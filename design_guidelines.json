@@ -1,0 +1,124 @@
+{
+  "theme": "light",
+  "archetype": "Archetype 4 (Swiss & High-Contrast)",
+  "primary_color": "#9933FF",
+  "typography": {
+    "heading_font": "Cabinet Grotesk",
+    "body_font": "Manrope",
+    "hierarchy": {
+      "h1": "text-4xl font-black tracking-tight font-cabinet text-neutral-900",
+      "h2": "text-2xl font-bold tracking-tight font-cabinet text-neutral-900",
+      "h3": "text-xl font-bold font-cabinet text-neutral-800",
+      "body": "text-base font-medium font-manrope text-neutral-700",
+      "small_label": "text-xs font-bold uppercase tracking-[0.2em] text-neutral-500"
+    }
+  },
+  "colors": {
+    "background": {
+      "app": "#F9FAFB",
+      "surface": "#FFFFFF",
+      "glass": "rgba(255, 255, 255, 0.7)"
+    },
+    "brand": {
+      "primary": "#9933FF",
+      "primary_hover": "#802AD3",
+      "primary_active": "#6B23B1"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#525252",
+      "muted": "#A3A3A3",
+      "on_primary": "#FFFFFF"
+    },
+    "structural": {
+      "border": "rgba(0, 0, 0, 0.08)",
+      "divider": "rgba(0, 0, 0, 0.05)"
+    },
+    "alerts": {
+      "green": "#16A34A",
+      "yellow": "#EAB308",
+      "red": "#DC2626",
+      "green_bg": "#DCFCE7",
+      "yellow_bg": "#FEF9C3",
+      "red_bg": "#FEE2E2"
+    }
+  },
+  "layout_spacing": {
+    "sidebar": "w-64 md:flex flex-col border-r border-border bg-white fixed h-full z-40 hidden",
+    "sidebar_mobile": "w-72 fixed h-full bg-white z-50 transition-transform transform",
+    "header": "h-16 border-b border-border bg-white/70 backdrop-blur-md sticky top-0 z-30 flex items-center justify-between px-6",
+    "main_content": "md:ml-64 p-4 md:p-8 space-y-8 bg-[#F9FAFB] min-h-screen",
+    "bento_grid": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6",
+    "bento_grid_large": "grid grid-cols-1 lg:grid-cols-3 gap-6",
+    "container_padding": "p-6"
+  },
+  "components": {
+    "kpi_card": {
+      "wrapper": "bg-white border border-border rounded-md p-6 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] hover:shadow-[0_4px_20px_-4px_rgba(0,0,0,0.08)] transition-all duration-200",
+      "label": "text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2 flex items-center gap-2",
+      "value": "text-3xl font-black text-neutral-900 font-cabinet"
+    },
+    "chart_card": {
+      "wrapper": "bg-white border border-border rounded-md p-6 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.05)] flex flex-col h-full",
+      "header": "mb-6 pb-4 border-b border-divider",
+      "title": "text-lg font-bold font-cabinet text-neutral-900"
+    },
+    "button": {
+      "primary": "bg-[#9933FF] hover:bg-[#802AD3] text-white rounded-md px-4 py-2 text-sm font-bold transition-all shadow-sm hover:shadow-md active:scale-95",
+      "secondary": "bg-white hover:bg-neutral-50 text-neutral-900 border border-border rounded-md px-4 py-2 text-sm font-bold transition-all shadow-sm",
+      "danger": "bg-red-50 hover:bg-red-100 text-red-600 rounded-md px-4 py-2 text-sm font-bold transition-colors"
+    },
+    "table": {
+      "wrapper": "w-full overflow-x-auto bg-white border border-border rounded-md shadow-sm",
+      "header": "bg-neutral-50 border-b border-border text-left text-xs font-bold text-neutral-500 uppercase tracking-wider p-4 whitespace-nowrap",
+      "row": "border-b border-divider hover:bg-neutral-50/50 transition-colors",
+      "cell": "p-4 text-sm font-medium text-neutral-700 whitespace-nowrap"
+    },
+    "alert_badge": {
+      "wrapper": "px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 w-max",
+      "green": "bg-green-100 text-green-700",
+      "yellow": "bg-yellow-100 text-yellow-700",
+      "red": "bg-red-100 text-red-700"
+    }
+  },
+  "media": {
+    "images": {
+      "user_avatar": "https://images.unsplash.com/photo-1758876019290-be620a8971f3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBwb3J0cmFpdCUyMG1hbmFnZXJ8ZW58MHx8fHwxNzc2NTUzNjE1fDA&ixlib=rb-4.1.0&q=85",
+      "banner_bg": "https://images.unsplash.com/photo-1759380115149-70983437f672?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxOTJ8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB0cmFpdCUyMG1hbmFnZXJ8ZW58MHx8fHwxNzc2NTUzNjE1fDA&ixlib=rb-4.1.0&q=85"
+    }
+  },
+  "icons": {
+    "library": "lucide-react",
+    "instructions": "Use Lucide React icons. Stroke width 2 for standard UI, stroke width 2.5 for emphasized CTAs or KPIs. Default size 20, Sidebar size 20."
+  },
+  "testing": {
+    "attributes": [
+      "data-testid='sidebar-nav'",
+      "data-testid='mobile-menu-toggle'",
+      "data-testid='kpi-total-gal'",
+      "data-testid='kpi-total-cost'",
+      "data-testid='kpi-total-savings'",
+      "data-testid='kpi-loads-count'",
+      "data-testid='chart-top-plates'",
+      "data-testid='chart-city-consumption'",
+      "data-testid='chart-product-donut'",
+      "data-testid='chart-savings-station'",
+      "data-testid='chart-weekly-trend'",
+      "data-testid='alerts-list'",
+      "data-testid='reports-table'",
+      "data-testid='export-excel-btn'",
+      "data-testid='export-pdf-btn'",
+      "data-testid='support-whatsapp-btn'"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Strictly apply the Primary Color #9933FF for active states, primary buttons, and critical data visualizations. Do not use generic tailwind blue or indigo.",
+    "Data Currency Format: ALL financial values must be prefixed with 'S/' (Peruvian Sol) and formatted to 2 decimal places. e.g. S/ 15,240.50",
+    "Branding Restrictions: Display the 'ENERED' logo prominently at the top of the sidebar. Do NOT show the client company name anywhere in the UI. Instead, use generic 'Bienvenido' or the User's Name.",
+    "Layout Restrictions: The design must feature a left sidebar (hidden on mobile, toggleable via hamburger menu), top sticky header, followed by KPI bento grid, and then the chart section.",
+    "Component Strategy: Use Shadcn UI for structural interactive components (select, dropdown, dialog, tables) but customize them to match the 6px rounded-md border-radius and exact colors. Use Recharts for all 5 requested charts.",
+    "Mobile Responsiveness: This is a strict requirement. KPI grids collapse to 1 column. Charts must have 100% width and responsive containers. Tables must be wrapped in overflow-x-auto.",
+    "Typography: Use Cabinet Grotesk for Headings and Manrope for body text. Make sure to import them via Google Fonts or standard CDN if not present in the template.",
+    "WhatsApp Support: The Support Module is a static contact UI. Clicking the button must open a 'wa.me' link."
+  ]
+}
