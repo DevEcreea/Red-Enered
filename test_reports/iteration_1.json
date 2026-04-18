@@ -1,0 +1,42 @@
+{
+  "summary": "First run of backend API tests for ENERED fintech platform. 26/26 tests PASSED after fixing 1 MongoDB ObjectId serialization bug in POST /api/users. Covered: auth (login/me/logout/forgot-password), dashboard KPIs + alerts, consumptions with tenant isolation, empresas, Users CRUD, Invoices with role-based access, Control requests role gating, Courses LMS with submit scoring, and CSV/Excel admin upload.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "No pending actions — backend is green. Main agent can proceed with frontend integration/UI work.",
+    "Consider: seed_demo_data does NOT re-hash admin password if ADMIN_PASSWORD changes (only inserts if absent). Not idempotent for rotations — acceptable for demo but worth noting.",
+    "Consider: verify_password swallows all exceptions silently (returns False). Fine for auth safety but masks configuration errors."
+  ],
+  "critical_code_review_comments": [
+    "FIXED by T1: POST /api/users returned 500 due to Mongo's _id ObjectId being serialized. Added `doc.pop('_id', None)` after insert_one in server.py. All other create endpoints (invoices/control-requests/courses) already handle this correctly.",
+    "server.py is ~917 lines and mixes auth, models, endpoints, seed logic — approaching the 700-line split threshold. Recommend modularising into routers (auth, users, consumptions, invoices, control, courses, admin) plus a separate seed module.",
+    "CORS is configured at `app` level AFTER `app.include_router(api)` and uses `FRONTEND_URL` env var. Currently FRONTEND_URL in backend/.env (`9ceebdef-...preview.emergentagent.com`) does NOT match the actual frontend URL in frontend/.env (`enered-insight.preview.emergentagent.com`). Cookie-based auth from browser will fail CORS with credentials; Bearer token fallback works. Should either align URLs or use a wildcard-safe regex.",
+    "No brute-force / rate-limit / account lockout on /api/auth/login — playbook asks for lockout after 5 fails. Not implemented.",
+    "JWT_SECRET is present and strong. bcrypt hash produced via bcrypt.gensalt() -> format $2b$ ✓.",
+    "DELETE /api/admin/consumptions wipes ALL consumption rows with no confirmation/backup — destructive, consider soft-delete or require explicit empresa.",
+    "Dashboard endpoints load up to 100 000 rows into memory for aggregation — acceptable at current seed volume (~451 rows) but should move to Mongo aggregation pipeline for scale.",
+    "`/api/courses/{cid}/submit` divides by `len(preguntas) if preguntas else 1` and computes 0/1=0 when no questions — edge case handled but silently awards 0% rather than rejecting."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (popped _id in create_user response)",
+    "/app/backend/tests/backend_test.py (new pytest suite)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "admin@enered.com/admin123, administrador@lima.com/demo123, logistica@lima.com/demo123, contabilidad@lima.com/demo123 — all valid and verified.",
+  "seed_data_creation": "Backend auto-seeds on startup: 1 admin + 5 demo users + 451 consumption rows + 9 invoices + 1 course. Tests created TEST_ users/invoices and cleaned them up; CSV upload test inserted 2 TEST-001/TEST-002 rows (not cleaned — harmless).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Suite at /app/backend/tests/backend_test.py is pytest-based and idempotent (unique emails via uuid). Uses Authorization: Bearer header because httpOnly cookies are samesite=none/secure=true and work for browsers but the test client also supports them. One fix applied to server.py (create_user _id removal). If frontend testing is requested next, verify CORS FRONTEND_URL alignment — currently mismatched between backend/.env and frontend/.env.",
+  "rca of the issue": "POST /api/users → 500. Root cause: Motor's insert_one mutates the input dict by adding `_id` (bson.ObjectId). The endpoint then returned the same dict to FastAPI, which cannot JSON-serialize ObjectId -> raised ValueError('ObjectId is not iterable'). Reproduction: authenticated POST to /api/users with valid payload. Mitigation applied: `doc.pop('_id', None)` after insert_one, mirroring the pattern used in create_invoice/create_control/create_course."
+}

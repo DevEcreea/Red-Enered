@@ -1,115 +1,133 @@
+@import url("https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@800,700,500,400&f[]=manrope@700,600,500,400&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-}
-
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+  margin: 0;
+  font-family: "Manrope", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f9fafb;
+  color: #0a0a0a;
 }
 
 @layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 0 0% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4%;
+    --primary: 270 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 45%;
+    --accent: 270 100% 96%;
+    --accent-foreground: 270 60% 30%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 91%;
+    --input: 0 0% 91%;
+    --ring: 270 100% 60%;
+    --chart-1: 270 100% 60%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 90% 55%;
+    --chart-4: 200 80% 50%;
+    --chart-5: 340 75% 55%;
+    --radius: 0.5rem;
+  }
 }
 
 @layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  h1, h2, h3, h4, h5 {
+    font-family: "Cabinet Grotesk", "Manrope", system-ui, sans-serif;
+    letter-spacing: -0.015em;
+  }
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
+/* Sidebar link hover */
+.nav-link {
+  @apply flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-semibold text-neutral-600 transition-all;
+}
+.nav-link:hover {
+  @apply bg-neutral-100 text-neutral-900;
+}
+.nav-link.active {
+  @apply bg-brand text-white shadow-sm;
+}
+.nav-link.active:hover {
+  @apply bg-brand-hover text-white;
+}
 
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
+/* KPI card */
+.kpi-card {
+  @apply bg-white border border-border rounded-lg p-6 transition-all duration-200;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.kpi-card:hover {
+  box-shadow: 0 8px 24px -8px rgba(153, 51, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+/* Chart card */
+.chart-card {
+  @apply bg-white border border-border rounded-lg p-6;
+}
+
+/* Brand button */
+.btn-brand {
+  @apply bg-brand text-white font-bold rounded-md px-4 py-2 transition-all shadow-sm;
+}
+.btn-brand:hover {
+  @apply bg-brand-hover shadow-md;
+}
+.btn-brand:active {
+  transform: scale(0.98);
+}
+
+.btn-ghost {
+  @apply bg-white text-neutral-900 border border-border font-bold rounded-md px-4 py-2 transition-all;
+}
+.btn-ghost:hover {
+  @apply bg-neutral-50;
+}
+
+/* Table */
+.enered-table {
+  @apply w-full text-sm;
+}
+.enered-table thead {
+  @apply bg-neutral-50 border-b border-border;
+}
+.enered-table th {
+  @apply text-left text-xs font-bold uppercase tracking-wider text-neutral-500 px-4 py-3 whitespace-nowrap;
+}
+.enered-table td {
+  @apply px-4 py-3 text-neutral-700 border-b border-neutral-100 whitespace-nowrap;
+}
+.enered-table tbody tr:hover {
+  @apply bg-neutral-50/60;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
+
+/* Fade in */
+.page-enter { animation: fade-in 0.4s ease-out; }
+
+@layer base {
+  [data-debug-wrapper="true"] { display: contents !important; }
 }
