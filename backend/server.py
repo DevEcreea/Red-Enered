@@ -609,6 +609,35 @@ async def delete_all_consumptions(user: dict = Depends(require_roles("admin_ener
     return {"deleted": res.deleted_count}
 
 
+# ---------- Google Sheets Sync ----------
+from google_sheets_sync import sync_to_mongo, last_sync_status
+
+
+class SheetsSyncIn(BaseModel):
+    mode: Literal["replace", "append"] = "replace"
+
+
+@api.post("/admin/sheets/sync")
+async def sheets_sync(data: SheetsSyncIn, user: dict = Depends(require_roles("admin_enered"))):
+    try:
+        result = await sync_to_mongo(db, mode=data.mode)
+        return result
+    except Exception as e:
+        logger.exception("Sheets sync error")
+        raise HTTPException(status_code=400, detail=f"Error al sincronizar: {str(e)}")
+
+
+@api.get("/admin/sheets/status")
+async def sheets_status(user: dict = Depends(require_roles("admin_enered"))):
+    last = await last_sync_status(db)
+    return {
+        "sheet_id": os.environ.get("GOOGLE_SHEETS_ID"),
+        "tab": os.environ.get("GOOGLE_SHEETS_TAB"),
+        "service_account": "enered-reader@quick-platform-481116-a9.iam.gserviceaccount.com",
+        "last_sync": last,
+    }
+
+
 # ---------- Invoices ----------
 @api.get("/invoices")
 async def list_invoices(user: dict = Depends(get_current_user), empresa: Optional[str] = None):

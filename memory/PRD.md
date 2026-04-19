@@ -38,7 +38,7 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 - 26/26 pytest backend tests PASSED (auth, dashboard, consumptions tenant isolation, CRUDs, role gating, CSV upload)
 
 ## Backlog / Future
-- **P1**: Integración directa Google Sheets via service account (actualmente CSV upload)
+- ~~**P1**: Integración directa Google Sheets via service account~~ ✅ COMPLETADO Feb 2026 — `/api/admin/sheets/sync` con modos replace/append, normalización robusta de columnas (tildes, paréntesis, strings "S/")
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
 - **P2**: Aggregation pipeline en Mongo para dashboards a escala (>50k rows)
 - **P2**: Modularizar server.py (actualmente ~900 líneas) en routers separados
