@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   PieChart, Pie, Cell, Legend, LineChart, Line,
 } from "recharts";
 import {
   Fuel, DollarSign, TrendingDown, Package, AlertTriangle, CheckCircle2, AlertCircle,
+  Gauge, Coins, Droplets, CalendarClock, Receipt, Zap, Filter, X,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber, BRAND_COLORS } from "../lib/utils";
@@ -16,7 +17,33 @@ const ALERT_STYLES = {
   green: { bg: "bg-green-50", text: "text-green-700", border: "border-green-200", Icon: CheckCircle2, dot: "bg-green-500" },
 };
 
-function KPICard({ label, value, sub, icon: Icon, testid }) {
+const SECTION_COLORS = {
+  brand: "bg-brand-50 text-brand border-brand-100",
+  green: "bg-green-50 text-green-700 border-green-200",
+  amber: "bg-amber-50 text-amber-700 border-amber-200",
+  blue: "bg-blue-50 text-blue-700 border-blue-200",
+  pink: "bg-pink-50 text-pink-700 border-pink-200",
+  slate: "bg-slate-50 text-slate-700 border-slate-200",
+};
+
+function SectionHeader({ label, title, color = "brand" }) {
+  return (
+    <div className="flex items-baseline gap-3 mb-5 mt-2">
+      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${SECTION_COLORS[color]}`}>
+        {label}
+      </span>
+      <h2 className="font-cabinet font-bold text-xl text-neutral-900">{title}</h2>
+    </div>
+  );
+}
+
+function KPI({ label, value, sub, icon: Icon, testid, accent = "brand" }) {
+  const ring = {
+    brand: "bg-brand-50 border-brand-100 text-brand",
+    green: "bg-green-50 border-green-100 text-green-600",
+    amber: "bg-amber-50 border-amber-100 text-amber-600",
+    blue: "bg-blue-50 border-blue-100 text-blue-600",
+  }[accent];
   return (
     <div className="kpi-card" data-testid={testid}>
       <div className="flex items-start justify-between">
@@ -25,22 +52,22 @@ function KPICard({ label, value, sub, icon: Icon, testid }) {
           <div className="font-cabinet font-black text-3xl text-neutral-900 leading-none">{value}</div>
           {sub && <div className="text-xs text-neutral-500 mt-2 font-semibold">{sub}</div>}
         </div>
-        <div className="w-10 h-10 rounded-md bg-brand-50 border border-brand-100 flex items-center justify-center">
-          <Icon className="w-5 h-5 text-brand" strokeWidth={2.5} />
+        <div className={`w-10 h-10 rounded-md border flex items-center justify-center ${ring}`}>
+          <Icon className="w-5 h-5" strokeWidth={2.5} />
         </div>
       </div>
     </div>
   );
 }
 
-function ChartCard({ title, subtitle, children, testid, className = "" }) {
+function Card({ title, subtitle, children, testid, className = "" }) {
   return (
     <div className={`chart-card ${className}`} data-testid={testid}>
-      <div className="mb-5 pb-4 border-b border-neutral-100">
-        <div className="font-cabinet font-bold text-lg text-neutral-900">{title}</div>
-        {subtitle && <div className="text-xs text-neutral-500 mt-1 font-semibold">{subtitle}</div>}
+      <div className="mb-4 pb-3 border-b border-neutral-100">
+        <div className="font-cabinet font-bold text-base text-neutral-900">{title}</div>
+        {subtitle && <div className="text-[11px] text-neutral-500 mt-0.5 font-semibold">{subtitle}</div>}
       </div>
-      <div className="w-full">{children}</div>
+      {children}
     </div>
   );
 }
@@ -50,23 +77,23 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [empresas, setEmpresas] = useState([]);
-  const [empresa, setEmpresa] = useState("");
+  const [options, setOptions] = useState({ placas: [], semanas: [], estaciones: [], productos: [] });
+  const [filters, setFilters] = useState({ empresa: "", placa: "", semana: "", estacion: "", producto: "" });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (user?.role === "admin_enered") {
-      api.get("/empresas").then((r) => setEmpresas(r.data)).catch(() => {});
-    }
+    if (user?.role === "admin_enered") api.get("/empresas").then((r) => setEmpresas(r.data)).catch(() => {});
+    api.get("/dashboard/filter-options").then((r) => setOptions(r.data)).catch(() => {});
   }, [user]);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const params = empresa ? { empresa } : {};
+        const params = Object.fromEntries(Object.entries(filters).filter(([_, v]) => v));
         const [k, a] = await Promise.all([
           api.get("/dashboard/kpis", { params }),
-          api.get("/dashboard/alerts", { params }),
+          api.get("/dashboard/alerts", { params: filters.empresa ? { empresa: filters.empresa } : {} }),
         ]);
         setData(k.data);
         setAlerts(a.data);
@@ -74,7 +101,9 @@ export default function Dashboard() {
         setLoading(false);
       }
     })();
-  }, [empresa]);
+  }, [filters]);
+
+  const activeFiltersCount = useMemo(() => Object.values(filters).filter(Boolean).length, [filters]);
 
   if (loading || !data) {
     return (
@@ -84,114 +113,340 @@ export default function Dashboard() {
     );
   }
 
-  const { kpis, top_placas, ciudades, productos, estaciones, tendencia } = data;
+  const t = data.totals;
+  const productosPie = data.consumo_producto.map((p) => ({ name: p.producto, value: p.galones }));
+  const medioPie = data.medio_identificacion.map((m) => ({ name: m.medio, value: m.cargas }));
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Panel operativo</div>
-          <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Resumen de consumo</h1>
-          <p className="text-neutral-500 mt-1 text-sm">Decisiones claras a partir de cada carga de combustible.</p>
+      {/* Header + Filtros globales */}
+      <div>
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Panel operativo</div>
+            <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Resumen de consumo</h1>
+            <p className="text-neutral-500 mt-1 text-sm">Decisiones claras a partir de cada carga de combustible.</p>
+          </div>
+          {user?.role === "admin_enered" && empresas.length > 0 && (
+            <select
+              value={filters.empresa}
+              onChange={(e) => setFilters({ ...filters, empresa: e.target.value })}
+              className="h-11 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[220px]"
+              data-testid="empresa-filter"
+            >
+              <option value="">Todas las empresas</option>
+              {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          )}
         </div>
-        {user?.role === "admin_enered" && empresas.length > 0 && (
-          <select
-            value={empresa}
-            onChange={(e) => setEmpresa(e.target.value)}
-            className="h-11 px-3 border border-border rounded-md bg-white text-sm font-semibold"
-            data-testid="empresa-filter"
-          >
-            <option value="">Todas las empresas</option>
-            {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+
+        <div className="bg-white border border-border rounded-lg p-3 md:p-4 flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-neutral-600 uppercase tracking-wider">
+            <Filter className="w-4 h-4" /> Filtros
+          </div>
+          <select value={filters.placa} onChange={(e) => setFilters({ ...filters, placa: e.target.value })}
+            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[140px]" data-testid="filter-placa">
+            <option value="">Placa</option>
+            {options.placas.map((v) => <option key={v}>{v}</option>)}
           </select>
-        )}
+          <select value={filters.semana} onChange={(e) => setFilters({ ...filters, semana: e.target.value })}
+            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[140px]" data-testid="filter-semana">
+            <option value="">Semana</option>
+            {options.semanas.map((v) => <option key={v}>{v}</option>)}
+          </select>
+          <select value={filters.estacion} onChange={(e) => setFilters({ ...filters, estacion: e.target.value })}
+            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[180px]" data-testid="filter-estacion">
+            <option value="">Estación</option>
+            {options.estaciones.map((v) => <option key={v}>{v}</option>)}
+          </select>
+          <select value={filters.producto} onChange={(e) => setFilters({ ...filters, producto: e.target.value })}
+            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[160px]" data-testid="filter-producto">
+            <option value="">Producto</option>
+            {options.productos.map((v) => <option key={v}>{v}</option>)}
+          </select>
+          {activeFiltersCount > 0 && (
+            <button
+              onClick={() => setFilters({ empresa: filters.empresa, placa: "", semana: "", estacion: "", producto: "" })}
+              className="h-9 px-3 border border-border rounded-md text-xs font-bold flex items-center gap-1 hover:bg-neutral-50"
+              data-testid="filter-clear"
+            >
+              <X className="w-3 h-3" /> Limpiar ({activeFiltersCount})
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <KPICard label="Consumo total" value={`${formatNumber(kpis.total_gal, 2)} gal`} icon={Fuel} testid="kpi-total-gal" />
-        <KPICard label="Gasto total" value={formatSoles(kpis.total_gasto)} icon={DollarSign} testid="kpi-total-cost" />
-        <KPICard label="Ahorro total" value={formatSoles(kpis.total_ahorro)} sub="vs precio pizarra" icon={TrendingDown} testid="kpi-total-savings" />
-        <KPICard label="Nº de cargas" value={formatNumber(kpis.cargas, 0)} icon={Package} testid="kpi-loads-count" />
+      {/* ========== CONSUMO ========== */}
+      <SectionHeader label="1 · Consumo" title="Volumen operativo" color="brand" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+        <KPI label="Consumo total" value={`${formatNumber(t.total_gal, 2)} gal`} icon={Fuel} testid="kpi-total-gal" />
+        <KPI label="Nº cargas" value={formatNumber(t.cargas, 0)} icon={Package} testid="kpi-cargas" />
+        <KPI label="Gal / carga" value={formatNumber(t.gal_por_carga, 2)} sub="promedio" icon={Droplets} accent="blue" />
+        <KPI label="Ticket prom." value={formatSoles(t.ticket_prom)} sub="S/ por carga" icon={Receipt} accent="amber" />
       </div>
 
-      {/* Charts row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <ChartCard title="Top 5 placas" subtitle="Mayor consumo en galones" testid="chart-top-plates" className="lg:col-span-2">
-          <ResponsiveContainer width="100%" height={320}>
-            <BarChart data={top_placas} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Consumo en el tiempo" subtitle="Galones por semana" testid="chart-consumo-tiempo">
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => `${formatNumber(v, 2)} gal`} />
+              <Line type="monotone" dataKey="consumo" stroke="#9933FF" strokeWidth={3} dot={{ r: 3 }} name="Galones" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Top 5 placas por consumo" subtitle="Galones · unidades a revisar" testid="chart-top-placas">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data.top_placas_consumo} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-              <XAxis type="number" tick={{ fontSize: 11, fontWeight: 600 }} stroke="#a3a3a3" />
-              <YAxis type="category" dataKey="placa" tick={{ fontSize: 12, fontWeight: 700 }} stroke="#525252" width={80} />
-              <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, border: "1px solid #e5e5e5", fontSize: 12 }} />
+              <XAxis type="number" tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <YAxis type="category" dataKey="placa" tick={{ fontSize: 12, fontWeight: 700 }} width={80} stroke="#525252" />
+              <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Bar dataKey="galones" fill="#9933FF" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Consumo por producto" subtitle="Distribución por tipo" testid="chart-product-donut">
-          <ResponsiveContainer width="100%" height={320}>
-            <PieChart>
-              <Pie data={productos} dataKey="galones" nameKey="producto" cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={2}>
-                {productos.map((_, i) => <Cell key={i} fill={BRAND_COLORS[i % BRAND_COLORS.length]} />)}
-              </Pie>
-              <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </ChartCard>
+        </Card>
       </div>
 
-      {/* Charts row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Consumo por ciudad" subtitle="Top 10 ciudades" testid="chart-city-consumption">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={ciudades} margin={{ top: 5, right: 10, left: 0, bottom: 30 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Consumo por ciudad" subtitle="Galones · zonas críticas" testid="chart-ciudad">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data.consumo_ciudad} margin={{ top: 5, right: 10, left: 0, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-              <XAxis dataKey="ciudad" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-30} textAnchor="end" height={50} />
-              <YAxis tick={{ fontSize: 11, fontWeight: 600 }} stroke="#a3a3a3" />
+              <XAxis dataKey="ciudad" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-30} textAnchor="end" height={55} />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
               <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Bar dataKey="galones" fill="#9933FF" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </Card>
 
-        <ChartCard title="Ahorro por estación" subtitle="Top 10 estaciones con más ahorro" testid="chart-savings-station">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={estaciones} margin={{ top: 5, right: 10, left: 0, bottom: 30 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-              <XAxis dataKey="estacion" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-30} textAnchor="end" height={50} />
-              <YAxis tick={{ fontSize: 11, fontWeight: 600 }} stroke="#a3a3a3" />
-              <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="ahorro" fill="#16A34A" radius={[6, 6, 0, 0]} />
+        <Card title="Consumo por estación" subtitle="Top 10 · dependencia operativa" testid="chart-estacion-consumo">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data.consumo_estacion} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
+              <YAxis type="category" dataKey="estacion" tick={{ fontSize: 10, fontWeight: 700 }} width={140} stroke="#525252" />
+              <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="galones" fill="#9933FF" radius={[0, 4, 4, 0]} />
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </Card>
       </div>
 
-      {/* Tendencia */}
-      <ChartCard title="Tendencia semanal" subtitle="Consumo, gasto y ahorro por semana" testid="chart-weekly-trend">
-        <ResponsiveContainer width="100%" height={340}>
-          <LineChart data={tendencia} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="semana" tick={{ fontSize: 11, fontWeight: 700 }} stroke="#525252" />
-            <YAxis tick={{ fontSize: 11, fontWeight: 600 }} stroke="#a3a3a3" />
-            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-            <Legend wrapperStyle={{ fontSize: 12, fontWeight: 600 }} />
-            <Line type="monotone" dataKey="consumo" stroke="#9933FF" strokeWidth={3} dot={{ r: 3 }} name="Consumo (gal)" />
-            <Line type="monotone" dataKey="gasto" stroke="#3B82F6" strokeWidth={2} dot={{ r: 3 }} name="Gasto (S/)" />
-            <Line type="monotone" dataKey="ahorro" stroke="#16A34A" strokeWidth={2} dot={{ r: 3 }} name="Ahorro (S/)" />
-          </LineChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      {/* ========== GASTO ========== */}
+      <SectionHeader label="2 · Gasto" title="Control financiero" color="amber" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+        <KPI label="Gasto total" value={formatSoles(t.total_gasto)} icon={DollarSign} accent="amber" testid="kpi-total-gasto" />
+      </div>
 
-      {/* Alertas */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Gasto en el tiempo" subtitle="S/ por semana" testid="chart-gasto-tiempo">
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => formatSoles(v)} />
+              <Line type="monotone" dataKey="gasto" stroke="#F59E0B" strokeWidth={3} dot={{ r: 3 }} name="S/" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Gasto por placa" subtitle="Top 10 unidades más costosas" testid="chart-gasto-placa">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data.gasto_placa} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
+              <YAxis type="category" dataKey="placa" tick={{ fontSize: 11, fontWeight: 700 }} width={80} stroke="#525252" />
+              <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="gasto" fill="#F59E0B" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      {/* ========== AHORRO ========== */}
+      <SectionHeader label="3 · Ahorro" title="El diferencial ENERED" color="green" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+        <KPI label="Ahorro total" value={formatSoles(t.total_ahorro)} icon={TrendingDown} accent="green" testid="kpi-total-ahorro" />
+        <KPI label="Ahorro %" value={`${t.ahorro_pct}%`} sub="vs precio pizarra" icon={Coins} accent="green" />
+        <KPI label="Precio ENERED" value={`S/ ${t.precio_enered}`} sub="prom ponderado" icon={Fuel} accent="brand" />
+        <KPI label="Precio pizarra" value={`S/ ${t.precio_pizarra}`} sub="de referencia" icon={Fuel} accent="amber" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Ahorro en el tiempo" subtitle="S/ por semana · valor entregado" testid="chart-ahorro-tiempo">
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => formatSoles(v)} />
+              <Line type="monotone" dataKey="ahorro" stroke="#16A34A" strokeWidth={3} dot={{ r: 3 }} name="Ahorro S/" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Ahorro por estación" subtitle="Top 10 · dónde conviene cargar" testid="chart-ahorro-estacion">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={data.ahorro_estacion} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
+              <YAxis type="category" dataKey="estacion" tick={{ fontSize: 10, fontWeight: 700 }} width={140} stroke="#525252" />
+              <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="ahorro" fill="#16A34A" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      <Card title="Precio ENERED vs Pizarra" subtitle="Comparación por tipo de combustible · ahorro visible" testid="chart-precio-comparacion">
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={data.precio_comparacion_producto} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+            <XAxis dataKey="producto" tick={{ fontSize: 11, fontWeight: 700 }} stroke="#525252" />
+            <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" domain={["auto", "auto"]} />
+            <Tooltip formatter={(v) => `S/ ${v}`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+            <Legend wrapperStyle={{ fontSize: 12, fontWeight: 600 }} />
+            <Bar dataKey="pizarra" fill="#F59E0B" radius={[4, 4, 0, 0]} name="Precio Pizarra" />
+            <Bar dataKey="enered" fill="#9933FF" radius={[4, 4, 0, 0]} name="Precio ENERED" />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {/* ========== OPERATIVOS ========== */}
+      <SectionHeader label="4 · Operativos" title="Eficiencia del abastecimiento" color="blue" />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Cargas en el tiempo" subtitle="Frecuencia de abastecimiento por semana" testid="chart-cargas-tiempo">
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" allowDecimals={false} />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Line type="monotone" dataKey="cargas" stroke="#3B82F6" strokeWidth={3} dot={{ r: 3 }} name="Cargas" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Cargas por placa" subtitle="Top 10 · unidades que cargan demasiado" testid="chart-cargas-placa">
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data.cargas_placa} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 10 }} stroke="#a3a3a3" allowDecimals={false} />
+              <YAxis type="category" dataKey="placa" tick={{ fontSize: 11, fontWeight: 700 }} width={80} stroke="#525252" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="cargas" fill="#3B82F6" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Ticket promedio en el tiempo" subtitle="S/ por carga · evolución semanal" testid="chart-ticket">
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => formatSoles(v)} />
+              <Line type="monotone" dataKey="ticket_prom" stroke="#EC4899" strokeWidth={2.5} dot={{ r: 3 }} name="Ticket" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Galones promedio por carga" subtitle="Cargas pequeñas = posible ineficiencia" testid="chart-gal-carga">
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={data.series_semana} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="semana" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v) => `${v} gal`} />
+              <Line type="monotone" dataKey="gal_por_carga" stroke="#06B6D4" strokeWidth={2.5} dot={{ r: 3 }} name="Gal/carga" />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      {/* ========== PRODUCTO ========== */}
+      <SectionHeader label="5 · Producto" title="Mezcla de combustibles" color="pink" />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Consumo por producto" subtitle="Galones · mix utilizado" testid="chart-producto-dona">
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie data={productosPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={110} paddingAngle={2}>
+                {productosPie.map((_, i) => <Cell key={i} fill={BRAND_COLORS[i % BRAND_COLORS.length]} />)}
+              </Pie>
+              <Tooltip formatter={(v) => `${formatNumber(v, 2)} gal`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 12, fontWeight: 600 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Gasto por producto" subtitle="S/ · cuál pesa más en el presupuesto" testid="chart-gasto-producto">
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={data.gasto_producto} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis dataKey="producto" tick={{ fontSize: 11, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
+              <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="gasto" fill="#EC4899" radius={[6, 6, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      {/* ========== COMPORTAMIENTO ========== */}
+      <SectionHeader label="6 · Comportamiento" title="Patrones operativos" color="slate" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card title="Cargas por hora" subtitle="Horarios operativos" testid="chart-cargas-hora" className="lg:col-span-2">
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data.cargas_por_hora} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis dataKey="hora" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
+              <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" allowDecimals={false} />
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Bar dataKey="cargas" fill="#9933FF" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Uso QR vs otros medios" subtitle="Nivel de control" testid="chart-medio">
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie data={medioPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={2}>
+                {medioPie.map((_, i) => <Cell key={i} fill={BRAND_COLORS[i % BRAND_COLORS.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      <Card title="Cargas por día de la semana" subtitle="Identificar días críticos" testid="chart-cargas-dia">
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={data.cargas_por_dia} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+            <XAxis dataKey="dia" tick={{ fontSize: 12, fontWeight: 700 }} stroke="#525252" />
+            <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" allowDecimals={false} />
+            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+            <Bar dataKey="cargas" fill="#9933FF" radius={[6, 6, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+
+      {/* ========== ALERTAS ========== */}
+      <SectionHeader label="7 · Alertas" title="Patrones detectados automáticamente" color="amber" />
       <div className="chart-card" data-testid="alerts-list">
-        <div className="mb-5 pb-4 border-b border-neutral-100 flex items-center justify-between">
-          <div>
-            <div className="font-cabinet font-bold text-lg text-neutral-900">Alertas inteligentes</div>
-            <div className="text-xs text-neutral-500 mt-1 font-semibold">Patrones detectados automáticamente</div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+            Señales inteligentes sobre la flota
           </div>
           <span className="px-3 py-1 rounded-full bg-brand-50 text-brand text-xs font-bold border border-brand-100">
             {alerts.length} alerta{alerts.length !== 1 ? "s" : ""}
@@ -199,7 +454,7 @@ export default function Dashboard() {
         </div>
 
         {alerts.length === 0 ? (
-          <div className="text-center py-10 text-neutral-500 text-sm font-semibold">
+          <div className="text-center py-8 text-neutral-500 text-sm font-semibold">
             <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-3" />
             Sin alertas activas. Todo en orden.
           </div>

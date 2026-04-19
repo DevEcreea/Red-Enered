@@ -372,12 +372,32 @@ async def list_consumptions(
     return rows
 
 
+@api.get("/dashboard/filter-options")
+async def dashboard_filter_options(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    q = tenant_filter(user)
+    if empresa and user["role"] == "admin_enered":
+        q["EMPRESA"] = empresa
+    rows = await db.consumptions.find(q, {"_id": 0, "PLACA": 1, "SEMANA": 1, "ESTACION": 1, "PRODUCTO": 1}).to_list(100000)
+    placas = sorted({r["PLACA"] for r in rows if r.get("PLACA")})
+    semanas = sorted({r["SEMANA"] for r in rows if r.get("SEMANA")})
+    estaciones = sorted({r["ESTACION"] for r in rows if r.get("ESTACION")})
+    productos = sorted({r["PRODUCTO"] for r in rows if r.get("PRODUCTO")})
+    return {"placas": placas, "semanas": semanas, "estaciones": estaciones, "productos": productos}
+
+
+DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+
+
 @api.get("/dashboard/kpis")
 async def dashboard_kpis(
     user: dict = Depends(get_current_user),
     empresa: Optional[str] = None,
     fecha_desde: Optional[str] = None,
     fecha_hasta: Optional[str] = None,
+    placa: Optional[str] = None,
+    semana: Optional[str] = None,
+    estacion: Optional[str] = None,
+    producto: Optional[str] = None,
 ):
     q = tenant_filter(user)
     if empresa and user["role"] == "admin_enered":
@@ -386,68 +406,201 @@ async def dashboard_kpis(
         q.setdefault("FECHA", {})["$gte"] = fecha_desde
     if fecha_hasta:
         q.setdefault("FECHA", {})["$lte"] = fecha_hasta
+    if placa:
+        q["PLACA"] = placa
+    if semana:
+        q["SEMANA"] = semana
+    if estacion:
+        q["ESTACION"] = estacion
+    if producto:
+        q["PRODUCTO"] = producto
 
     rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
 
-    total_gal = sum(float(r.get("CANTIDAD_GL", 0) or 0) for r in rows)
-    total_gasto = sum(float(r.get("IMPORTE_TOTAL", 0) or 0) for r in rows)
-    total_ahorro = sum(float(r.get("AHORRO", 0) or 0) for r in rows)
+    def _f(x, default=0):
+        try: return float(x) if x not in (None, "") else default
+        except Exception: return default
+
+    # ---- Totales ----
+    total_gal = sum(_f(r.get("CANTIDAD_GL")) for r in rows)
+    total_gasto = sum(_f(r.get("IMPORTE_TOTAL")) for r in rows)
+    total_ahorro = sum(_f(r.get("AHORRO")) for r in rows)
     cargas = len(rows)
 
-    # Top 5 placas
-    placas = {}
+    # ---- Agregados por semana ----
+    by_week = {}
+    precios_pond = {}  # sum(precio_unit*gal), sum(gal) per semana
+    pizarra_pond = {}
+    for r in rows:
+        s = r.get("SEMANA", "Sin semana")
+        d = by_week.setdefault(s, {"consumo": 0.0, "gasto": 0.0, "ahorro": 0.0, "cargas": 0})
+        g = _f(r.get("CANTIDAD_GL"))
+        d["consumo"] += g
+        d["gasto"] += _f(r.get("IMPORTE_TOTAL"))
+        d["ahorro"] += _f(r.get("AHORRO"))
+        d["cargas"] += 1
+
+        pu = _f(r.get("PRECIO_UNITARIO"))
+        pp = _f(r.get("PRECIO_PIZARRA"))
+        if pu > 0 and g > 0:
+            pw = precios_pond.setdefault(s, {"pond": 0.0, "gal": 0.0})
+            pw["pond"] += pu * g
+            pw["gal"] += g
+        if pp > 0 and g > 0:
+            pw = pizarra_pond.setdefault(s, {"pond": 0.0, "gal": 0.0})
+            pw["pond"] += pp * g
+            pw["gal"] += g
+
+    semanas_sorted = sorted(by_week.keys())
+    serie_semanas = []
+    for s in semanas_sorted:
+        d = by_week[s]
+        pu_avg = (precios_pond[s]["pond"] / precios_pond[s]["gal"]) if s in precios_pond and precios_pond[s]["gal"] > 0 else 0
+        pp_avg = (pizarra_pond[s]["pond"] / pizarra_pond[s]["gal"]) if s in pizarra_pond and pizarra_pond[s]["gal"] > 0 else 0
+        ticket = (d["gasto"] / d["cargas"]) if d["cargas"] else 0
+        gal_carga = (d["consumo"] / d["cargas"]) if d["cargas"] else 0
+        serie_semanas.append({
+            "semana": s,
+            "consumo": round(d["consumo"], 2),
+            "gasto": round(d["gasto"], 2),
+            "ahorro": round(d["ahorro"], 2),
+            "cargas": d["cargas"],
+            "ticket_prom": round(ticket, 2),
+            "gal_por_carga": round(gal_carga, 2),
+            "precio_enered": round(pu_avg, 2),
+            "precio_pizarra": round(pp_avg, 2),
+        })
+
+    # ---- Agregados por placa ----
+    by_placa = {}
     for r in rows:
         p = r.get("PLACA")
-        if p:
-            placas[p] = placas.get(p, 0) + float(r.get("CANTIDAD_GL", 0) or 0)
-    top_placas = sorted(placas.items(), key=lambda x: -x[1])[:5]
+        if not p: continue
+        d = by_placa.setdefault(p, {"consumo": 0.0, "gasto": 0.0, "cargas": 0})
+        d["consumo"] += _f(r.get("CANTIDAD_GL"))
+        d["gasto"] += _f(r.get("IMPORTE_TOTAL"))
+        d["cargas"] += 1
 
-    # Consumo por ciudad
+    top_placas_consumo = sorted(
+        [{"placa": p, "galones": round(v["consumo"], 2)} for p, v in by_placa.items()],
+        key=lambda x: -x["galones"]
+    )[:5]
+    gasto_placa = sorted(
+        [{"placa": p, "gasto": round(v["gasto"], 2)} for p, v in by_placa.items()],
+        key=lambda x: -x["gasto"]
+    )[:10]
+    cargas_placa = sorted(
+        [{"placa": p, "cargas": v["cargas"]} for p, v in by_placa.items()],
+        key=lambda x: -x["cargas"]
+    )[:10]
+
+    # ---- Ciudad / Estación ----
     ciudades = {}
+    est_consumo = {}
+    est_ahorro = {}
     for r in rows:
         c = r.get("CIUDAD", "Sin ciudad")
-        ciudades[c] = ciudades.get(c, 0) + float(r.get("CANTIDAD_GL", 0) or 0)
-
-    # Consumo por producto
-    productos = {}
-    for r in rows:
-        p = r.get("PRODUCTO", "Otro")
-        productos[p] = productos.get(p, 0) + float(r.get("CANTIDAD_GL", 0) or 0)
-
-    # Ahorro por estación
-    estaciones = {}
-    for r in rows:
+        ciudades[c] = ciudades.get(c, 0) + _f(r.get("CANTIDAD_GL"))
         e = r.get("ESTACION", "Sin estación")
-        estaciones[e] = estaciones.get(e, 0) + float(r.get("AHORRO", 0) or 0)
-    top_estaciones = sorted(estaciones.items(), key=lambda x: -x[1])[:10]
+        est_consumo[e] = est_consumo.get(e, 0) + _f(r.get("CANTIDAD_GL"))
+        est_ahorro[e] = est_ahorro.get(e, 0) + _f(r.get("AHORRO"))
 
-    # Tendencia semanal
-    semanas = {}
+    consumo_ciudad = [{"ciudad": c, "galones": round(v, 2)} for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]]
+    consumo_estacion = [{"estacion": e, "galones": round(v, 2)} for e, v in sorted(est_consumo.items(), key=lambda x: -x[1])[:10]]
+    ahorro_estacion = [{"estacion": e, "ahorro": round(v, 2)} for e, v in sorted(est_ahorro.items(), key=lambda x: -x[1])[:10]]
+
+    # ---- Producto ----
+    prod_consumo = {}
+    prod_gasto = {}
     for r in rows:
-        s = r.get("SEMANA", "S/D")
-        s_key = str(s)
-        if s_key not in semanas:
-            semanas[s_key] = {"consumo": 0, "gasto": 0, "ahorro": 0}
-        semanas[s_key]["consumo"] += float(r.get("CANTIDAD_GL", 0) or 0)
-        semanas[s_key]["gasto"] += float(r.get("IMPORTE_TOTAL", 0) or 0)
-        semanas[s_key]["ahorro"] += float(r.get("AHORRO", 0) or 0)
-    tendencia = sorted(
-        [{"semana": k, **v} for k, v in semanas.items()],
-        key=lambda x: x["semana"]
-    )
+        pr = r.get("PRODUCTO", "Otro")
+        prod_consumo[pr] = prod_consumo.get(pr, 0) + _f(r.get("CANTIDAD_GL"))
+        prod_gasto[pr] = prod_gasto.get(pr, 0) + _f(r.get("IMPORTE_TOTAL"))
+
+    consumo_producto = [{"producto": p, "galones": round(v, 2)} for p, v in sorted(prod_consumo.items(), key=lambda x: -x[1])]
+    gasto_producto = [{"producto": p, "gasto": round(v, 2)} for p, v in sorted(prod_gasto.items(), key=lambda x: -x[1])]
+
+    # ---- Comportamiento: hora, día, medio ----
+    cargas_hora = [0] * 24
+    cargas_dia = {d: 0 for d in DIAS_SEMANA}
+    medio_counts = {}
+    for r in rows:
+        h_raw = r.get("HORA", "")
+        try:
+            h = int(str(h_raw).split(":")[0])
+            if 0 <= h <= 23:
+                cargas_hora[h] += 1
+        except Exception:
+            pass
+        try:
+            d = datetime.fromisoformat(r["FECHA"])
+            cargas_dia[DIAS_SEMANA[d.weekday()]] += 1
+        except Exception:
+            pass
+        m = r.get("MEDIO_DE_IDENTIFICACION") or "Sin dato"
+        medio_counts[m] = medio_counts.get(m, 0) + 1
+
+    cargas_por_hora = [{"hora": f"{h:02d}h", "cargas": cargas_hora[h]} for h in range(24)]
+    cargas_por_dia = [{"dia": d, "cargas": cargas_dia[d]} for d in DIAS_SEMANA]
+    medio_identificacion = [
+        {"medio": m, "cargas": c} for m, c in sorted(medio_counts.items(), key=lambda x: -x[1])
+    ]
+
+    # ---- Precio ENERED vs pizarra (global) ----
+    total_pu_pond = sum(p["pond"] for p in precios_pond.values())
+    total_pu_gal = sum(p["gal"] for p in precios_pond.values())
+    total_pp_pond = sum(p["pond"] for p in pizarra_pond.values())
+    total_pp_gal = sum(p["gal"] for p in pizarra_pond.values())
+    precio_enered = round(total_pu_pond / total_pu_gal, 2) if total_pu_gal > 0 else 0
+    precio_pizarra = round(total_pp_pond / total_pp_gal, 2) if total_pp_gal > 0 else 0
+
+    precio_comparacion_producto = []
+    by_prod_precio = {}
+    for r in rows:
+        pr = r.get("PRODUCTO", "Otro")
+        g = _f(r.get("CANTIDAD_GL"))
+        pu = _f(r.get("PRECIO_UNITARIO"))
+        pp = _f(r.get("PRECIO_PIZARRA"))
+        if g <= 0: continue
+        d = by_prod_precio.setdefault(pr, {"pu": 0.0, "pp": 0.0, "g1": 0.0, "g2": 0.0})
+        if pu > 0: d["pu"] += pu * g; d["g1"] += g
+        if pp > 0: d["pp"] += pp * g; d["g2"] += g
+    for pr, d in by_prod_precio.items():
+        precio_comparacion_producto.append({
+            "producto": pr,
+            "enered": round(d["pu"] / d["g1"], 2) if d["g1"] > 0 else 0,
+            "pizarra": round(d["pp"] / d["g2"], 2) if d["g2"] > 0 else 0,
+        })
+
+    # ---- Ticket & Gal promedio ----
+    ticket_prom = round(total_gasto / cargas, 2) if cargas else 0
+    gal_por_carga = round(total_gal / cargas, 2) if cargas else 0
 
     return {
-        "kpis": {
+        "totals": {
             "total_gal": round(total_gal, 2),
             "total_gasto": round(total_gasto, 2),
             "total_ahorro": round(total_ahorro, 2),
             "cargas": cargas,
+            "ticket_prom": ticket_prom,
+            "gal_por_carga": gal_por_carga,
+            "precio_enered": precio_enered,
+            "precio_pizarra": precio_pizarra,
+            "ahorro_pct": round((total_ahorro / (total_gasto + total_ahorro) * 100) if (total_gasto + total_ahorro) else 0, 2),
         },
-        "top_placas": [{"placa": p, "galones": round(v, 2)} for p, v in top_placas],
-        "ciudades": [{"ciudad": c, "galones": round(v, 2)} for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]],
-        "productos": [{"producto": p, "galones": round(v, 2)} for p, v in sorted(productos.items(), key=lambda x: -x[1])],
-        "estaciones": [{"estacion": e, "ahorro": round(v, 2)} for e, v in top_estaciones],
-        "tendencia": [{"semana": t["semana"], "consumo": round(t["consumo"], 2), "gasto": round(t["gasto"], 2), "ahorro": round(t["ahorro"], 2)} for t in tendencia],
+        "series_semana": serie_semanas,
+        "top_placas_consumo": top_placas_consumo,
+        "gasto_placa": gasto_placa,
+        "cargas_placa": cargas_placa,
+        "consumo_ciudad": consumo_ciudad,
+        "consumo_estacion": consumo_estacion,
+        "ahorro_estacion": ahorro_estacion,
+        "consumo_producto": consumo_producto,
+        "gasto_producto": gasto_producto,
+        "precio_comparacion_producto": precio_comparacion_producto,
+        "cargas_por_hora": cargas_por_hora,
+        "cargas_por_dia": cargas_por_dia,
+        "medio_identificacion": medio_identificacion,
     }
 
 
@@ -604,6 +757,38 @@ async def analytics_fleet(
         for h in range(24):
             heatmap.append({"dia": dia, "hora": h, "count": heatmap_counts.get((dia, h), 0)})
 
+    # ---- Heatmap placa x semana (consumo gal) ----
+    placa_semana = {}
+    semanas_set = set()
+    placas_set = set()
+    for r in rows:
+        p = r.get("PLACA")
+        s = r.get("SEMANA")
+        if not p or not s: continue
+        semanas_set.add(s); placas_set.add(p)
+        placa_semana[(p, s)] = placa_semana.get((p, s), 0) + float(r.get("CANTIDAD_GL", 0) or 0)
+    semanas_list = sorted(semanas_set)
+    # Placas ordenadas por consumo total desc (para mostrar top en primera fila)
+    placas_totales = {}
+    for (p, s), v in placa_semana.items():
+        placas_totales[p] = placas_totales.get(p, 0) + v
+    placas_list = [p for p, _ in sorted(placas_totales.items(), key=lambda x: -x[1])]
+    heatmap_ps = [
+        {
+            "placa": p,
+            "semana": s,
+            "galones": round(placa_semana.get((p, s), 0), 2),
+        }
+        for p in placas_list for s in semanas_list
+    ]
+
+    # Participación por placa (%)
+    tot_gal_placas = sum(placas_totales.values()) or 1
+    participacion_placa = [
+        {"placa": p, "galones": round(v, 2), "pct": round(v / tot_gal_placas * 100, 2)}
+        for p, v in sorted(placas_totales.items(), key=lambda x: -x[1])
+    ]
+
     # ---- Productos (%) ----
     productos = {}
     total_gal_prod = 0
@@ -660,6 +845,12 @@ async def analytics_fleet(
         "precio_estaciones": precio_estaciones,
         "tendencia_precio": tendencia_precio,
         "heatmap": heatmap,
+        "heatmap_placa_semana": {
+            "placas": placas_list,
+            "semanas": semanas_list,
+            "cells": heatmap_ps,
+        },
+        "participacion_placa": participacion_placa,
         "productos_pct": productos_pct,
         "top_tarjetas": top_tarjetas,
     }
