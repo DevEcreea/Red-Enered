@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, FileBarChart, Receipt, ShieldCheck, GraduationCap,
-  LifeBuoy, Users, Upload, LogOut, Menu, X, Fuel,
+  LifeBuoy, Users, Upload, LogOut, Menu, X, Fuel, Gauge,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { ROLE_LABEL } from "../lib/utils";
 
 const ALL_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
+  { to: "/analitica", label: "Analítica", icon: Gauge, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica" },
   { to: "/reportes", label: "Reportes", icon: FileBarChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-reportes" },
   { to: "/facturacion", label: "Facturación", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-facturacion" },
   { to: "/control", label: "Control Integral", icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica"], testid: "nav-control" },

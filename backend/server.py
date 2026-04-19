@@ -451,6 +451,220 @@ async def dashboard_kpis(
     }
 
 
+@api.get("/analytics/fleet")
+async def analytics_fleet(
+    user: dict = Depends(get_current_user),
+    empresa: Optional[str] = None,
+    fecha_desde: Optional[str] = None,
+    fecha_hasta: Optional[str] = None,
+):
+    q = tenant_filter(user)
+    if empresa and user["role"] == "admin_enered":
+        q["EMPRESA"] = empresa
+    if fecha_desde:
+        q.setdefault("FECHA", {})["$gte"] = fecha_desde
+    if fecha_hasta:
+        q.setdefault("FECHA", {})["$lte"] = fecha_hasta
+
+    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+    if not rows:
+        return {
+            "kpis": {"ahorro_pct": 0, "galones_por_carga": 0, "costo_por_carga": 0, "rendimiento_prom": 0, "cargas_por_dia": 0},
+            "rendimiento": [], "pareto": [], "precio_estaciones": [],
+            "tendencia_precio": [], "heatmap": [], "productos_pct": [], "top_tarjetas": [],
+        }
+
+    # ---- Aggregate per placa ----
+    per_placa = {}
+    for r in rows:
+        p = r.get("PLACA")
+        if not p:
+            continue
+        d = per_placa.setdefault(p, {
+            "placa": p, "gal": 0.0, "gasto": 0.0, "ahorro": 0.0,
+            "cargas": 0, "readings": [],
+        })
+        d["gal"] += float(r.get("CANTIDAD_GL", 0) or 0)
+        d["gasto"] += float(r.get("IMPORTE_TOTAL", 0) or 0)
+        d["ahorro"] += float(r.get("AHORRO", 0) or 0)
+        d["cargas"] += 1
+        km = r.get("KILOMETRAJE")
+        try:
+            km = float(km) if km not in (None, "") else None
+        except Exception:
+            km = None
+        if km is not None and km > 0 and r.get("FECHA"):
+            d["readings"].append((r["FECHA"], km))
+
+    # Sensible upper bound for km between two fuel loads in a transport fleet
+    MAX_KM_PER_DELTA = 3000
+
+    rendimiento = []
+    for p, d in per_placa.items():
+        # Sort readings by date and sum valid consecutive deltas
+        d["readings"].sort(key=lambda x: x[0])
+        km_trav = 0
+        for i in range(1, len(d["readings"])):
+            delta = d["readings"][i][1] - d["readings"][i - 1][1]
+            # keep only physically plausible deltas
+            if 0 < delta <= MAX_KM_PER_DELTA:
+                km_trav += delta
+        km_por_gal = round(km_trav / d["gal"], 2) if d["gal"] > 0 and km_trav > 0 else None
+        costo_km = round(d["gasto"] / km_trav, 2) if km_trav > 0 else None
+        rendimiento.append({
+            "placa": p,
+            "gal": round(d["gal"], 2),
+            "gasto": round(d["gasto"], 2),
+            "ahorro": round(d["ahorro"], 2),
+            "cargas": d["cargas"],
+            "km_recorridos": round(km_trav, 0) if km_trav else 0,
+            "km_por_gal": km_por_gal,
+            "costo_km": costo_km,
+        })
+    rendimiento.sort(key=lambda x: -(x["km_por_gal"] or 0))
+
+    # ---- Pareto (80/20) gasto ----
+    pareto_sorted = sorted(per_placa.values(), key=lambda x: -x["gasto"])
+    total_gasto = sum(d["gasto"] for d in pareto_sorted) or 1
+    pareto = []
+    acc = 0
+    for d in pareto_sorted:
+        acc += d["gasto"]
+        pareto.append({
+            "placa": d["placa"],
+            "gasto": round(d["gasto"], 2),
+            "pct_acum": round((acc / total_gasto) * 100, 2),
+        })
+
+    # ---- Precio promedio por estación ----
+    per_est = {}
+    for r in rows:
+        e = r.get("ESTACION")
+        if not e:
+            continue
+        pu = float(r.get("PRECIO_UNITARIO", 0) or 0)
+        gl = float(r.get("CANTIDAD_GL", 0) or 0)
+        ah = float(r.get("AHORRO", 0) or 0)
+        if pu <= 0:
+            continue
+        d = per_est.setdefault(e, {"estacion": e, "suma_pu_pond": 0.0, "gal": 0.0, "cargas": 0, "ahorro": 0.0})
+        d["suma_pu_pond"] += pu * gl
+        d["gal"] += gl
+        d["cargas"] += 1
+        d["ahorro"] += ah
+    precio_estaciones = []
+    for d in per_est.values():
+        precio = d["suma_pu_pond"] / d["gal"] if d["gal"] > 0 else 0
+        ahorro_gal = d["ahorro"] / d["gal"] if d["gal"] > 0 else 0
+        precio_estaciones.append({
+            "estacion": d["estacion"],
+            "precio_prom": round(precio, 2),
+            "cargas": d["cargas"],
+            "ahorro_por_gal": round(ahorro_gal, 2),
+        })
+    precio_estaciones.sort(key=lambda x: x["precio_prom"])
+
+    # ---- Tendencia de precio unitario en el tiempo ----
+    per_date = {}
+    for r in rows:
+        fecha = r.get("FECHA")
+        if not fecha:
+            continue
+        pu = float(r.get("PRECIO_UNITARIO", 0) or 0)
+        gl = float(r.get("CANTIDAD_GL", 0) or 0)
+        if pu <= 0:
+            continue
+        d = per_date.setdefault(fecha, {"suma_pond": 0.0, "gal": 0.0})
+        d["suma_pond"] += pu * gl
+        d["gal"] += gl
+    tendencia_precio = sorted([
+        {"fecha": k, "precio_prom": round(v["suma_pond"] / v["gal"], 3) if v["gal"] > 0 else 0}
+        for k, v in per_date.items()
+    ], key=lambda x: x["fecha"])
+
+    # ---- Heatmap día semana x hora ----
+    DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    heatmap_counts = {}
+    for r in rows:
+        try:
+            d = datetime.fromisoformat(r["FECHA"])
+            dia = DIAS[d.weekday()]
+        except Exception:
+            continue
+        hora = r.get("HORA", "")
+        try:
+            h = int(str(hora).split(":")[0])
+        except Exception:
+            continue
+        if not (0 <= h <= 23):
+            continue
+        heatmap_counts[(dia, h)] = heatmap_counts.get((dia, h), 0) + 1
+    heatmap = []
+    for dia in DIAS:
+        for h in range(24):
+            heatmap.append({"dia": dia, "hora": h, "count": heatmap_counts.get((dia, h), 0)})
+
+    # ---- Productos (%) ----
+    productos = {}
+    total_gal_prod = 0
+    for r in rows:
+        p = r.get("PRODUCTO", "Otro")
+        gl = float(r.get("CANTIDAD_GL", 0) or 0)
+        productos[p] = productos.get(p, 0) + gl
+        total_gal_prod += gl
+    productos_pct = [
+        {"producto": p, "galones": round(g, 2), "pct": round((g / total_gal_prod * 100) if total_gal_prod else 0, 2)}
+        for p, g in sorted(productos.items(), key=lambda x: -x[1])
+    ]
+
+    # ---- Top tarjetas ----
+    tarjetas = {}
+    for r in rows:
+        t = r.get("NRO_DE_TARJETA") or r.get("MEDIO_DE_IDENTIFICACION") or "Sin ID"
+        d = tarjetas.setdefault(t, {"tarjeta": str(t), "gal": 0, "gasto": 0, "cargas": 0})
+        d["gal"] += float(r.get("CANTIDAD_GL", 0) or 0)
+        d["gasto"] += float(r.get("IMPORTE_TOTAL", 0) or 0)
+        d["cargas"] += 1
+    top_tarjetas = sorted(
+        [{"tarjeta": v["tarjeta"], "gal": round(v["gal"], 2), "gasto": round(v["gasto"], 2), "cargas": v["cargas"]} for v in tarjetas.values()],
+        key=lambda x: -x["gasto"]
+    )[:10]
+
+    # ---- KPIs avanzados ----
+    total_gal_all = sum(float(r.get("CANTIDAD_GL", 0) or 0) for r in rows)
+    total_gasto_all = sum(float(r.get("IMPORTE_TOTAL", 0) or 0) for r in rows)
+    total_ahorro_all = sum(float(r.get("AHORRO", 0) or 0) for r in rows)
+    cargas_all = len(rows)
+
+    try:
+        dates = sorted({datetime.fromisoformat(r["FECHA"]) for r in rows if r.get("FECHA")})
+        dias_unicos = len(dates) or 1
+    except Exception:
+        dias_unicos = 1
+
+    rendimientos_validos = [r["km_por_gal"] for r in rendimiento if r["km_por_gal"]]
+    rend_prom = round(sum(rendimientos_validos) / len(rendimientos_validos), 2) if rendimientos_validos else 0
+
+    ahorro_pct = round((total_ahorro_all / (total_gasto_all + total_ahorro_all) * 100) if (total_gasto_all + total_ahorro_all) else 0, 2)
+
+    return {
+        "kpis": {
+            "ahorro_pct": ahorro_pct,
+            "galones_por_carga": round(total_gal_all / cargas_all, 2) if cargas_all else 0,
+            "costo_por_carga": round(total_gasto_all / cargas_all, 2) if cargas_all else 0,
+            "rendimiento_prom": rend_prom,
+            "cargas_por_dia": round(cargas_all / dias_unicos, 2) if dias_unicos else 0,
+        },
+        "rendimiento": rendimiento,
+        "pareto": pareto,
+        "precio_estaciones": precio_estaciones,
+        "tendencia_precio": tendencia_precio,
+        "heatmap": heatmap,
+        "productos_pct": productos_pct,
+        "top_tarjetas": top_tarjetas,
+    }
+
+
 @api.get("/dashboard/alerts")
 async def dashboard_alerts(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
     q = tenant_filter(user)

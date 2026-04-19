@@ -13,6 +13,7 @@ import Facturacion from "./pages/Facturacion";
 import ControlIntegral from "./pages/ControlIntegral";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
+import Analitica from "./pages/Analitica";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 
@@ -35,6 +36,7 @@ function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Shell><Dashboard /></Shell>} />
           <Route path="/reportes" element={<Shell><Reportes /></Shell>} />
+          <Route path="/analitica" element={<Shell><Analitica /></Shell>} />
           <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
           <Route path="/control" element={<Shell roles={["admin_enered", "administrador", "logistica"]}><ControlIntegral /></Shell>} />
           <Route path="/capacitacion" element={<Shell><Capacitacion /></Shell>} />
