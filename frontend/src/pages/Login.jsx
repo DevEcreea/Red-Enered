@@ -1,8 +1,11 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Fuel, Mail, Lock, Loader2 } from "lucide-react";
+import { User, Lock, Loader2, Globe, Phone } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { formatApiError } from "../lib/utils";
+
+const HERO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/0fc04sfs_image.png";
+const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
 
 export default function Login() {
   const { login } = useAuth();
@@ -27,134 +30,131 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Left - Brand panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-[#2D0A4E] via-[#4A148C] to-[#9933FF] relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20"
-          style={{
-            backgroundImage: "radial-gradient(circle at 20% 30%, white 1px, transparent 1px), radial-gradient(circle at 80% 70%, white 1px, transparent 1px)",
-            backgroundSize: "60px 60px, 80px 80px",
-          }}
-        />
-        <div className="relative z-10 flex flex-col justify-between p-12 text-white w-full">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-md bg-white/15 backdrop-blur flex items-center justify-center border border-white/20">
-              <Fuel className="w-6 h-6" strokeWidth={2.5} />
-            </div>
-            <div>
-              <div className="font-cabinet font-black text-2xl leading-none">ENERED</div>
-              <div className="text-[11px] font-bold uppercase tracking-widest text-white/70 mt-1">Fuel Intelligence</div>
-            </div>
-          </div>
-
-          <div className="max-w-md">
-            <div className="text-[11px] font-bold uppercase tracking-widest text-white/70 mb-3">Plataforma multi-empresa</div>
-            <h1 className="font-cabinet font-black text-5xl leading-tight mb-4">
-              Control total de tu consumo de combustible.
-            </h1>
-            <p className="text-white/80 text-lg font-medium">
-              Visualiza, analiza y decide con datos precisos sobre cada carga, placa y estación.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-6 pt-8 border-t border-white/20">
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-white/60">Galones/mes</div>
-              <div className="font-cabinet font-black text-2xl mt-1">+250K</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-white/60">Empresas</div>
-              <div className="font-cabinet font-black text-2xl mt-1">25+</div>
-            </div>
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-white/60">Ahorro</div>
-              <div className="font-cabinet font-black text-2xl mt-1">S/ 1.2M</div>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen flex flex-col lg:flex-row bg-white">
+      {/* Left - Hero image panel */}
+      <div
+        className="hidden lg:block lg:w-1/2 xl:w-[55%] bg-black bg-cover bg-center"
+        style={{ backgroundImage: `url(${HERO_IMG})` }}
+        data-testid="login-hero"
+      >
+        {/* image already has text baked in */}
       </div>
 
-      {/* Right - Form */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12 bg-white">
-        <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-11 h-11 rounded-md bg-brand flex items-center justify-center">
-              <Fuel className="w-6 h-6 text-white" strokeWidth={2.5} />
-            </div>
-            <div>
-              <div className="font-cabinet font-black text-2xl leading-none text-neutral-900">ENERED</div>
-              <div className="text-[11px] font-bold uppercase tracking-widest text-neutral-500 mt-1">Fuel Intelligence</div>
-            </div>
+      {/* Mobile hero (shorter) */}
+      <div
+        className="lg:hidden h-56 bg-cover bg-center"
+        style={{ backgroundImage: `url(${HERO_IMG})` }}
+      />
+
+      {/* Right - Form panel */}
+      <div className="flex-1 flex flex-col justify-between px-6 py-8 md:px-12 md:py-10 lg:px-16 xl:px-24 bg-white">
+        <div className="w-full max-w-md mx-auto flex-1 flex flex-col justify-center">
+          {/* Logo */}
+          <div className="mb-10">
+            <img src={LOGO_IMG} alt="ENERED" className="h-10 md:h-12 w-auto" />
           </div>
 
-          <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-3">Ingreso seguro</div>
-          <h2 className="font-cabinet font-black text-4xl text-neutral-900 mb-2">Bienvenido</h2>
-          <p className="text-neutral-500 mb-8">Accede a tu panel de control.</p>
+          {/* Title */}
+          <h1 className="text-brand text-3xl md:text-4xl font-bold font-cabinet mb-8" style={{ letterSpacing: "-0.01em" }}>
+            Inicia Sesión
+          </h1>
 
-          <form onSubmit={onSubmit} className="space-y-4" data-testid="login-form">
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-neutral-700 block mb-2">Correo</label>
-              <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="tu@empresa.com"
-                  className="w-full h-11 pl-10 pr-3 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand bg-white text-sm font-medium"
-                  data-testid="login-email"
-                />
-              </div>
+          <form onSubmit={onSubmit} className="space-y-5" data-testid="login-form">
+            {/* Usuario */}
+            <div className="relative">
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Usuario"
+                className="peer w-full h-14 px-5 pr-12 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand text-base bg-white transition"
+                data-testid="login-email"
+              />
+              <User className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-neutral-400" strokeWidth={1.8} />
             </div>
 
-            <div>
-              <label className="text-xs font-bold uppercase tracking-wider text-neutral-700 block mb-2">Contraseña</label>
-              <div className="relative">
-                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full h-11 pl-10 pr-3 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand bg-white text-sm font-medium"
-                  data-testid="login-password"
-                />
-              </div>
+            {/* Contraseña */}
+            <div className="relative">
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Contraseña"
+                className="peer w-full h-14 px-5 pr-12 border border-neutral-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand focus:border-brand text-base bg-white transition"
+                data-testid="login-password"
+              />
+              <Lock className="w-5 h-5 absolute right-5 top-1/2 -translate-y-1/2 text-neutral-400" strokeWidth={1.8} />
             </div>
 
             {error && (
-              <div className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2" data-testid="login-error">
+              <div className="text-sm font-semibold text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3" data-testid="login-error">
                 {error}
               </div>
             )}
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-11 btn-brand text-sm flex items-center justify-center gap-2 disabled:opacity-60"
+              className="w-full h-14 bg-brand hover:bg-brand-hover active:bg-brand-active text-white font-bold rounded-2xl text-base flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md disabled:opacity-60"
               data-testid="login-submit"
             >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
               Ingresar
             </button>
 
-            <div className="text-center">
-              <Link to="/forgot-password" className="text-sm font-semibold text-brand hover:text-brand-hover">
-                ¿Olvidaste tu contraseña?
+            {/* Forgot */}
+            <div className="text-center pt-2">
+              <Link to="/forgot-password" className="text-sm font-medium text-brand hover:text-brand-hover hover:underline">
+                ¿Has olvidado tu contraseña?
               </Link>
             </div>
           </form>
 
-          <div className="mt-8 p-4 bg-neutral-50 border border-border rounded-md">
-            <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-2">Cuentas demo</div>
-            <div className="text-xs space-y-1 text-neutral-600 font-mono">
-              <div>admin@enered.com / admin123 <span className="text-brand font-bold">Admin ENERED</span></div>
+          {/* Contact block */}
+          <div className="mt-10 pt-8 border-t border-neutral-100 text-sm text-neutral-700 leading-relaxed">
+            <p className="font-bold text-neutral-900 mb-2">Para nuestros clientes:</p>
+            <p className="text-neutral-600 mb-4">
+              Si aún no tienes tu usuario y/o clave, por favor comunícate con nuestros ejecutivos corporativos, a los siguientes números y/o correos electrónicos:
+            </p>
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
+                <Globe className="w-4 h-4 text-white" strokeWidth={2} />
+              </div>
+              <div className="flex-1 text-xs md:text-sm text-neutral-700 pt-1.5">
+                (044) 659-3519 | +51 972 228 870 | <a href="mailto:hola@enered.pe" className="hover:text-brand">hola@enered.pe</a>
+              </div>
+            </div>
+          </div>
+
+          {/* Demo accounts (colapsado) */}
+          <details className="mt-6 text-xs">
+            <summary className="cursor-pointer text-neutral-400 hover:text-brand font-medium">Cuentas demo</summary>
+            <div className="mt-2 p-3 bg-neutral-50 border border-neutral-200 rounded-lg font-mono text-neutral-600 space-y-1">
+              <div>admin@enered.com / admin123</div>
               <div>administrador@lima.com / demo123</div>
               <div>logistica@lima.com / demo123</div>
               <div>contabilidad@lima.com / demo123</div>
             </div>
+          </details>
+        </div>
+
+        {/* Footer */}
+        <div className="w-full max-w-md mx-auto pt-8 space-y-3 text-center">
+          <div className="text-xs text-neutral-600">
+            <a href="#" className="hover:text-brand">Asistencia técnica</a>
+            <span className="mx-2">•</span>
+            <a href="#" className="hover:text-brand">Términos y condiciones</a>
+            <span className="mx-2">•</span>
+            <a href="#" className="hover:text-brand">Avisos de copyright</a>
+          </div>
+          <div className="text-xs text-neutral-500">
+            <a href="https://www.energix.pe" target="_blank" rel="noreferrer" className="hover:text-brand">www.energix.pe</a>
+          </div>
+          <div className="text-[11px] text-neutral-400 pt-2 border-t border-neutral-100">
+            ENERED | Soluciones en Energías | Copyright © {new Date().getFullYear()} | Energix Perú | Todos los derechos reservados.
           </div>
         </div>
       </div>

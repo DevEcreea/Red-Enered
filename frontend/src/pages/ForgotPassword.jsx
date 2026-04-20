@@ -27,13 +27,11 @@ export default function ForgotPassword() {
     <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-6">
       <div className="w-full max-w-md bg-white rounded-lg border border-border p-8">
         <div className="flex items-center gap-3 mb-8">
-          <div className="w-11 h-11 rounded-md bg-brand flex items-center justify-center">
-            <Fuel className="w-6 h-6 text-white" strokeWidth={2.5} />
-          </div>
-          <div>
-            <div className="font-cabinet font-black text-2xl leading-none">ENERED</div>
-            <div className="text-[11px] font-bold uppercase tracking-widest text-neutral-500 mt-1">Fuel Intelligence</div>
-          </div>
+          <img
+            src="https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png"
+            alt="ENERED"
+            className="h-8 w-auto"
+          />
         </div>
 
         <h2 className="font-cabinet font-black text-3xl text-neutral-900 mb-2">Recuperar acceso</h2>

@@ -40,15 +40,11 @@ export default function Layout({ children }) {
   const SidebarContent = () => (
     <>
       <div className="px-6 py-6 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-md bg-brand flex items-center justify-center">
-            <Fuel className="w-5 h-5 text-white" strokeWidth={2.5} />
-          </div>
-          <div>
-            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none">ENERED</div>
-            <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mt-1">Fuel Intelligence</div>
-          </div>
-        </div>
+        <img
+          src="https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png"
+          alt="ENERED"
+          className="h-8 w-auto"
+        />
       </div>
 
       <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
