@@ -120,7 +120,7 @@ export default function Analitica() {
             <XAxis dataKey="placa" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-45} textAnchor="end" height={60} />
             <YAxis yAxisId="left" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
             <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#9933FF" unit="%" />
-            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v, n) => n === "pct_acum" ? `${v}%` : formatSoles(v)} />
+            <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v, n) => n === "pct_acum" ? `${v}%` : `S/ ${formatNumber(v, 2)}`} />
             <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
             <Bar yAxisId="left" dataKey="gasto" fill="#9933FF" name="Gasto (S/)" radius={[4, 4, 0, 0]} />
             <Line yAxisId="right" type="monotone" dataKey="pct_acum" stroke="#DC2626" strokeWidth={2.5} dot={{ r: 3 }} name="% acumulado" />
