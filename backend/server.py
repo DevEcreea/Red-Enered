@@ -385,6 +385,127 @@ async def dashboard_filter_options(user: dict = Depends(get_current_user), empre
     return {"placas": placas, "semanas": semanas, "estaciones": estaciones, "productos": productos}
 
 
+# ---------- Empresa Config (plan, línea crédito, unidades, RUC) ----------
+class EmpresaConfig(BaseModel):
+    empresa: str
+    ruc: Optional[str] = ""
+    plan: Literal["tracking", "advanced", "integral"] = "tracking"
+    linea_credito: float = 0.0
+    unidades_contratadas: int = 0
+
+
+@api.get("/empresas-config")
+async def list_empresas_config(user: dict = Depends(require_roles("admin_enered"))):
+    configs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
+    return configs
+
+
+@api.post("/empresas-config")
+async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(require_roles("admin_enered"))):
+    doc = data.model_dump()
+    doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+    existing = await db.empresas_config.find_one({"empresa": data.empresa}, {"_id": 0})
+    if existing:
+        await db.empresas_config.update_one({"empresa": data.empresa}, {"$set": doc})
+    else:
+        doc["id"] = str(uuid.uuid4())
+        doc["created_at"] = doc["updated_at"]
+        await db.empresas_config.insert_one(doc)
+    return await db.empresas_config.find_one({"empresa": data.empresa}, {"_id": 0})
+
+
+@api.get("/dashboard/overview")
+async def dashboard_overview(
+    user: dict = Depends(get_current_user),
+    empresa: Optional[str] = None,
+):
+    # Determinar empresa visible
+    if user["role"] == "admin_enered":
+        target_empresa = empresa or None
+    else:
+        target_empresa = user.get("empresa")
+
+    # Config de la empresa
+    cfg = None
+    if target_empresa:
+        cfg = await db.empresas_config.find_one({"empresa": target_empresa}, {"_id": 0})
+    if not cfg:
+        cfg = {
+            "empresa": target_empresa or "Todas las empresas",
+            "ruc": "",
+            "plan": "tracking",
+            "linea_credito": 0,
+            "unidades_contratadas": 0,
+        }
+
+    # Consumos
+    q = tenant_filter(user)
+    if target_empresa and user["role"] == "admin_enered":
+        q["EMPRESA"] = target_empresa
+    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+
+    def _f(x, d=0):
+        try: return float(x) if x not in (None, "") else d
+        except Exception: return d
+
+    total_gal = sum(_f(r.get("CANTIDAD_GL")) for r in rows)
+    total_gasto = sum(_f(r.get("IMPORTE_TOTAL")) for r in rows)
+    total_ahorro = sum(_f(r.get("AHORRO")) for r in rows)
+    cargas = len(rows)
+
+    # Precio promedio ponderado
+    sum_pu = sum(_f(r.get("PRECIO_UNITARIO")) * _f(r.get("CANTIDAD_GL")) for r in rows if _f(r.get("CANTIDAD_GL")) > 0 and _f(r.get("PRECIO_UNITARIO")) > 0)
+    sum_gl = sum(_f(r.get("CANTIDAD_GL")) for r in rows if _f(r.get("PRECIO_UNITARIO")) > 0)
+    precio_prom = (sum_pu / sum_gl) if sum_gl > 0 else 0
+
+    ticket_prom = total_gasto / cargas if cargas else 0
+    gal_por_carga = total_gal / cargas if cargas else 0
+    ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
+
+    # Línea de crédito: utilizada = facturas no pagadas
+    inv_q = {"empresa": target_empresa} if target_empresa else {}
+    facturas = await db.invoices.find(inv_q, {"_id": 0}).to_list(1000)
+    utilizada = sum(float(f.get("monto", 0) or 0) for f in facturas if f.get("estado") != "pagada")
+    total_credito = float(cfg.get("linea_credito", 0) or 0)
+    disponible = max(0, total_credito - utilizada)
+
+    # Unidades (placas únicas reales)
+    placas_reales = len({r.get("PLACA") for r in rows if r.get("PLACA")})
+
+    # Última sync de sheets
+    last_sync = await db.sheets_sync_log.find_one({}, {"_id": 0}, sort=[("finished_at", -1)])
+    last_sync_at = last_sync["finished_at"] if last_sync else None
+
+    return {
+        "empresa": cfg["empresa"],
+        "ruc": cfg.get("ruc", ""),
+        "plan": cfg.get("plan", "tracking"),
+        "unidades_contratadas": int(cfg.get("unidades_contratadas", 0) or 0),
+        "unidades_reales": placas_reales,
+        "red_estaciones": 358,
+        "linea_credito": {
+            "total": total_credito,
+            "utilizada": round(utilizada, 2),
+            "disponible": round(disponible, 2),
+        },
+        "ahorro": {
+            "soles": round(total_ahorro, 2),
+            "galones": round(ahorro_gl, 2),
+        },
+        "consumo": {
+            "soles": round(total_gasto, 2),
+            "galones": round(total_gal, 2),
+        },
+        "promedios": {
+            "ticket": round(ticket_prom, 2),
+            "carga_gal": round(gal_por_carga, 2),
+            "precio": round(precio_prom, 2),
+        },
+        "cargas": cargas,
+        "ultima_sincronizacion": last_sync_at,
+    }
+
+
 DIAS_SEMANA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
 
 
@@ -1334,6 +1455,26 @@ async def seed_demo_data():
             ],
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+
+    # Empresa configs (plan, RUC, línea de crédito, unidades)
+    empresa_defaults = [
+        ("ROSANDINA SAC", "20605479686", "tracking", 50000, 77),
+        ("TRANSPORTES LIMA SAC", "20512345678", "advanced", 80000, 25),
+        ("LOGISTICA ANDINA SA", "20556781234", "tracking", 40000, 18),
+        ("CARGO PERU EIRL", "20578912345", "integral", 30000, 12),
+    ]
+    for empresa, ruc, plan, linea, unidades in empresa_defaults:
+        if not await db.empresas_config.find_one({"empresa": empresa}):
+            await db.empresas_config.insert_one({
+                "id": str(uuid.uuid4()),
+                "empresa": empresa,
+                "ruc": ruc,
+                "plan": plan,
+                "linea_credito": linea,
+                "unidades_contratadas": unidades,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
 
 
 @app.on_event("startup")

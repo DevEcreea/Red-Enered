@@ -6,10 +6,148 @@ import {
 import {
   Fuel, DollarSign, TrendingDown, Package, AlertTriangle, CheckCircle2, AlertCircle,
   Gauge, Coins, Droplets, CalendarClock, Receipt, Zap, Filter, X,
+  Truck, Fuel as FuelIcon, Building2, ArrowUpRight, Info, XCircle, ExternalLink, Clock,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber, BRAND_COLORS } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
+
+const MAPS_LINK = "https://maps.app.goo.gl/LZpyBqYs54LazZtV7";
+
+function OverviewSection({ overview, alerts }) {
+  const { linea_credito, ahorro, consumo, promedios, cargas, unidades_contratadas, red_estaciones, ultima_sincronizacion } = overview;
+  const pctUsado = linea_credito.total > 0 ? (linea_credito.utilizada / linea_credito.total) * 100 : 0;
+  const syncFmt = ultima_sincronizacion
+    ? new Date(ultima_sincronizacion).toLocaleString("es-PE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : "—";
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Estado General */}
+        <div className="lg:col-span-3 bg-white border border-neutral-200 rounded-2xl p-5" data-testid="estado-general">
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand flex items-center justify-center">
+              <AlertCircle className="w-4 h-4" />
+            </div>
+            <h3 className="font-cabinet font-bold text-base text-neutral-900">Estado General</h3>
+          </div>
+          {alerts.length === 0 ? (
+            <div className="flex items-start gap-2 bg-green-50 border border-green-100 rounded-lg p-3">
+              <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+              <div className="text-xs">
+                <div className="font-bold text-green-800">Felicitaciones</div>
+                <div className="text-green-700">La configuración está completa</div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+              {alerts.slice(0, 6).map((a, i) => {
+                const col = a.nivel === "red" ? { bg: "bg-red-50", bd: "border-red-100", tx: "text-red-700", Ic: XCircle }
+                  : a.nivel === "green" ? { bg: "bg-green-50", bd: "border-green-100", tx: "text-green-700", Ic: CheckCircle2 }
+                  : { bg: "bg-amber-50", bd: "border-amber-100", tx: "text-amber-700", Ic: AlertTriangle };
+                const Ic = col.Ic;
+                return (
+                  <div key={i} className={`flex items-start gap-2 ${col.bg} border ${col.bd} rounded-lg p-2.5`}>
+                    <Ic className={`w-3.5 h-3.5 ${col.tx} mt-0.5 flex-shrink-0`} />
+                    <div className="text-[11px] leading-tight">
+                      <div className={`font-bold ${col.tx}`}>{a.titulo}</div>
+                      <div className="text-neutral-700 mt-0.5">{a.mensaje}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Línea de Crédito + Ahorro + Consumo */}
+        <div className="lg:col-span-5 rounded-2xl p-5 text-white" style={{ background: "linear-gradient(135deg, #9933FF 0%, #6B23B1 100%)" }} data-testid="linea-credito">
+          <div className="flex items-center gap-2 mb-3">
+            <Coins className="w-5 h-5" />
+            <h3 className="font-cabinet font-bold text-base">Línea de Crédito</h3>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3 mb-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Total</div>
+              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5">{formatSoles(linea_credito.total)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Disponible</div>
+              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5 text-cyan-200">{formatSoles(linea_credito.disponible)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Utilizada</div>
+              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5 text-amber-200">{formatSoles(linea_credito.utilizada)}</div>
+            </div>
+          </div>
+
+          <div className="h-1.5 bg-white/15 rounded-full overflow-hidden mb-4">
+            <div className="h-full rounded-full bg-amber-300" style={{ width: `${Math.min(100, pctUsado)}%` }} />
+          </div>
+
+          <div className="border-t border-white/15 pt-3 grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold mb-1">Ahorro</div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-cabinet font-black text-base">{formatSoles(ahorro.soles)}</span>
+                <span className="text-[10px] text-white/60 font-semibold">{formatNumber(ahorro.galones, 2)} gal</span>
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold mb-1">Consumo</div>
+              <div className="flex items-baseline gap-2">
+                <span className="font-cabinet font-black text-base">{formatSoles(consumo.soles)}</span>
+                <span className="text-[10px] text-white/60 font-semibold">{formatNumber(consumo.galones, 2)} gal</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Mini metrics: Ticket / Carga / Precio + Unidades / Cargas / Red */}
+        <div className="lg:col-span-4 grid grid-cols-3 gap-3">
+          <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" />
+          <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} gal`} testid="mini-carga" />
+          <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" />
+          <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" />
+          <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" />
+          <MiniMetric
+            label="Red"
+            value={formatNumber(red_estaciones, 0)}
+            icon={Building2}
+            cyan
+            onClick={() => window.open(MAPS_LINK, "_blank")}
+            testid="mini-red"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 text-[11px] text-neutral-500 font-medium">
+        <Clock className="w-3 h-3" />
+        Información generada el {syncFmt}
+      </div>
+    </div>
+  );
+}
+
+function MiniMetric({ label, value, icon: Icon, cyan = false, onClick, testid }) {
+  const base = "rounded-xl p-3 flex flex-col justify-center transition-all";
+  const cls = cyan
+    ? "bg-cyan-300 text-[#1e1b4b] border border-cyan-300 hover:bg-cyan-400 hover:-translate-y-0.5 cursor-pointer"
+    : "bg-[#2B1C4A] text-white border border-[#2B1C4A]";
+  const Wrapper = onClick ? "button" : "div";
+  return (
+    <Wrapper onClick={onClick} data-testid={testid} className={`${base} ${cls} ${onClick ? "text-left" : ""}`}>
+      <div className="flex items-center justify-between">
+        <div className={`text-[10px] uppercase tracking-widest font-bold ${cyan ? "text-[#1e1b4b]/70" : "text-white/60"}`}>{label}</div>
+        {Icon && <Icon className={`w-3.5 h-3.5 ${cyan ? "text-[#1e1b4b]/70" : "text-white/50"}`} />}
+      </div>
+      <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-1">{value}</div>
+      {cyan && onClick && <div className="text-[9px] font-bold text-[#1e1b4b]/70 mt-0.5 flex items-center gap-0.5">Cobertura <ArrowUpRight className="w-2.5 h-2.5" /></div>}
+    </Wrapper>
+  );
+}
 
 const ALERT_STYLES = {
   red: { bg: "bg-red-50", text: "text-red-700", border: "border-red-200", Icon: AlertCircle, dot: "bg-red-500" },
@@ -75,6 +213,7 @@ function Card({ title, subtitle, children, testid, className = "" }) {
 export default function Dashboard() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
+  const [overview, setOverview] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [empresas, setEmpresas] = useState([]);
   const [options, setOptions] = useState({ placas: [], semanas: [], estaciones: [], productos: [] });
@@ -91,12 +230,15 @@ export default function Dashboard() {
       setLoading(true);
       try {
         const params = Object.fromEntries(Object.entries(filters).filter(([_, v]) => v));
-        const [k, a] = await Promise.all([
+        const ovParams = filters.empresa ? { empresa: filters.empresa } : {};
+        const [k, a, o] = await Promise.all([
           api.get("/dashboard/kpis", { params }),
-          api.get("/dashboard/alerts", { params: filters.empresa ? { empresa: filters.empresa } : {} }),
+          api.get("/dashboard/alerts", { params: ovParams }),
+          api.get("/dashboard/overview", { params: ovParams }),
         ]);
         setData(k.data);
         setAlerts(a.data);
+        setOverview(o.data);
       } finally {
         setLoading(false);
       }
@@ -175,6 +317,12 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* ========== OVERVIEW (Estado General + Línea Crédito + Metrics) ========== */}
+      {overview && (
+        <OverviewSection overview={overview} alerts={alerts} />
+      )}
+
 
       {/* ========== CONSUMO ========== */}
       <SectionHeader label="1 · Consumo" title="Volumen operativo" color="brand" />
@@ -441,42 +589,7 @@ export default function Dashboard() {
         </ResponsiveContainer>
       </Card>
 
-      {/* ========== ALERTAS ========== */}
-      <SectionHeader label="7 · Alertas" title="Patrones detectados automáticamente" color="amber" />
-      <div className="chart-card" data-testid="alerts-list">
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-xs font-bold uppercase tracking-wider text-neutral-500">
-            Señales inteligentes sobre la flota
-          </div>
-          <span className="px-3 py-1 rounded-full bg-brand-50 text-brand text-xs font-bold border border-brand-100">
-            {alerts.length} alerta{alerts.length !== 1 ? "s" : ""}
-          </span>
-        </div>
-
-        {alerts.length === 0 ? (
-          <div className="text-center py-8 text-neutral-500 text-sm font-semibold">
-            <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-3" />
-            Sin alertas activas. Todo en orden.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {alerts.map((a, i) => {
-              const s = ALERT_STYLES[a.nivel] || ALERT_STYLES.yellow;
-              const Ic = s.Icon;
-              return (
-                <div key={i} className={`flex items-start gap-3 p-4 rounded-md border ${s.bg} ${s.border}`}>
-                  <span className={`w-2 h-2 rounded-full mt-2 ${s.dot}`} />
-                  <Ic className={`w-5 h-5 flex-shrink-0 ${s.text}`} />
-                  <div className="flex-1">
-                    <div className={`font-bold text-sm ${s.text}`}>{a.titulo}</div>
-                    <div className="text-sm text-neutral-700 mt-0.5">{a.mensaje}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {/* ========== ALERTAS (movidas a Estado General arriba) ========== */}
     </div>
   );
 }

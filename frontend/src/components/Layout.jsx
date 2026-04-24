@@ -1,13 +1,15 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Truck, Satellite, PieChart, Receipt, ShieldCheck, GraduationCap,
-  LifeBuoy, Users, Upload, LogOut, Menu, X, Search, Bell, Mail, ChevronRight,
+  LifeBuoy, Users, Upload, LogOut, Menu, Search, Bell, Mail,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
 import { ROLE_LABEL } from "../lib/utils";
 
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
+const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
 const MENU = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
@@ -83,28 +85,47 @@ function SidebarLink({ item, onClick }) {
   );
 }
 
-function PlanCard({ label, title, color = "violet", testid }) {
+function PlanCard({ label, title, color = "violet", testid, onClick, active = false, wide = false }) {
+  const base = "rounded-2xl px-4 py-3 border flex flex-col justify-center transition-all " + (wide ? "min-w-[200px]" : "min-w-[140px]");
   const styles = {
     gray: "bg-neutral-100 text-neutral-800 border-neutral-200",
-    violet: "bg-brand text-white border-brand",
-    violetDark: "bg-[#6B23B1] text-white border-[#6B23B1]",
-    cyan: "bg-cyan-300 text-[#1e1b4b] border-cyan-300",
+    violet: "bg-brand text-white border-brand hover:bg-brand-hover cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
+    violetDark: "bg-[#6B23B1] text-white border-[#6B23B1] hover:bg-[#5A1E96] cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
+    cyan: "bg-cyan-300 text-[#1e1b4b] border-cyan-300 hover:bg-cyan-400 cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
   }[color];
-  return (
-    <div className={`rounded-2xl px-4 py-3 border ${styles} min-w-[140px] flex flex-col justify-center`} data-testid={testid}>
+
+  const activeRing = active ? "ring-4 ring-cyan-300 ring-offset-2 ring-offset-white shadow-lg scale-105" : "";
+
+  const content = (
+    <>
       <div className={`text-[10px] font-semibold uppercase tracking-wider ${color === "gray" ? "text-neutral-500" : color === "cyan" ? "text-[#1e1b4b]/70" : "text-white/75"}`}>
         {label}
       </div>
       <div className={`font-bold text-sm mt-0.5 leading-tight ${color === "cyan" ? "text-[#1e1b4b]" : ""}`}>{title}</div>
-    </div>
+      {active && <div className="text-[9px] font-black uppercase tracking-widest text-cyan-300 mt-1">● Tu Plan</div>}
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button onClick={onClick} data-testid={testid} className={`${base} ${styles} ${activeRing} text-left`}>
+        {content}
+      </button>
+    );
+  }
+  return <div className={`${base} ${styles}`} data-testid={testid}>{content}</div>;
 }
 
 export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [overview, setOverview] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    if (user) api.get("/dashboard/overview").then((r) => setOverview(r.data)).catch(() => {});
+  }, [user?.id]);
 
   if (!user) return null;
 
@@ -118,7 +139,11 @@ export default function Layout({ children }) {
 
   const pageTitle = ROUTE_TITLES[location.pathname] || "";
   const initials = (user.name || user.email).split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const clientCode = user.empresa || "ENERED PERÚ";
+  const currentPlan = overview?.plan || "tracking";
+  const clienteLabel = overview && overview.ruc
+    ? `${overview.empresa} - ${overview.ruc}`
+    : (overview?.empresa || user.empresa || "ENERED PERÚ");
+  const openWA = () => window.open(WA_LINK, "_blank");
 
   const SidebarContent = () => (
     <>
@@ -243,12 +268,12 @@ export default function Layout({ children }) {
       {/* Planes row */}
       <div className="md:ml-28 px-4 md:px-8 py-4 bg-white border-b border-neutral-100">
         <div className="flex gap-3 overflow-x-auto pb-1" data-testid="plan-cards">
-          <PlanCard label="Cliente" title={clientCode} color="gray" testid="plan-cliente" />
-          <PlanCard label="Tipo de Producto" title="Flotas" color="gray" testid="plan-producto" />
-          <PlanCard label="Ahorro Combustible" title="Plan Tracking" color="violet" testid="plan-tracking" />
-          <PlanCard label="Ahorro Integral" title="Plan Advanced" color="violetDark" testid="plan-advanced" />
-          <PlanCard label="Control Total 360" title="Plan Integral" color="violet" testid="plan-integral" />
-          <PlanCard label="Prueba Gratis" title="¡Optimiza tu Flota!" color="cyan" testid="plan-prueba" />
+          <PlanCard label="Cliente" title={clienteLabel} color="gray" testid="plan-cliente" wide />
+          <PlanCard label="Tipo de Producto" title="Flotas" color="gray" testid="plan-producto" wide />
+          <PlanCard label="Ahorro Combustible" title="Plan Tracking" color="violet" testid="plan-tracking" onClick={openWA} active={currentPlan === "tracking"} />
+          <PlanCard label="Ahorro Integral" title="Plan Advanced" color="violetDark" testid="plan-advanced" onClick={openWA} active={currentPlan === "advanced"} />
+          <PlanCard label="Control Total 360" title="Plan Integral" color="violet" testid="plan-integral" onClick={openWA} active={currentPlan === "integral"} />
+          <PlanCard label="Prueba Gratis" title="¡Optimiza tu Flota!" color="cyan" testid="plan-prueba" onClick={openWA} />
         </div>
       </div>
 
