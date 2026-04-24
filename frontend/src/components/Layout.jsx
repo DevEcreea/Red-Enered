@@ -43,11 +43,11 @@ function SidebarLink({ item, onClick }) {
   const content = (active) => (
     <>
       <div className="relative">
-        <Ic className={`w-6 h-6 mb-1.5 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+        <Ic className={`w-5 h-5 mb-1 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
       </div>
-      <span className={`text-[11px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
+      <span className={`text-[10px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
-        <span className={`mt-1.5 px-2 py-0.5 rounded-full text-[8px] font-black tracking-wider ${
+        <span className={`mt-1 px-1.5 py-0.5 rounded-full text-[7px] font-black tracking-wider ${
           item.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
         }`}>
           {item.badge}
@@ -59,7 +59,7 @@ function SidebarLink({ item, onClick }) {
   if (item.disabled) {
     return (
       <div
-        className="flex flex-col items-center justify-center py-3 px-2 rounded-xl opacity-60 cursor-not-allowed"
+        className="flex flex-col items-center justify-center py-2 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
         data-testid={item.testid}
       >
         {content(false)}
@@ -73,7 +73,7 @@ function SidebarLink({ item, onClick }) {
       onClick={onClick}
       data-testid={item.testid}
       className={({ isActive }) =>
-        `flex flex-col items-center justify-center py-3 px-2 rounded-xl transition-all ${
+        `flex flex-col items-center justify-center py-2 px-1.5 rounded-lg transition-all ${
           isActive ? "bg-white/15 shadow-inner" : "hover:bg-white/10"
         }`
       }
@@ -123,30 +123,30 @@ export default function Layout({ children }) {
   const SidebarContent = () => (
     <>
       {/* Logo + tagline */}
-      <div className="px-4 pt-7 pb-5 text-center">
+      <div className="px-3 pt-4 pb-3 text-center flex-shrink-0">
         <img
           src={LOGO_IMG}
           alt="ENERED"
-          className="h-9 w-auto mx-auto"
+          className="h-7 w-auto mx-auto"
           style={{ filter: "brightness(0) invert(1)" }}
         />
-        <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-white/70 mt-2">
-          Red inteligente de energías
+        <div className="text-[8px] font-semibold uppercase tracking-[0.18em] text-white/70 mt-1.5 leading-tight">
+          Red inteligente<br />de energías
         </div>
       </div>
 
       {/* Divider */}
-      <div className="mx-6 h-px bg-white/15 mb-3" />
+      <div className="mx-5 h-px bg-white/15 mb-1 flex-shrink-0" />
 
-      <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto" data-testid="sidebar-nav">
+      <nav className="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto" data-testid="sidebar-nav">
         {items.map((item) => (
           <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
         ))}
 
         {isAdmin && (
           <>
-            <div className="mx-2 mt-4 mb-2 pt-4 border-t border-white/15 text-[9px] font-bold uppercase tracking-widest text-white/60 text-center">
-              Administración
+            <div className="mx-2 mt-2 mb-1 pt-2 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
+              Admin
             </div>
             {ADMIN_ITEMS.map((item) => (
               <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
@@ -156,14 +156,14 @@ export default function Layout({ children }) {
       </nav>
 
       {/* Logout */}
-      <div className="px-3 py-3 border-t border-white/15">
+      <div className="px-2 py-2 border-t border-white/15 flex-shrink-0">
         <button
           onClick={handleLogout}
-          className="w-full flex flex-col items-center justify-center py-3 rounded-xl hover:bg-white/10 transition-colors"
+          className="w-full flex flex-col items-center justify-center py-2 rounded-lg hover:bg-white/10 transition-colors"
           data-testid="logout-btn"
         >
-          <LogOut className="w-5 h-5 text-white/80 mb-1" strokeWidth={1.75} />
-          <span className="text-[11px] font-semibold text-white/90">Salir</span>
+          <LogOut className="w-4 h-4 text-white/80 mb-0.5" strokeWidth={1.75} />
+          <span className="text-[10px] font-semibold text-white/90">Salir</span>
         </button>
       </div>
     </>
