@@ -151,63 +151,89 @@ export default function Facturacion() {
         )}
       </div>
 
-      {/* CARD PRINCIPAL: KPIs + Donut */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-        <div className="lg:col-span-3 bg-white border border-neutral-200 rounded-2xl p-6">
+      {/* CARD PRINCIPAL: KPIs + Donut a la izquierda · 4 botones violetas verticales a la derecha */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
+        <div className="bg-white border border-neutral-200 rounded-2xl p-6">
           <h2 className="font-cabinet font-black text-2xl text-brand mb-5">Estado de Cuenta</h2>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5">
-            <KpiRow label="Línea de Crédito Total" value={formatSoles(state.linea_credito_total)} testid="ec-linea-total" />
-            <KpiRow label="Disponible (Libre)" value={formatSoles(state.disponible)} testid="ec-disponible" highlight />
-            <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
-            <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
-            <KpiRow label="Total Facturado" value={formatSoles(state.total_facturado)} testid="ec-total-facturado" />
-            <KpiRow label="% Línea Utilizada" value={`${state.pct_utilizada}%`} testid="ec-pct" />
-            <KpiRow label="Total Vencido" value={formatSoles(state.total_vencido)} testid="ec-vencido" danger={state.total_vencido > 0} />
-            <KpiRow label="Condición de Pago Crédito" value={`${state.dias_credito} días`} testid="ec-dias-credito" />
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-center">
+            {/* KPIs en 2 columnas con divisores */}
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-x-10">
+                <KpiRow label="Línea de Crédito Total" value={formatSoles(state.linea_credito_total)} testid="ec-linea-total" />
+                <KpiRow label="Disponible (Libre)" value={formatSoles(state.disponible)} testid="ec-disponible" highlight />
+              </div>
+              <div className="border-t border-neutral-200" />
+              <div className="grid grid-cols-2 gap-x-10">
+                <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
+                <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
+              </div>
+              <div className="border-t border-neutral-200" />
+              <div className="grid grid-cols-2 gap-x-10">
+                <KpiRow label="Total Facturado" value={formatSoles(state.total_facturado)} testid="ec-total-facturado" />
+                <KpiRow label="% Línea Utilizada" value={`${state.pct_utilizada}%`} testid="ec-pct" />
+              </div>
+              <div className="border-t border-neutral-200" />
+              <div className="grid grid-cols-2 gap-x-10">
+                <KpiRow label="Total Vencido" value={formatSoles(state.total_vencido)} testid="ec-vencido" danger={state.total_vencido > 0} />
+                <KpiRow label="Condición de Pago Crédito" value={`${state.dias_credito} días`} testid="ec-dias-credito" />
+              </div>
+            </div>
+
+            {/* Donut a la derecha del card */}
+            <div className="relative w-full h-[280px]" data-testid="ec-donut">
+              {donutData.length === 0 ? (
+                <div className="text-sm text-neutral-400 text-center pt-20">Sin datos</div>
+              ) : (
+                <>
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={donutData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={70}
+                        outerRadius={130}
+                        paddingAngle={1}
+                        startAngle={90}
+                        endAngle={-270}
+                        stroke="#fff"
+                        strokeWidth={3}
+                      >
+                        {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex items-start justify-center pt-6 pointer-events-none">
+                    <div className="font-cabinet font-black text-base text-white drop-shadow-md">
+                      {formatSoles(state.linea_credito_total)}
+                    </div>
+                  </div>
+                  {/* Etiquetas de los segmentos pequeños */}
+                  <div className="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none">
+                    {donutData.filter((d) => d.name !== "Disponible").map((d) => (
+                      <div key={d.name} className="text-[10px] font-bold flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
+                        <span className="text-neutral-700">{d.name}: <b>{formatSoles(d.value)}</b></span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Donut */}
-        <div className="bg-white border border-neutral-200 rounded-2xl p-6 flex items-center justify-center" data-testid="ec-donut">
-          {donutData.length === 0 ? (
-            <div className="text-sm text-neutral-400 text-center">Sin datos para graficar</div>
-          ) : (
-            <div className="relative w-full h-full min-h-[260px]">
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={donutData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                  >
-                    {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="text-center">
-                  <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Total</div>
-                  <div className="font-cabinet font-black text-lg text-neutral-900">{formatSoles(state.linea_credito_total)}</div>
-                </div>
-              </div>
-            </div>
-          )}
+        {/* Acciones laterales (columna vertical) */}
+        <div className="flex flex-col gap-4">
+          <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
+          <ActionCardEmail onClick={(email) => { setEmailInput(email); setComingSoon("email"); }} testid="ec-action-email" />
+          <ActionCardLarge onClick={() => setComingSoon("historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
+          <ActionCardLarge onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a realizar el pago masivo de tus facturas" body="Conoce cómo hacerlo paso a paso" cta="Aprende cómo" testid="ec-action-aprende" />
         </div>
-      </div>
-
-      {/* Acciones laterales */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
-        <ActionCard onClick={() => setComingSoon("email")} icon={Mail} title="Enviar estado" subtitle="por correo" testid="ec-action-email" />
-        <ActionCard onClick={() => setComingSoon("historial")} icon={Search} title="Consulta tu" subtitle="historial" testid="ec-action-historial" />
-        <ActionCard onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a pagar" subtitle="tus facturas" testid="ec-action-aprende" />
       </div>
 
       {/* TABLA DE DOCUMENTOS */}
@@ -343,13 +369,53 @@ function ActionCard({ onClick, icon: Icon, title, subtitle, testid }) {
     <button
       onClick={onClick}
       data-testid={testid}
-      className="bg-brand text-white rounded-2xl p-4 flex items-center justify-between hover:bg-brand-hover transition-all hover:-translate-y-0.5 shadow-sm hover:shadow-md text-left"
+      className="bg-brand text-white rounded-2xl p-5 flex items-start justify-between gap-3 hover:bg-brand-hover transition-all hover:-translate-y-0.5 shadow-sm hover:shadow-md text-left min-h-[110px]"
     >
       <div>
-        <div className="font-cabinet font-bold text-sm leading-tight">{title}</div>
-        <div className="text-xs text-white/85 leading-tight">{subtitle}</div>
+        <div className="font-cabinet font-bold text-base leading-tight">{title}</div>
+        <div className="text-sm text-white/85 leading-tight mt-0.5">{subtitle}</div>
       </div>
-      <Icon className="w-6 h-6 text-white/90" strokeWidth={2} />
+      <Icon className="w-7 h-7 text-white/95 flex-shrink-0" strokeWidth={1.75} />
     </button>
+  );
+}
+
+function ActionCardEmail({ onClick, testid }) {
+  const [email, setEmail] = React.useState("");
+  return (
+    <div data-testid={testid} className="bg-brand text-white rounded-2xl p-5 min-h-[110px]">
+      <div className="font-cabinet font-bold text-base leading-tight mb-3">Enviar estado de cuenta</div>
+      <div className="flex items-stretch gap-0 rounded-md overflow-hidden bg-white/10">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Ingresa el Correo"
+          className="flex-1 h-9 px-3 bg-white text-neutral-800 text-xs font-medium outline-none placeholder:text-neutral-400"
+        />
+        <button
+          onClick={() => onClick && onClick(email)}
+          className="px-3 h-9 bg-[#5A1E96] text-white text-xs font-bold hover:bg-[#4A1880]"
+        >
+          Enviar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActionCardLarge({ onClick, icon: Icon, title, body, cta, testid }) {
+  return (
+    <div data-testid={testid} className="bg-brand text-white rounded-2xl p-5 min-h-[140px] flex flex-col">
+      <div className="font-cabinet font-bold text-base leading-tight mb-1.5">{title}</div>
+      <div className="text-xs text-white/80 leading-snug flex-1">{body}</div>
+      <button
+        onClick={onClick}
+        className="mt-3 self-start h-8 px-3 rounded-md bg-[#5A1E96] hover:bg-[#4A1880] text-white text-xs font-bold flex items-center gap-1.5"
+      >
+        <Icon className="w-3.5 h-3.5" strokeWidth={2} />
+        {cta}
+      </button>
+    </div>
   );
 }
