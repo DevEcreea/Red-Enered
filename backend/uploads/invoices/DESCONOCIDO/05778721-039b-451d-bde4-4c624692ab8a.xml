@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<ar:ApplicationResponse xmlns:ar="urn:oasis:names:specification:ubl:schema:xsd:ApplicationResponse-2" xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+  <ext:UBLExtensions>
+    <ext:UBLExtension>
+      <ext:ExtensionContent><Signature Id="SignDigiflowOSEPROD_PERU" xmlns="http://www.w3.org/2000/09/xmldsig#"><SignedInfo><CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#WithComments" /><SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256" /><Reference URI=""><Transforms><Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature" /></Transforms><DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256" /><DigestValue>F5OnX0FeZYbwnDDV2kq3V73hMyv/S4/DG7jjieSQbK0=</DigestValue></Reference></SignedInfo><SignatureValue>o+ZKubnX8/mF8r/FWl/tINbU2dJJ1JI3jidQKsY8ZFF7yYE18kf7O2aRFKPX+7Ghs4LTvPpZx3uSBI18SDj/6fQJPRBCYSdqhnf8g9wrCLM29f55ymmqiQ1pSy35QpDn0KhQY9rQysAdouGaZhbN0kH8LDMAowLBufXJUnZsJnOaZqIYg/j7qrK7rbUQ9SJuaXGieebR6n3ya577oDJ6LSq8nGivrPdaG+p6MIq59ebrJg0rmawiWtcCUuy0yNoWwlXNEfH9Q7+FYQDyVvvj69kdeMl2hvWc/CdxIc8EVNY5VECJU0O0DKcsZo8TudbNUnSkJzfybIr7I5aXU1mCrQ==</SignatureValue><KeyInfo><X509Data><X509Certificate>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</X509Certificate></X509Data></KeyInfo></Signature></ext:ExtensionContent>
+    </ext:UBLExtension>
+  </ext:UBLExtensions>
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:CustomizationID>1.0</cbc:CustomizationID>
+  <cbc:ID>05778721-039b-451d-bde4-4c624692ab8a</cbc:ID>
+  <cbc:IssueDate>2026-01-27</cbc:IssueDate>
+  <cbc:IssueTime>10:33:02.52992</cbc:IssueTime>
+  <cbc:ResponseDate>2026-01-27</cbc:ResponseDate>
+  <cbc:ResponseTime>10:33:02.54555</cbc:ResponseTime>
+  <cac:SenderParty>
+    <cac:PartyLegalEntity>
+      <cbc:CompanyID schemeID="6" schemeAgencyName="PE:SUNAT" schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo6">20600948131</cbc:CompanyID>
+    </cac:PartyLegalEntity>
+  </cac:SenderParty>
+  <cac:ReceiverParty>
+    <cac:PartyLegalEntity>
+      <cbc:CompanyID schemeID="6" schemeAgencyName="PE:SUNAT" schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo6">20600948131</cbc:CompanyID>
+    </cac:PartyLegalEntity>
+  </cac:ReceiverParty>
+  <cac:DocumentResponse>
+    <cac:Response>
+      <cbc:ResponseCode listAgencyName="PE:SUNAT">0</cbc:ResponseCode>
+      <cbc:Description>La factura numero 20609304082-01-F003-00000039, ha sido aceptada</cbc:Description>
+    </cac:Response>
+    <cac:DocumentReference>
+      <cbc:ID>F003-00000039</cbc:ID>
+      <cbc:IssueDate>2026-01-27</cbc:IssueDate>
+      <cbc:IssueTime>00:00:00.00000</cbc:IssueTime>
+      <cbc:DocumentTypeCode>01</cbc:DocumentTypeCode>
+      <cac:Attachment>
+        <cac:ExternalReference>
+          <cbc:DocumentHash>1qtsyXT6uLWuDWo3QXWP0I6LDP4=</cbc:DocumentHash>
+        </cac:ExternalReference>
+      </cac:Attachment>
+    </cac:DocumentReference>
+    <cac:IssuerParty>
+      <cac:PartyLegalEntity>
+        <cbc:CompanyID schemeID="6">20609304082</cbc:CompanyID>
+      </cac:PartyLegalEntity>
+    </cac:IssuerParty>
+    <cac:RecipientParty>
+      <cac:PartyLegalEntity>
+        <cbc:CompanyID schemeID="6">20440382003</cbc:CompanyID>
+      </cac:PartyLegalEntity>
+    </cac:RecipientParty>
+  </cac:DocumentResponse>
+</ar:ApplicationResponse>

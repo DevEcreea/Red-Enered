@@ -1213,6 +1213,16 @@ async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_
     return {"ok": True}
 
 
+@api.post("/admin/invoices/{inv_id}/reassign")
+async def admin_invoice_reassign(inv_id: str, empresa: str = Form(...),
+                                  user: dict = Depends(require_roles("admin_enered"))):
+    """Reasigna una factura existente a otra empresa (corrige matching incorrecto)."""
+    res = await db.invoices.update_one({"id": inv_id}, {"$set": {"empresa": empresa}})
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
+
 # ---------- Control Integral ----------
 @api.get("/control-requests")
 async def list_control(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
@@ -1392,11 +1402,14 @@ def _safe_doc(name: str) -> str:
 @api.post("/admin/invoices/upload-bulk")
 async def admin_invoices_upload_bulk(
     files: List[UploadFile] = File(...),
+    empresa_override: Optional[str] = Form(None),
     user: dict = Depends(require_roles("admin_enered")),
 ):
     """Bulk upload pairs of PDF + XML files. Files are matched by basename
     (e.g. F001-123.pdf + F001-123.xml). Each XML is parsed (SUNAT UBL 2.1) to
     extract invoice metadata. Empresa is matched by RUC against empresas_config.
+    If empresa_override is provided, all uploaded invoices are assigned to that
+    empresa (skips RUC matching).
     """
     by_base: dict = {}
     for f in files:
@@ -1407,11 +1420,28 @@ async def admin_invoices_upload_bulk(
 
     saved: List[dict] = []
     skipped: List[dict] = []
-    rucs_to_empresa = {}
+
+    # Build matching maps from empresas_config
+    rucs_to_empresa: dict = {}
+    name_to_empresa: dict = {}
+
+    def _clean_name(n: str) -> str:
+        """Lowercase, strip punctuation and corporate suffixes for fuzzy match."""
+        if not n: return ""
+        s = str(n).upper()
+        s = "".join(c for c in s if c.isalnum() or c == " ")
+        for suf in [" SAC", " S A C", " EIRL", " E I R L", " SA", " S A", " SRL", " S R L"]:
+            if s.endswith(suf):
+                s = s[: -len(suf)]
+        return " ".join(s.split())
+
     cfgs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
     for c in cfgs:
         if c.get("ruc"):
-            rucs_to_empresa[str(c["ruc"]).strip()] = c["empresa"]
+            ruc_clean = str(c["ruc"]).strip().lstrip("0")
+            rucs_to_empresa[ruc_clean] = c["empresa"]
+        if c.get("empresa"):
+            name_to_empresa[_clean_name(c["empresa"])] = c["empresa"]
 
     for base, parts in by_base.items():
         if "xml" not in parts:
@@ -1424,8 +1454,28 @@ async def admin_invoices_upload_bulk(
             skipped.append({"base": base, "reason": f"XML no parseable: {e}"})
             continue
 
-        ruc = (meta.get("ruc_cliente") or "").strip()
-        empresa = rucs_to_empresa.get(ruc) or meta.get("razon_social_cliente") or "DESCONOCIDO"
+        # Resolve empresa: override > RUC match > razón social fuzzy match
+        empresa = None
+        match_source = "none"
+        if empresa_override:
+            empresa = empresa_override
+            match_source = "override"
+        else:
+            ruc = (meta.get("ruc_cliente") or "").strip().lstrip("0")
+            if ruc and ruc in rucs_to_empresa:
+                empresa = rucs_to_empresa[ruc]
+                match_source = "ruc"
+            else:
+                rs_clean = _clean_name(meta.get("razon_social_cliente") or "")
+                if rs_clean and rs_clean in name_to_empresa:
+                    empresa = name_to_empresa[rs_clean]
+                    match_source = "razon_social"
+        if not empresa:
+            skipped.append({
+                "base": base,
+                "reason": f"No se encontró empresa para RUC={meta.get('ruc_cliente')!r} / Razón={meta.get('razon_social_cliente')!r}. Configura el RUC en 'Configuración por empresa' o usa el dropdown 'Asignar a empresa'.",
+            })
+            continue
 
         # Save files
         empresa_dir = INV_DIR / _safe_doc(empresa)
@@ -1486,7 +1536,7 @@ async def admin_invoices_upload_bulk(
         else:
             await db.invoices.insert_one(record)
 
-        saved.append({"n_doc": n_doc, "empresa": empresa, "estado": estado})
+        saved.append({"n_doc": n_doc, "empresa": empresa, "estado": estado, "match": match_source})
 
     return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
 

@@ -389,6 +389,12 @@ function InvoicesBulkUpload() {
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
+  const [empresas, setEmpresas] = useState([]);
+  const [overrideEmpresa, setOverrideEmpresa] = useState("");
+
+  useEffect(() => {
+    api.get("/empresas-config").then((r) => setEmpresas((r.data || []).map((c) => c.empresa))).catch(() => {});
+  }, []);
 
   const handleFiles = (selected) => {
     const arr = Array.from(selected || []);
@@ -403,6 +409,7 @@ function InvoicesBulkUpload() {
     try {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f));
+      if (overrideEmpresa) fd.append("empresa_override", overrideEmpresa);
       const { data } = await api.post("/admin/invoices/upload-bulk", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -425,6 +432,21 @@ function InvoicesBulkUpload() {
           <h3 className="font-cabinet font-bold text-lg text-neutral-900">Carga masiva de facturas</h3>
           <p className="text-xs text-neutral-500 mt-1">Adjunta los pares <b>PDF + XML</b> generados por tu facturador. Se parsea el XML SUNAT y se asigna a la empresa por <b>RUC</b>.</p>
         </div>
+      </div>
+
+      <div className="mb-4">
+        <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
+          Asignar a empresa <span className="text-neutral-400 font-medium normal-case tracking-normal">(opcional — si no, se intenta por RUC del XML)</span>
+        </label>
+        <select
+          value={overrideEmpresa}
+          onChange={(e) => setOverrideEmpresa(e.target.value)}
+          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold w-full max-w-md"
+          data-testid="invoices-empresa-override"
+        >
+          <option value="">— Auto (por RUC) —</option>
+          {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+        </select>
       </div>
 
       <label className="block border-2 border-dashed border-cyan-200 rounded-xl bg-cyan-50/40 hover:bg-cyan-50 p-8 text-center cursor-pointer transition-colors" data-testid="invoices-dropzone">
@@ -467,7 +489,11 @@ function InvoicesBulkUpload() {
           {result.saved?.length > 0 && (
             <div className="text-xs text-neutral-600 space-y-0.5 max-h-40 overflow-y-auto">
               {result.saved.map((s, i) => (
-                <div key={i} className="font-mono">• <b>{s.n_doc}</b> → {s.empresa} <span className={`ml-2 ${s.estado === "vencido" ? "text-red-600" : "text-amber-600"}`}>[{s.estado}]</span></div>
+                <div key={i} className="font-mono">
+                  • <b>{s.n_doc}</b> → {s.empresa}
+                  <span className="ml-2 text-[10px] text-neutral-400">[match: {s.match || "?"}]</span>
+                  <span className={`ml-2 ${s.estado === "vencido" ? "text-red-600" : "text-amber-600"}`}>[{s.estado}]</span>
+                </div>
               ))}
             </div>
           )}
