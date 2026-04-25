@@ -113,20 +113,20 @@ class TestDashboard:
         r = requests.get(f"{API}/dashboard/kpis", headers=_headers(admin_token), timeout=30)
         assert r.status_code == 200
         d = r.json()
-        for k in ["kpis", "top_placas", "ciudades", "productos", "estaciones", "tendencia"]:
+        # Updated contract: top-level keys (totals, series_semana, top_placas_consumo, consumo_ciudad, consumo_estacion)
+        for k in ["totals", "series_semana", "top_placas_consumo", "consumo_ciudad", "consumo_estacion"]:
             assert k in d, f"missing key {k}"
         for sk in ["total_gal", "total_gasto", "total_ahorro", "cargas"]:
-            assert sk in d["kpis"]
-        assert isinstance(d["top_placas"], list)
-        assert d["kpis"]["cargas"] > 0  # seed data present
+            assert sk in d["totals"], f"missing totals.{sk}"
+        assert isinstance(d["top_placas_consumo"], list)
+        assert d["totals"]["cargas"] > 0
 
     def test_kpis_tenant_isolation_logistica(self, logistica_token, admin_token):
         r_log = requests.get(f"{API}/dashboard/kpis", headers=_headers(logistica_token), timeout=30)
         r_adm = requests.get(f"{API}/dashboard/kpis", headers=_headers(admin_token), timeout=30)
         assert r_log.status_code == 200 and r_adm.status_code == 200
-        # Tenant user should see <= admin's totals
-        assert r_log.json()["kpis"]["cargas"] <= r_adm.json()["kpis"]["cargas"]
-        assert r_log.json()["kpis"]["cargas"] > 0
+        assert r_log.json()["totals"]["cargas"] <= r_adm.json()["totals"]["cargas"]
+        assert r_log.json()["totals"]["cargas"] > 0
 
     def test_alerts_returns_list(self, admin_token):
         r = requests.get(f"{API}/dashboard/alerts", headers=_headers(admin_token), timeout=30)

@@ -1,22 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Truck, Satellite, PieChart, Receipt, ShieldCheck, GraduationCap,
+  LayoutDashboard, ClipboardList, FileBarChart, QrCode, Satellite, PieChart, Receipt, ShieldCheck, GraduationCap,
   LifeBuoy, Users, Upload, LogOut, Menu, Search, Bell, Mail,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { ROLE_LABEL } from "../lib/utils";
 
-const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
+const LOGO_IMG = "/assets/enered-logo.png";
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
 const MENU = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
-  { to: "/reportes", label: "Flotas", icon: Truck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
-  { to: "/centro-monitoreo", label: "Centro Monitoreo", icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMAMENTE", badgeColor: "cyan", disabled: true },
-  { to: "/analitica", label: "Analítics", icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
-  { to: "/facturacion", label: "Estado de Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
+  { to: "/reportes", label: "Control Integral", icon: ClipboardList, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-control-integral" },
+  { to: "/reportes-consumo", label: "Reportes Consumo", icon: FileBarChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-reportes-consumo" },
+  { to: "/qr", label: "Descarga tus QR", icon: QrCode, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-qr" },
+  { to: "/centro-monitoreo", label: "Centro Monitoreo", icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
+  { to: "/analitica", label: "Analítica", icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
+  { to: "/facturacion", label: "Estado Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
   { to: "/control", label: "Seguridad", icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica"], testid: "nav-seguridad" },
   { to: "/capacitacion", label: "Capacitación", icon: GraduationCap, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-capacitacion" },
   { to: "/soporte", label: "Soporte", icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
@@ -24,20 +26,24 @@ const MENU = [
 
 const ADMIN_ITEMS = [
   { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
-  { to: "/admin/upload", label: "Fuente de Datos", icon: Upload, testid: "nav-upload" },
+  { to: "/admin/upload", label: "Fuente Datos", icon: Upload, testid: "nav-upload" },
+  { to: "/admin/qr", label: "Carga QR", icon: QrCode, testid: "nav-qr-admin" },
 ];
 
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
-  "/reportes": "Flotas",
+  "/reportes": "Control Integral",
+  "/reportes-consumo": "Reportes de Consumo",
+  "/qr": "Descarga tus QR",
   "/centro-monitoreo": "Centro Monitoreo",
-  "/analitica": "Analítics",
+  "/analitica": "Analítica",
   "/facturacion": "Estado de Cuenta",
   "/control": "Seguridad",
   "/capacitacion": "Capacitación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
   "/admin/upload": "Fuente de Datos",
+  "/admin/qr": "Carga Masiva de QR",
 };
 
 function SidebarLink({ item, onClick }) {
@@ -45,11 +51,11 @@ function SidebarLink({ item, onClick }) {
   const content = (active) => (
     <>
       <div className="relative">
-        <Ic className={`w-5 h-5 mb-1 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+        <Ic className={`w-5 h-5 mb-0.5 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
       </div>
-      <span className={`text-[10px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
+      <span className={`text-[9.5px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
-        <span className={`mt-1 px-1.5 py-0.5 rounded-full text-[7px] font-black tracking-wider ${
+        <span className={`mt-0.5 px-1 py-0.5 rounded-full text-[7px] font-black tracking-wider ${
           item.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
         }`}>
           {item.badge}
@@ -61,7 +67,7 @@ function SidebarLink({ item, onClick }) {
   if (item.disabled) {
     return (
       <div
-        className="flex flex-col items-center justify-center py-2 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
+        className="flex flex-col items-center justify-center py-1.5 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
         data-testid={item.testid}
       >
         {content(false)}
@@ -75,7 +81,7 @@ function SidebarLink({ item, onClick }) {
       onClick={onClick}
       data-testid={item.testid}
       className={({ isActive }) =>
-        `flex flex-col items-center justify-center py-2 px-1.5 rounded-lg transition-all ${
+        `flex flex-col items-center justify-center py-1.5 px-1.5 rounded-lg transition-all ${
           isActive ? "bg-white/15 shadow-inner" : "hover:bg-white/10"
         }`
       }
@@ -148,15 +154,13 @@ export default function Layout({ children }) {
   const SidebarContent = () => (
     <>
       {/* Logo + tagline */}
-      <div className="px-3 pt-4 pb-3 text-center flex-shrink-0">
-        <img
-          src={LOGO_IMG}
-          alt="ENERED"
-          className="h-7 w-auto mx-auto"
-          style={{ filter: "brightness(0) invert(1)" }}
-        />
-        <div className="text-[8px] font-semibold uppercase tracking-[0.18em] text-white/70 mt-1.5 leading-tight">
-          Red inteligente<br />de energías
+      <div className="px-2 pt-3 pb-2 text-center flex-shrink-0">
+        <div className="w-20 h-20 mx-auto rounded-xl overflow-hidden bg-white/0 flex items-center justify-center">
+          <img
+            src={LOGO_IMG}
+            alt="ENERED"
+            className="w-full h-full object-contain"
+          />
         </div>
       </div>
 

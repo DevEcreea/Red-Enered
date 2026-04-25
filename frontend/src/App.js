@@ -16,6 +16,9 @@ import Soporte from "./pages/Soporte";
 import Analitica from "./pages/Analitica";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
+import AdminQRUpload from "./pages/AdminQRUpload";
+import ReportesConsumo from "./pages/ReportesConsumo";
+import QRDescarga from "./pages/QRDescarga";
 
 function Shell({ children, roles }) {
   return (
@@ -36,6 +39,8 @@ function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Shell><Dashboard /></Shell>} />
           <Route path="/reportes" element={<Shell><Reportes /></Shell>} />
+          <Route path="/reportes-consumo" element={<Shell><ReportesConsumo /></Shell>} />
+          <Route path="/qr" element={<Shell><QRDescarga /></Shell>} />
           <Route path="/analitica" element={<Shell><Analitica /></Shell>} />
           <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
           <Route path="/control" element={<Shell roles={["admin_enered", "administrador", "logistica"]}><ControlIntegral /></Shell>} />
@@ -43,6 +48,7 @@ function App() {
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
+          <Route path="/admin/qr" element={<Shell roles={["admin_enered"]}><AdminQRUpload /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

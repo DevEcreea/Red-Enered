@@ -351,6 +351,7 @@ async def list_consumptions(
     ciudad: Optional[str] = None,
     estacion: Optional[str] = None,
     producto: Optional[str] = None,
+    semana: Optional[str] = None,
     limit: int = 2000,
 ):
     q = tenant_filter(user)
@@ -368,6 +369,8 @@ async def list_consumptions(
         q["ESTACION"] = estacion
     if producto:
         q["PRODUCTO"] = producto
+    if semana:
+        q["SEMANA"] = semana
     rows = await db.consumptions.find(q, {"_id": 0}).sort("FECHA", -1).to_list(limit)
     return rows
 
@@ -617,17 +620,21 @@ async def dashboard_kpis(
 
     # ---- Ciudad / Estación ----
     ciudades = {}
+    ciudades_gasto = {}
     est_consumo = {}
+    est_gasto = {}
     est_ahorro = {}
     for r in rows:
         c = r.get("CIUDAD", "Sin ciudad")
         ciudades[c] = ciudades.get(c, 0) + _f(r.get("CANTIDAD_GL"))
+        ciudades_gasto[c] = ciudades_gasto.get(c, 0) + _f(r.get("IMPORTE_TOTAL"))
         e = r.get("ESTACION", "Sin estación")
         est_consumo[e] = est_consumo.get(e, 0) + _f(r.get("CANTIDAD_GL"))
+        est_gasto[e] = est_gasto.get(e, 0) + _f(r.get("IMPORTE_TOTAL"))
         est_ahorro[e] = est_ahorro.get(e, 0) + _f(r.get("AHORRO"))
 
-    consumo_ciudad = [{"ciudad": c, "galones": round(v, 2)} for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]]
-    consumo_estacion = [{"estacion": e, "galones": round(v, 2)} for e, v in sorted(est_consumo.items(), key=lambda x: -x[1])[:10]]
+    consumo_ciudad = [{"ciudad": c, "galones": round(v, 2), "gasto": round(ciudades_gasto.get(c, 0), 2)} for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]]
+    consumo_estacion = [{"estacion": e, "galones": round(v, 2), "gasto": round(est_gasto.get(e, 0), 2)} for e, v in sorted(est_consumo.items(), key=lambda x: -x[1])[:10]]
     ahorro_estacion = [{"estacion": e, "ahorro": round(v, 2)} for e, v in sorted(est_ahorro.items(), key=lambda x: -x[1])[:10]]
 
     # ---- Producto ----
@@ -1307,6 +1314,115 @@ async def submit_course(cid: str, data: CourseSubmit, user: dict = Depends(get_c
 async def my_results(user: dict = Depends(get_current_user)):
     rows = await db.course_results.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
     return rows
+
+
+# ---------- QR Code Bulk Upload / Download ----------
+QR_DIR = ROOT_DIR / "uploads" / "qr"
+QR_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _safe_placa(name: str) -> str:
+    """Sanitize placa filename: alphanumeric, dash, underscore only."""
+    base = name.rsplit(".", 1)[0].strip().upper()
+    return "".join(c for c in base if c.isalnum() or c in ("-", "_"))
+
+
+@api.post("/admin/qr/upload-bulk")
+async def admin_qr_upload_bulk(
+    empresa: str = Form(...),
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    """Bulk upload QR images. Filename format: [PLACA].png/jpg/etc.
+    Each file is associated with the placa (filename without extension)."""
+    if not empresa:
+        raise HTTPException(status_code=400, detail="empresa es requerida")
+
+    empresa_dir = QR_DIR / _safe_placa(empresa)
+    empresa_dir.mkdir(parents=True, exist_ok=True)
+
+    saved: List[dict] = []
+    skipped: List[dict] = []
+
+    for f in files:
+        try:
+            placa = _safe_placa(f.filename)
+            if not placa:
+                skipped.append({"file": f.filename, "reason": "nombre inválido"})
+                continue
+            ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else "png"
+            if ext not in ("png", "jpg", "jpeg", "webp", "svg"):
+                skipped.append({"file": f.filename, "reason": "extensión no soportada"})
+                continue
+            content = await f.read()
+            if len(content) > 5 * 1024 * 1024:
+                skipped.append({"file": f.filename, "reason": "supera 5MB"})
+                continue
+            target = empresa_dir / f"{placa}.{ext}"
+            with open(target, "wb") as out:
+                out.write(content)
+            # Upsert in mongo
+            await db.qr_codes.update_one(
+                {"empresa": empresa, "placa": placa},
+                {"$set": {
+                    "empresa": empresa,
+                    "placa": placa,
+                    "filename": target.name,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "uploaded_by": user["email"],
+                }},
+                upsert=True,
+            )
+            saved.append({"placa": placa, "file": target.name})
+        except Exception as e:
+            skipped.append({"file": f.filename, "reason": str(e)})
+
+    return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
+
+
+@api.get("/qr/list")
+async def qr_list(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    """List QR codes available to current user (filtered by empresa for non-admin)."""
+    q: dict = {}
+    if user["role"] != "admin_enered":
+        q["empresa"] = user.get("empresa")
+    elif empresa:
+        q["empresa"] = empresa
+    rows = await db.qr_codes.find(q, {"_id": 0}).sort("placa", 1).to_list(2000)
+    return rows
+
+
+@api.get("/qr/download/{placa}")
+async def qr_download(placa: str, user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    """Download QR for a specific placa. Validates empresa for non-admin users."""
+    from fastapi.responses import FileResponse
+    placa = _safe_placa(placa)
+    target_empresa = empresa if user["role"] == "admin_enered" else user.get("empresa")
+    if not target_empresa:
+        raise HTTPException(status_code=400, detail="empresa requerida")
+    record = await db.qr_codes.find_one({"empresa": target_empresa, "placa": placa}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="QR no encontrado")
+    file_path = QR_DIR / _safe_placa(target_empresa) / record["filename"]
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="archivo no encontrado")
+    return FileResponse(path=str(file_path), filename=f"QR_{placa}.{file_path.suffix.lstrip('.')}", media_type="application/octet-stream")
+
+
+@api.delete("/admin/qr/{placa}")
+async def admin_qr_delete(placa: str, empresa: str, user: dict = Depends(require_roles("admin_enered"))):
+    placa = _safe_placa(placa)
+    record = await db.qr_codes.find_one({"empresa": empresa, "placa": placa}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="QR no encontrado")
+    file_path = QR_DIR / _safe_placa(empresa) / record["filename"]
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except Exception:
+            pass
+    await db.qr_codes.delete_one({"empresa": empresa, "placa": placa})
+    return {"ok": True}
 
 
 # ---------- Root ----------

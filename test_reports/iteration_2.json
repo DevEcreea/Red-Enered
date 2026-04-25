@@ -1,0 +1,40 @@
+{
+  "summary": "Comprehensive test of ENERED Dashboard refactor (4 charts + Galones/Soles toggle), Sidebar reorg, new QR endpoints (bulk-upload/list/download/delete) and new pages (Reportes Consumo, Descarga QR, Admin Carga QR). 36/36 backend tests PASS (10 new tests for QR + dashboard gasto fields). All requested frontend flows verified: 4 dashboard charts present, multi-select toggles work with min-1 enforcement, sidebar testids found, multi-tenant QR isolation correct, Lima client correctly hides admin items.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/test_qr_dashboard.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/qr_dashboard_results.xml"
+  ],
+  "action_items": [
+    "No blocking issues. Refactor is functional end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "Backend dashboard endpoint changed contract from {kpis, top_placas, ciudades, ...} to {totals, top_placas_consumo, consumo_ciudad, consumo_estacion, ...}. Old test suite was updated to match. If any other consumer/script depends on previous shape it must be updated.",
+    "POST /api/admin/qr/upload-bulk: file validation accepts any extension in [png,jpg,jpeg,webp,svg] but does NOT verify file content (magic bytes). Recommend a basic magic-byte check (e.g., PNG signature 0x89504E47) to prevent malicious uploads disguised as png. Also, _safe_placa() uppercases and strips non-alphanum but still allows files like '.png' (empty placa) — this case is correctly skipped. Good.",
+    "QR_DIR = ROOT_DIR / 'uploads' / 'qr' is created at import time. That means tests/CI environments without write permission to ROOT_DIR will fail at import. Acceptable for current container.",
+    "GET /api/qr/download streams a FileResponse without rate-limiting; multiple concurrent downloads are possible. For production add basic auth-rate-limiting per user.",
+    "Consumption seed data has been swapped: now contains ROSANDINA SAC + TRANSPORTES GALPESA SAC + TRANSPORTES LIMA SAC consumptions. Empresas dropdown reflects all 3. No regression detected for tenant filtering.",
+    "server.py is now ~1609 lines (was 917). Recommend splitting routers (auth/users/dashboard/consumptions/invoices/control/courses/qr/admin) into separate files."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (updated dashboard tests for new {totals,...} shape)",
+    "/app/backend/tests/test_qr_dashboard.py (NEW: 10 tests covering QR bulk-upload, tenant isolation, download, delete + dashboard gasto fields)"
+  ],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "100% (all flows verified)"},
+  "test_credentials": "admin@enered.com/admin123, administrador@lima.com/demo123, administrador@andina.com/demo123 — all valid.",
+  "seed_data_creation": "Backend auto-seeds. Test created+deleted 2 QR rows (TST-prefixed placas) under TRANSPORTES LIMA SAC; cleaned up.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite is at /app/backend/tests/{backend_test.py,test_qr_dashboard.py}. Run via: pytest /app/backend/tests/ -v. New QR endpoints require multipart with form field 'empresa' and repeated 'files' parts. The dashboard /api/dashboard/kpis response shape was REFACTORED — top-level keys are: totals, series_semana, top_placas_consumo, gasto_placa, cargas_placa, consumo_ciudad (with gasto field), consumo_estacion (with gasto field), ahorro_estacion, consumo_producto, gasto_producto, precio_comparacion_producto, cargas_por_hora, cargas_por_dia, medio_identificacion. UI dashboard renders 4 charts each with multi-select Galones/Soles toggle (default Galones, min 1 active enforced).",
+  "rca of the issue": "N/A — no bugs uncovered. Pre-existing flaky tests in iteration_1 were fixed by aligning assertions with the new dashboard contract (totals.* instead of kpis.*, top_placas_consumo instead of top_placas)."
+}
