@@ -388,13 +388,14 @@ async def dashboard_filter_options(user: dict = Depends(get_current_user), empre
     return {"placas": placas, "semanas": semanas, "estaciones": estaciones, "productos": productos}
 
 
-# ---------- Empresa Config (plan, línea crédito, unidades, RUC) ----------
+# ---------- Empresa Config (plan, línea crédito, unidades, RUC, días crédito) ----------
 class EmpresaConfig(BaseModel):
     empresa: str
     ruc: Optional[str] = ""
     plan: Literal["tracking", "advanced", "integral"] = "tracking"
     linea_credito: float = 0.0
     unidades_contratadas: int = 0
+    dias_credito: int = 0  # condición de crédito (días)
 
 
 @api.get("/empresas-config")
@@ -1314,6 +1315,277 @@ async def submit_course(cid: str, data: CourseSubmit, user: dict = Depends(get_c
 async def my_results(user: dict = Depends(get_current_user)):
     rows = await db.course_results.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
     return rows
+
+
+# ---------- Invoices: Bulk Upload (PDF + XML SUNAT) ----------
+INV_DIR = ROOT_DIR / "uploads" / "invoices"
+INV_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _parse_sunat_xml(xml_bytes: bytes) -> dict:
+    """Parse SUNAT UBL 2.1 invoice XML. Returns dict with extracted fields."""
+    import xml.etree.ElementTree as ET
+    ns = {
+        "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+        "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
+    }
+    try:
+        root = ET.fromstring(xml_bytes)
+    except Exception as e:
+        raise ValueError(f"XML inválido: {e}")
+
+    def _find(path):
+        el = root.find(path, ns)
+        return el.text.strip() if el is not None and el.text else None
+
+    n_doc = _find("cbc:ID")  # ej: F001-123
+    f_emision = _find("cbc:IssueDate")
+    f_vencimiento = _find("cbc:DueDate")
+    moneda = _find("cbc:DocumentCurrencyCode") or "PEN"
+    monto = _find("cac:LegalMonetaryTotal/cbc:PayableAmount")
+
+    # Cliente: AccountingCustomerParty
+    customer = root.find("cac:AccountingCustomerParty", ns)
+    ruc = None
+    razon_social = None
+    if customer is not None:
+        party = customer.find("cac:Party", ns)
+        if party is not None:
+            id_el = party.find("cac:PartyIdentification/cbc:ID", ns)
+            if id_el is not None and id_el.text:
+                ruc = id_el.text.strip()
+            name_el = party.find("cac:PartyLegalEntity/cbc:RegistrationName", ns)
+            if name_el is not None and name_el.text:
+                razon_social = name_el.text.strip()
+
+    # Detectar tipo de doc desde InvoiceTypeCode (01=Factura, 03=Boleta, 07=NC, 08=ND)
+    tipo_code = _find("cbc:InvoiceTypeCode")
+    tipo_doc = {
+        "01": "Factura Ventas", "03": "Boleta Ventas",
+        "07": "Nota de Crédito", "08": "Nota de Débito",
+    }.get(tipo_code or "01", "Factura Ventas")
+
+    # Producto: tomamos primer line item description
+    producto = None
+    line = root.find("cac:InvoiceLine/cac:Item/cbc:Description", ns)
+    if line is not None and line.text:
+        producto = line.text.strip()[:120]
+
+    return {
+        "n_doc": n_doc,
+        "f_emision": f_emision,
+        "f_vencimiento": f_vencimiento,
+        "moneda": moneda,
+        "monto_total": float(monto) if monto else 0.0,
+        "ruc_cliente": ruc,
+        "razon_social_cliente": razon_social,
+        "tipo_doc": tipo_doc,
+        "producto": producto or "Combustible",
+    }
+
+
+def _safe_doc(name: str) -> str:
+    base = name.rsplit(".", 1)[0].strip()
+    return "".join(c for c in base if c.isalnum() or c in ("-", "_"))
+
+
+@api.post("/admin/invoices/upload-bulk")
+async def admin_invoices_upload_bulk(
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    """Bulk upload pairs of PDF + XML files. Files are matched by basename
+    (e.g. F001-123.pdf + F001-123.xml). Each XML is parsed (SUNAT UBL 2.1) to
+    extract invoice metadata. Empresa is matched by RUC against empresas_config.
+    """
+    by_base: dict = {}
+    for f in files:
+        base = _safe_doc(f.filename)
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
+        content = await f.read()
+        by_base.setdefault(base, {})[ext] = (f.filename, content)
+
+    saved: List[dict] = []
+    skipped: List[dict] = []
+    rucs_to_empresa = {}
+    cfgs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
+    for c in cfgs:
+        if c.get("ruc"):
+            rucs_to_empresa[str(c["ruc"]).strip()] = c["empresa"]
+
+    for base, parts in by_base.items():
+        if "xml" not in parts:
+            skipped.append({"base": base, "reason": "falta XML"})
+            continue
+        try:
+            xml_name, xml_bytes = parts["xml"]
+            meta = _parse_sunat_xml(xml_bytes)
+        except Exception as e:
+            skipped.append({"base": base, "reason": f"XML no parseable: {e}"})
+            continue
+
+        ruc = (meta.get("ruc_cliente") or "").strip()
+        empresa = rucs_to_empresa.get(ruc) or meta.get("razon_social_cliente") or "DESCONOCIDO"
+
+        # Save files
+        empresa_dir = INV_DIR / _safe_doc(empresa)
+        empresa_dir.mkdir(parents=True, exist_ok=True)
+        n_doc = meta.get("n_doc") or base
+        xml_path = empresa_dir / f"{_safe_doc(n_doc)}.xml"
+        with open(xml_path, "wb") as out:
+            out.write(xml_bytes)
+
+        pdf_filename = None
+        if "pdf" in parts:
+            pdf_name, pdf_bytes = parts["pdf"]
+            pdf_path = empresa_dir / f"{_safe_doc(n_doc)}.pdf"
+            with open(pdf_path, "wb") as out:
+                out.write(pdf_bytes)
+            pdf_filename = pdf_path.name
+
+        # Determine status & atraso
+        from datetime import date as _date
+        today = _date.today()
+        f_venc = meta.get("f_vencimiento") or meta.get("f_emision")
+        estado = "por_vencer"
+        atraso_dias = 0
+        if f_venc:
+            try:
+                fv = _date.fromisoformat(f_venc)
+                if fv < today:
+                    estado = "vencido"
+                    atraso_dias = (today - fv).days
+            except Exception:
+                pass
+
+        record = {
+            "id": str(uuid.uuid4()),
+            "empresa": empresa,
+            "ruc_cliente": ruc,
+            "razon_social_cliente": meta.get("razon_social_cliente"),
+            "n_doc": n_doc,
+            "tipo_doc": meta.get("tipo_doc"),
+            "producto": meta.get("producto"),
+            "f_emision": meta.get("f_emision"),
+            "f_vencimiento": f_venc,
+            "moneda": meta.get("moneda", "PEN"),
+            "monto_total": meta.get("monto_total", 0.0),
+            "saldo": meta.get("monto_total", 0.0),
+            "estado": estado,  # vencido | por_vencer | pagado
+            "atraso_dias": atraso_dias,
+            "pdf_filename": pdf_filename,
+            "xml_filename": xml_path.name,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_by": user["email"],
+        }
+        # Upsert by (empresa, n_doc)
+        existing = await db.invoices.find_one({"empresa": empresa, "n_doc": n_doc}, {"_id": 0})
+        if existing:
+            record["id"] = existing.get("id", record["id"])
+            await db.invoices.update_one({"empresa": empresa, "n_doc": n_doc}, {"$set": record})
+        else:
+            await db.invoices.insert_one(record)
+
+        # Mark consumptions in [f_emision - 7d, f_emision] as facturado
+        if meta.get("f_emision"):
+            try:
+                fe = _date.fromisoformat(meta["f_emision"])
+                start = (fe - timedelta(days=14)).isoformat()
+                end = fe.isoformat()
+                await db.consumptions.update_many(
+                    {"EMPRESA": empresa, "FECHA": {"$gte": start, "$lte": end}, "facturado": {"$ne": True}},
+                    {"$set": {"facturado": True, "factura_n_doc": n_doc}},
+                )
+            except Exception:
+                pass
+
+        saved.append({"n_doc": n_doc, "empresa": empresa, "estado": estado})
+
+    return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
+
+
+@api.get("/invoices/{inv_id}/download/{kind}")
+async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_current_user)):
+    from fastapi.responses import FileResponse
+    if kind not in ("pdf", "xml"):
+        raise HTTPException(status_code=400, detail="kind inválido")
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
+        raise HTTPException(status_code=403, detail="Sin acceso")
+    fname = inv.get(f"{kind}_filename")
+    if not fname:
+        raise HTTPException(status_code=404, detail=f"Sin archivo {kind}")
+    file_path = INV_DIR / _safe_doc(inv["empresa"]) / fname
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo no existe")
+    media = "application/pdf" if kind == "pdf" else "application/xml"
+    return FileResponse(path=str(file_path), filename=fname, media_type=media)
+
+
+@api.get("/account-state")
+async def account_state(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    """Estado de Cuenta agregado por empresa.
+
+    - linea_credito_total: de empresas_config
+    - total_facturado: SUM monto_total de todas las invoices
+    - facturas_pendientes: SUM saldo donde estado != pagado
+    - notas_despacho: SUM IMPORTE_TOTAL de consumptions con facturado != true
+    - linea_credito_utilizada: facturas_pendientes + notas_despacho
+    - disponible: linea_credito_total - linea_credito_utilizada
+    - pct_utilizada: %
+    - total_vencido: SUM saldo donde estado == vencido
+    """
+    if user["role"] == "admin_enered":
+        target = empresa
+    else:
+        target = user.get("empresa")
+
+    cfg = None
+    if target:
+        cfg = await db.empresas_config.find_one({"empresa": target}, {"_id": 0})
+    if not cfg:
+        cfg = {"empresa": target or "", "linea_credito": 0.0, "dias_credito": 0, "ruc": ""}
+
+    inv_q = {"empresa": target} if target else {}
+    invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
+
+    cons_q = {"facturado": {"$ne": True}}
+    if target:
+        cons_q["EMPRESA"] = target
+    elif user["role"] != "admin_enered":
+        cons_q["EMPRESA"] = user.get("empresa")
+    cons = await db.consumptions.find(cons_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
+
+    def _f(x, d=0.0):
+        try: return float(x) if x not in (None, "") else d
+        except Exception: return d
+
+    total_facturado = sum(_f(i.get("monto_total")) for i in invs)
+    facturas_pendientes = sum(_f(i.get("saldo")) for i in invs if i.get("estado") != "pagado")
+    notas_despacho = sum(_f(c.get("IMPORTE_TOTAL")) for c in cons)
+    total_vencido = sum(_f(i.get("saldo")) for i in invs if i.get("estado") == "vencido")
+
+    linea_total = float(cfg.get("linea_credito") or 0)
+    linea_utilizada = facturas_pendientes + notas_despacho
+    disponible = max(0.0, linea_total - linea_utilizada)
+    pct = round((linea_utilizada / linea_total * 100), 2) if linea_total > 0 else 0.0
+
+    return {
+        "empresa": cfg.get("empresa") or target or "",
+        "ruc": cfg.get("ruc") or "",
+        "linea_credito_total": round(linea_total, 2),
+        "disponible": round(disponible, 2),
+        "linea_credito_utilizada": round(linea_utilizada, 2),
+        "facturas_pendientes": round(facturas_pendientes, 2),
+        "notas_despacho": round(notas_despacho, 2),
+        "total_facturado": round(total_facturado, 2),
+        "total_vencido": round(total_vencido, 2),
+        "pct_utilizada": pct,
+        "dias_credito": int(cfg.get("dias_credito") or 0),
+        "n_facturas": len(invs),
+    }
 
 
 # ---------- QR Code Bulk Upload / Download ----------

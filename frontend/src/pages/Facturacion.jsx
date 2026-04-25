@@ -1,199 +1,355 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import {
+  Download, FileText, Mail, Search, BookOpen, MessageCircle,
+  Clock, AlertCircle, FileSpreadsheet, Eye,
+} from "lucide-react";
 import { api } from "../lib/api";
-import { formatSoles, formatDate, formatApiError } from "../lib/utils";
+import { formatSoles, formatDate } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
-import { Plus, FileText, Download, FileSpreadsheet, Trash2 } from "lucide-react";
-import * as XLSX from "xlsx";
+import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
-const ESTADO_STYLE = {
-  pendiente: "bg-yellow-100 text-yellow-700 border-yellow-200",
-  pagada: "bg-green-100 text-green-700 border-green-200",
-  vencida: "bg-red-100 text-red-700 border-red-200",
+const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
+
+const ESTADO_BADGE = {
+  vencido: "bg-red-100 text-red-700 border-red-200",
+  por_vencer: "bg-amber-50 text-amber-700 border-amber-200",
+  pagado: "bg-green-50 text-green-700 border-green-200",
 };
 
 export default function Facturacion() {
   const { user } = useAuth();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [state, setState] = useState(null);
+  const [invoices, setInvoices] = useState([]);
   const [empresas, setEmpresas] = useState([]);
-  const [form, setForm] = useState({ empresa: "", numero: "", fecha_emision: "", fecha_vencimiento: "", monto: "", estado: "pendiente" });
-  const [err, setErr] = useState("");
-
-  const load = async () => {
-    setLoading(true);
-    try { const { data } = await api.get("/invoices"); setItems(data); }
-    finally { setLoading(false); }
-  };
+  const [empresa, setEmpresa] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [comingSoon, setComingSoon] = useState(false);
+  const [emailInput, setEmailInput] = useState("");
+  const PAGE_SIZE = 10;
 
   useEffect(() => {
-    load();
-    if (user?.role === "admin_enered") api.get("/empresas").then((r) => setEmpresas(r.data));
+    if (user?.role === "admin_enered") api.get("/empresas").then((r) => setEmpresas(r.data)).catch(() => {});
   }, [user]);
 
-  const create = async (e) => {
-    e.preventDefault(); setErr("");
-    try {
-      await api.post("/invoices", { ...form, monto: parseFloat(form.monto) });
-      setShowForm(false); setForm({ empresa: "", numero: "", fecha_emision: "", fecha_vencimiento: "", monto: "", estado: "pendiente" });
-      load();
-    } catch (e2) { setErr(formatApiError(e2.response?.data?.detail)); }
-  };
+  useEffect(() => {
+    setLoading(true);
+    const params = empresa ? { empresa } : {};
+    Promise.all([
+      api.get("/account-state", { params }),
+      api.get("/invoices", { params }),
+    ])
+      .then(([s, i]) => { setState(s.data); setInvoices(i.data); setPage(1); })
+      .finally(() => setLoading(false));
+  }, [empresa]);
 
-  const setEstado = async (inv, estado) => {
-    await api.put(`/invoices/${inv.id}`, { estado });
-    load();
-  };
+  const totalPages = Math.max(1, Math.ceil(invoices.length / PAGE_SIZE));
+  const pageRows = invoices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const remove = async (inv) => {
-    if (!window.confirm(`Eliminar factura ${inv.numero}?`)) return;
-    await api.delete(`/invoices/${inv.id}`);
-    load();
-  };
+  // Donut: total = línea_credito; segmentos = facturas pendientes + notas despacho + disponible
+  const donutData = useMemo(() => {
+    if (!state) return [];
+    const out = [];
+    if (state.disponible > 0) out.push({ name: "Disponible", value: state.disponible, color: "#1E1B4B" });
+    if (state.facturas_pendientes > 0) out.push({ name: "Facturas pendientes", value: state.facturas_pendientes, color: "#7C3AED" });
+    if (state.notas_despacho > 0) out.push({ name: "Notas de despacho", value: state.notas_despacho, color: "#22D3EE" });
+    return out;
+  }, [state]);
 
-  const generatePDF = (inv) => {
+  const downloadStatePDF = () => {
+    if (!state) return;
     const doc = new jsPDF();
-    doc.setFillColor(153, 51, 255); doc.rect(0, 0, 210, 35, "F");
-    doc.setTextColor(255); doc.setFontSize(22); doc.text("ENERED", 15, 20);
-    doc.setFontSize(10); doc.text("Fuel Intelligence", 15, 27);
-    doc.setTextColor(0); doc.setFontSize(18); doc.text("FACTURA", 15, 55);
-    doc.setFontSize(11);
-    doc.text(`N° ${inv.numero}`, 15, 65);
-    doc.text(`Empresa: ${inv.empresa}`, 15, 75);
-    doc.text(`Fecha emisión: ${formatDate(inv.fecha_emision)}`, 15, 85);
-    doc.text(`Fecha vencimiento: ${formatDate(inv.fecha_vencimiento)}`, 15, 95);
-    doc.text(`Estado: ${inv.estado.toUpperCase()}`, 15, 105);
-    doc.setFontSize(16); doc.text(`Monto: ${formatSoles(inv.monto)}`, 15, 125);
+    doc.setFillColor(153, 51, 255); doc.rect(0, 0, 210, 30, "F");
+    doc.setTextColor(255); doc.setFontSize(20); doc.text("ENERED", 14, 18);
+    doc.setFontSize(10); doc.text("Estado de Cuenta", 14, 25);
+    doc.setTextColor(0);
+
+    doc.setFontSize(13); doc.text(`Empresa: ${state.empresa || "—"}`, 14, 42);
+    if (state.ruc) doc.text(`RUC: ${state.ruc}`, 14, 49);
     doc.setFontSize(9); doc.setTextColor(120);
-    doc.text("Documento generado automáticamente por la plataforma ENERED.", 15, 280);
-    doc.save(`Factura_${inv.numero}.pdf`);
-  };
+    doc.text(`Generado: ${new Date().toLocaleString("es-PE")}`, 14, 56);
+    doc.setTextColor(0);
 
-  const exportExcel = () => {
-    const data = items.map((i) => ({
-      Empresa: i.empresa, "N°": i.numero, Emisión: i.fecha_emision,
-      Vencimiento: i.fecha_vencimiento, Monto: i.monto, Estado: i.estado,
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Facturas");
-    XLSX.writeFile(wb, `ENERED_facturas_${Date.now()}.xlsx`);
-  };
-
-  const exportPDFList = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(16); doc.text("ENERED — Listado de Facturas", 14, 15);
+    const summary = [
+      ["Línea de Crédito Total", formatSoles(state.linea_credito_total)],
+      ["Disponible (Libre)", formatSoles(state.disponible)],
+      ["Línea de Crédito Utilizada", formatSoles(state.linea_credito_utilizada)],
+      ["Notas de Despacho", formatSoles(state.notas_despacho)],
+      ["Total Facturado", formatSoles(state.total_facturado)],
+      ["% Línea Utilizada", `${state.pct_utilizada}%`],
+      ["Total Vencido", formatSoles(state.total_vencido)],
+      ["Condición de Crédito", `${state.dias_credito} días`],
+    ];
     autoTable(doc, {
-      startY: 22,
-      head: [["Empresa", "N°", "Emisión", "Vencimiento", "Monto", "Estado"]],
-      body: items.map((i) => [i.empresa, i.numero, i.fecha_emision, i.fecha_vencimiento, formatSoles(i.monto), i.estado]),
-      headStyles: { fillColor: [153, 51, 255] },
-      styles: { fontSize: 9 },
+      startY: 64,
+      body: summary,
+      theme: "plain",
+      styles: { fontSize: 10, cellPadding: 2 },
+      columnStyles: { 0: { fontStyle: "bold", cellWidth: 80 }, 1: { halign: "right" } },
     });
-    doc.save(`ENERED_facturas_${Date.now()}.pdf`);
+
+    autoTable(doc, {
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [["N° Doc", "Tipo", "F. Emisión", "F. Vencim.", "Atraso", "Monto", "Saldo", "Estado"]],
+      body: invoices.map((i) => [
+        i.n_doc, i.tipo_doc || "—", i.f_emision || "—", i.f_vencimiento || "—",
+        `${i.atraso_dias || 0} d`, formatSoles(i.monto_total), formatSoles(i.saldo),
+        (i.estado || "").toUpperCase(),
+      ]),
+      headStyles: { fillColor: [30, 27, 75] },
+      styles: { fontSize: 8 },
+    });
+
+    doc.save(`Estado_Cuenta_${state.empresa || "ENERED"}_${Date.now()}.pdf`);
+    toast.success("Estado de cuenta descargado");
   };
 
-  const isAdmin = user?.role === "admin_enered";
+  const downloadInvoice = async (inv, kind) => {
+    try {
+      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
+      const blob = new Blob([r.data]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${inv.n_doc}.${kind}`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(`No se encontró el ${kind.toUpperCase()} de la factura`);
+    }
+  };
+
+  if (loading || !state) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-10 h-10 border-4 border-brand border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Gestión financiera</div>
-          <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Facturación</h1>
-          <p className="text-neutral-500 mt-1 text-sm">Consulta, descarga y gestiona tus facturas.</p>
+    <div className="space-y-6" data-testid="estado-cuenta-page">
+      {/* Header con filtro empresa para admin */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-2 text-xs text-neutral-500 font-semibold">
+          <Clock className="w-3.5 h-3.5" />
+          Información generada el <span className="font-bold text-neutral-800">{new Date().toLocaleString("es-PE")}</span>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={exportExcel} className="btn-ghost text-sm flex items-center gap-2" data-testid="invoices-export-excel">
-            <FileSpreadsheet className="w-4 h-4" /> Excel
-          </button>
-          <button onClick={exportPDFList} className="btn-ghost text-sm flex items-center gap-2">
-            <FileText className="w-4 h-4" /> PDF
-          </button>
-          {isAdmin && (
-            <button onClick={() => setShowForm(true)} className="btn-brand text-sm flex items-center gap-2" data-testid="invoice-new-btn">
-              <Plus className="w-4 h-4" /> Nueva factura
-            </button>
+        {user?.role === "admin_enered" && empresas.length > 0 && (
+          <select
+            value={empresa}
+            onChange={(e) => setEmpresa(e.target.value)}
+            className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[220px]"
+            data-testid="ec-empresa-filter"
+          >
+            <option value="">Todas las empresas</option>
+            {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* CARD PRINCIPAL: KPIs + Donut */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
+        <div className="lg:col-span-3 bg-white border border-neutral-200 rounded-2xl p-6">
+          <h2 className="font-cabinet font-black text-2xl text-brand mb-5">Estado de Cuenta</h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-5">
+            <KpiRow label="Línea de Crédito Total" value={formatSoles(state.linea_credito_total)} testid="ec-linea-total" />
+            <KpiRow label="Disponible (Libre)" value={formatSoles(state.disponible)} testid="ec-disponible" highlight />
+            <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
+            <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
+            <KpiRow label="Total Facturado" value={formatSoles(state.total_facturado)} testid="ec-total-facturado" />
+            <KpiRow label="% Línea Utilizada" value={`${state.pct_utilizada}%`} testid="ec-pct" />
+            <KpiRow label="Total Vencido" value={formatSoles(state.total_vencido)} testid="ec-vencido" danger={state.total_vencido > 0} />
+            <KpiRow label="Condición de Pago Crédito" value={`${state.dias_credito} días`} testid="ec-dias-credito" />
+          </div>
+        </div>
+
+        {/* Donut */}
+        <div className="bg-white border border-neutral-200 rounded-2xl p-6 flex items-center justify-center" data-testid="ec-donut">
+          {donutData.length === 0 ? (
+            <div className="text-sm text-neutral-400 text-center">Sin datos para graficar</div>
+          ) : (
+            <div className="relative w-full h-full min-h-[260px]">
+              <ResponsiveContainer width="100%" height={260}>
+                <PieChart>
+                  <Pie
+                    data={donutData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={100}
+                    paddingAngle={2}
+                  >
+                    {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="text-center">
+                  <div className="text-[10px] uppercase tracking-widest text-neutral-500 font-bold">Total</div>
+                  <div className="font-cabinet font-black text-lg text-neutral-900">{formatSoles(state.linea_credito_total)}</div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
-      {showForm && isAdmin && (
-        <div className="bg-white border border-border rounded-lg p-6">
-          <h3 className="font-cabinet font-bold text-lg mb-4">Nueva factura</h3>
-          <form onSubmit={create} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <select required value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm">
-              <option value="">Empresa</option>{empresas.map((e) => <option key={e}>{e}</option>)}
-            </select>
-            <input required placeholder="N° factura" value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-            <input required type="number" step="0.01" placeholder="Monto S/" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-            <input required type="date" value={form.fecha_emision} onChange={(e) => setForm({ ...form, fecha_emision: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-            <input required type="date" value={form.fecha_vencimiento} onChange={(e) => setForm({ ...form, fecha_vencimiento: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-            <select value={form.estado} onChange={(e) => setForm({ ...form, estado: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm">
-              <option value="pendiente">Pendiente</option><option value="pagada">Pagada</option><option value="vencida">Vencida</option>
-            </select>
-            {err && <div className="md:col-span-3 text-red-600 text-sm">{err}</div>}
-            <div className="md:col-span-3 flex gap-2">
-              <button type="submit" className="btn-brand text-sm">Crear</button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancelar</button>
-            </div>
-          </form>
-        </div>
-      )}
+      {/* Acciones laterales */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
+        <ActionCard onClick={() => setComingSoon("email")} icon={Mail} title="Enviar estado" subtitle="por correo" testid="ec-action-email" />
+        <ActionCard onClick={() => setComingSoon("historial")} icon={Search} title="Consulta tu" subtitle="historial" testid="ec-action-historial" />
+        <ActionCard onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a pagar" subtitle="tus facturas" testid="ec-action-aprende" />
+      </div>
 
-      <div className="bg-white border border-border rounded-lg overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="enered-table" data-testid="invoices-table">
-            <thead>
-              <tr>
-                <th>Empresa</th><th>N° Factura</th><th>Emisión</th><th>Vencimiento</th>
-                <th className="text-right">Monto</th><th>Estado</th><th className="text-right">Acciones</th>
+      {/* TABLA DE DOCUMENTOS */}
+      <div className="rounded-2xl overflow-hidden border border-brand/30">
+        <div className="bg-brand text-white px-5 py-4 text-sm font-semibold space-y-1">
+          <div>Detalle de los documentos pendientes de pago (vencido y por vencer)</div>
+          <div className="text-xs text-white/80">(*) Monto total incluye IGV y/o percepción (según corresponda).</div>
+        </div>
+        <div className="overflow-x-auto bg-white">
+          <table className="w-full text-sm" data-testid="ec-table">
+            <thead className="bg-[#1E1B4B] text-white">
+              <tr className="text-[11px] font-bold uppercase tracking-wider">
+                <th className="px-3 py-3 text-left">Producto</th>
+                <th className="px-3 py-3 text-left">Tipo Doc</th>
+                <th className="px-3 py-3 text-left">N° Doc</th>
+                <th className="px-3 py-3 text-left">F. Emisión</th>
+                <th className="px-3 py-3 text-left">F. Vencimiento</th>
+                <th className="px-3 py-3 text-right">Atraso</th>
+                <th className="px-3 py-3 text-center">Moneda</th>
+                <th className="px-3 py-3 text-right">Monto Total</th>
+                <th className="px-3 py-3 text-right">Saldo</th>
+                <th className="px-3 py-3 text-center">Estado</th>
+                <th className="px-3 py-3 text-center">Descargar</th>
               </tr>
             </thead>
-            <tbody>
-              {loading ? <tr><td colSpan={7} className="text-center py-8">Cargando...</td></tr>
-                : items.length === 0 ? <tr><td colSpan={7} className="text-center py-8 text-neutral-500">Sin facturas</td></tr>
-                : items.map((inv) => (
-                  <tr key={inv.id}>
-                    <td className="font-semibold">{inv.empresa}</td>
-                    <td className="font-mono">{inv.numero}</td>
-                    <td>{formatDate(inv.fecha_emision)}</td>
-                    <td>{formatDate(inv.fecha_vencimiento)}</td>
-                    <td className="text-right font-bold">{formatSoles(inv.monto)}</td>
-                    <td>
-                      {isAdmin ? (
-                        <select value={inv.estado} onChange={(e) => setEstado(inv, e.target.value)}
-                          className={`text-xs font-bold px-2 py-1 rounded-full border ${ESTADO_STYLE[inv.estado]}`}>
-                          <option value="pendiente">Pendiente</option>
-                          <option value="pagada">Pagada</option>
-                          <option value="vencida">Vencida</option>
-                        </select>
-                      ) : (
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold border ${ESTADO_STYLE[inv.estado]}`}>
-                          {inv.estado.toUpperCase()}
-                        </span>
-                      )}
+            <tbody className="divide-y divide-neutral-100">
+              {pageRows.length === 0 ? (
+                <tr><td colSpan={11} className="text-center py-12 text-neutral-400">
+                  <FileText className="w-10 h-10 mx-auto mb-2 text-neutral-300" />
+                  Sin documentos pendientes
+                </td></tr>
+              ) : (
+                pageRows.map((inv) => (
+                  <tr key={inv.id || inv.n_doc} className="hover:bg-neutral-50">
+                    <td className="px-3 py-2.5 truncate max-w-[150px]">{inv.producto || "—"}</td>
+                    <td className="px-3 py-2.5">{inv.tipo_doc || "—"}</td>
+                    <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
+                    <td className="px-3 py-2.5">{formatDate(inv.f_emision) || "—"}</td>
+                    <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento) || "—"}</td>
+                    <td className="px-3 py-2.5 text-right">{inv.atraso_dias || 0} días</td>
+                    <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
+                        {(inv.estado || "—").toUpperCase().replace("_", " ")}
+                      </span>
                     </td>
-                    <td className="text-right">
-                      <div className="flex gap-2 justify-end">
-                        <button onClick={() => generatePDF(inv)} className="p-2 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`invoice-pdf-${inv.numero}`}>
-                          <Download className="w-4 h-4" />
-                        </button>
-                        {isAdmin && (
-                          <button onClick={() => remove(inv)} className="p-2 hover:bg-red-50 text-red-600 rounded-md">
-                            <Trash2 className="w-4 h-4" />
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-center gap-1.5">
+                        {inv.pdf_filename && (
+                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
+                            <FileText className="w-4 h-4" />
+                          </button>
+                        )}
+                        {inv.xml_filename && (
+                          <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
+                            <FileSpreadsheet className="w-4 h-4" />
                           </button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                ))
+              )}
             </tbody>
           </table>
         </div>
+        {invoices.length > 0 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-100 bg-neutral-50 text-xs">
+            <div className="text-neutral-500 font-semibold">
+              {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, invoices.length)} de {invoices.length} registros
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">‹</button>
+              <span className="font-bold">{page}/{totalPages}</span>
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">›</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal "Próximamente" */}
+      {comingSoon && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setComingSoon(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-full bg-cyan-100 text-cyan-600 flex items-center justify-center">
+                {comingSoon === "email" ? <Mail className="w-5 h-5" /> : <Search className="w-5 h-5" />}
+              </div>
+              <h3 className="font-cabinet font-bold text-lg">Próximamente</h3>
+            </div>
+            <p className="text-sm text-neutral-600 mb-4">
+              {comingSoon === "email"
+                ? "El envío automático por correo de tu estado de cuenta estará disponible muy pronto. Mientras tanto puedes descargarlo en PDF."
+                : "El historial avanzado de documentos llegará en la próxima versión. Por ahora todo se ve en la tabla principal."}
+            </p>
+            {comingSoon === "email" && (
+              <input
+                type="email"
+                placeholder="tucorreo@empresa.com"
+                value={emailInput}
+                onChange={(e) => setEmailInput(e.target.value)}
+                className="w-full h-10 px-3 border border-border rounded-md text-sm mb-3"
+              />
+            )}
+            <div className="flex justify-end gap-2">
+              <a href={WA_LINK} target="_blank" rel="noreferrer" className="text-xs font-bold text-brand hover:underline flex items-center gap-1 mr-auto">
+                <MessageCircle className="w-3 h-3" /> Hablar con un asesor
+              </a>
+              <button onClick={() => setComingSoon(false)} className="btn-brand text-sm">Entendido</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KpiRow({ label, value, highlight = false, danger = false, testid }) {
+  return (
+    <div data-testid={testid}>
+      <div className="text-sm text-neutral-600 font-medium">{label}</div>
+      <div className={`font-cabinet font-black text-2xl mt-0.5 ${danger ? "text-red-600" : highlight ? "text-brand" : "text-neutral-900"}`}>
+        {value}
       </div>
     </div>
+  );
+}
+
+function ActionCard({ onClick, icon: Icon, title, subtitle, testid }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      className="bg-brand text-white rounded-2xl p-4 flex items-center justify-between hover:bg-brand-hover transition-all hover:-translate-y-0.5 shadow-sm hover:shadow-md text-left"
+    >
+      <div>
+        <div className="font-cabinet font-bold text-sm leading-tight">{title}</div>
+        <div className="text-xs text-white/85 leading-tight">{subtitle}</div>
+      </div>
+      <Icon className="w-6 h-6 text-white/90" strokeWidth={2} />
+    </button>
   );
 }

@@ -66,6 +66,8 @@ export default function AdminUpload() {
 
       <EmpresaConfigManager />
 
+      <InvoicesBulkUpload />
+
       {/* Google Sheets Sync */}
       <div className="chart-card border-l-4 border-l-brand" data-testid="sheets-sync-card">
         <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-neutral-100">
@@ -238,7 +240,7 @@ function EmpresaConfigManager() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0 });
+  const [form, setForm] = useState({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0, dias_credito: 0 });
   const [err, setErr] = useState("");
   const [editing, setEditing] = useState(null);
 
@@ -254,7 +256,7 @@ function EmpresaConfigManager() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0 });
+    setForm({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0, dias_credito: 0 });
     setShowForm(true); setErr("");
   };
 
@@ -266,18 +268,22 @@ function EmpresaConfigManager() {
       plan: cfg.plan || "tracking",
       linea_credito: cfg.linea_credito || 0,
       unidades_contratadas: cfg.unidades_contratadas || 0,
+      dias_credito: cfg.dias_credito ?? 0,
     });
     setShowForm(true); setErr("");
   };
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
+    const dc = parseInt(form.dias_credito, 10);
+    if (isNaN(dc) || dc < 0) { setErr("Condición de crédito (días) es obligatoria. Mínimo 0."); return; }
     try {
       setSaving(form.empresa);
       await api.post("/empresas-config", {
         ...form,
         linea_credito: parseFloat(form.linea_credito) || 0,
         unidades_contratadas: parseInt(form.unidades_contratadas) || 0,
+        dias_credito: dc,
       });
       setShowForm(false);
       load();
@@ -318,6 +324,16 @@ function EmpresaConfigManager() {
           </select>
           <input type="number" step="0.01" placeholder="Línea de crédito (S/)" value={form.linea_credito} onChange={(e) => setForm({ ...form, linea_credito: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
           <input type="number" placeholder="Unidades contratadas" value={form.unidades_contratadas} onChange={(e) => setForm({ ...form, unidades_contratadas: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
+          <input
+            required
+            type="number"
+            min="0"
+            placeholder="Días de crédito (ej. 15)"
+            value={form.dias_credito}
+            onChange={(e) => setForm({ ...form, dias_credito: e.target.value })}
+            className="h-10 px-3 border border-border rounded-md text-sm"
+            data-testid="empresa-config-dias-credito"
+          />
           {err && <div className="md:col-span-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{err}</div>}
           <div className="md:col-span-3 flex gap-2">
             <button type="submit" disabled={saving} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-60" data-testid="empresa-config-save">
@@ -335,12 +351,13 @@ function EmpresaConfigManager() {
               <th>Empresa</th><th>RUC</th><th>Plan</th>
               <th className="text-right">Línea de crédito</th>
               <th className="text-right">Unidades</th>
+              <th className="text-right">Días Créd.</th>
               <th className="text-right">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {loading ? <tr><td colSpan={6} className="text-center py-6 text-neutral-500">Cargando...</td></tr>
-              : items.length === 0 ? <tr><td colSpan={6} className="text-center py-6 text-neutral-500">Sin empresas configuradas</td></tr>
+            {loading ? <tr><td colSpan={7} className="text-center py-6 text-neutral-500">Cargando...</td></tr>
+              : items.length === 0 ? <tr><td colSpan={7} className="text-center py-6 text-neutral-500">Sin empresas configuradas</td></tr>
               : items.map((cfg) => (
                 <tr key={cfg.empresa}>
                   <td className="font-bold flex items-center gap-2"><Building2 className="w-3.5 h-3.5 text-brand" />{cfg.empresa}</td>
@@ -348,6 +365,7 @@ function EmpresaConfigManager() {
                   <td><span className="text-xs font-bold px-2 py-1 bg-brand-50 text-brand rounded-full border border-brand-100 capitalize">{cfg.plan}</span></td>
                   <td className="text-right font-bold">{formatSoles(cfg.linea_credito)}</td>
                   <td className="text-right font-bold">{cfg.unidades_contratadas}</td>
+                  <td className="text-right font-bold">{cfg.dias_credito ?? 0}</td>
                   <td className="text-right">
                     <button onClick={() => openEdit(cfg)} className="text-xs font-bold text-brand hover:underline" data-testid={`empresa-config-edit-${cfg.empresa}`}>Editar</button>
                   </td>
@@ -361,6 +379,113 @@ function EmpresaConfigManager() {
         <Receipt className="w-4 h-4 flex-shrink-0" />
         <span><b>Facturas pendientes de pago</b> se gestionan en el módulo <Link to="/facturacion" className="font-bold underline">Estado de Cuenta</Link>. La línea utilizada se calcula automáticamente sumando facturas con estado <b>pendiente</b> o <b>vencida</b>.</span>
       </div>
+    </div>
+  );
+}
+
+
+function InvoicesBulkUpload() {
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+
+  const handleFiles = (selected) => {
+    const arr = Array.from(selected || []);
+    setFiles(arr);
+    setResult(null);
+    setErr("");
+  };
+
+  const submit = async () => {
+    if (files.length === 0) return;
+    setUploading(true); setResult(null); setErr("");
+    try {
+      const fd = new FormData();
+      files.forEach((f) => fd.append("files", f));
+      const { data } = await api.post("/admin/invoices/upload-bulk", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      setResult(data);
+      setFiles([]);
+    } catch (e) { setErr(formatApiError(e.response?.data?.detail)); }
+    finally { setUploading(false); }
+  };
+
+  const pdfCount = files.filter((f) => f.name.toLowerCase().endsWith(".pdf")).length;
+  const xmlCount = files.filter((f) => f.name.toLowerCase().endsWith(".xml")).length;
+
+  return (
+    <div className="chart-card border-l-4 border-l-cyan-400" data-testid="invoices-upload-card">
+      <div className="flex items-start gap-3 mb-5 pb-4 border-b border-neutral-100">
+        <div className="w-10 h-10 rounded-md bg-cyan-50 border border-cyan-100 flex items-center justify-center">
+          <Receipt className="w-5 h-5 text-cyan-600" strokeWidth={2.5} />
+        </div>
+        <div>
+          <h3 className="font-cabinet font-bold text-lg text-neutral-900">Carga masiva de facturas</h3>
+          <p className="text-xs text-neutral-500 mt-1">Adjunta los pares <b>PDF + XML</b> generados por tu facturador. Se parsea el XML SUNAT y se asigna a la empresa por <b>RUC</b>.</p>
+        </div>
+      </div>
+
+      <label className="block border-2 border-dashed border-cyan-200 rounded-xl bg-cyan-50/40 hover:bg-cyan-50 p-8 text-center cursor-pointer transition-colors" data-testid="invoices-dropzone">
+        <Upload className="w-8 h-8 text-cyan-600 mx-auto mb-2" />
+        <div className="font-bold text-sm text-neutral-700">
+          {files.length > 0 ? `${files.length} archivo(s): ${pdfCount} PDF · ${xmlCount} XML` : "Selecciona o arrastra archivos PDF y XML"}
+        </div>
+        <div className="text-xs text-neutral-500 mt-1">Cada par debe tener el mismo nombre base (ej. <code>F001-123.pdf</code> + <code>F001-123.xml</code>)</div>
+        <input
+          type="file"
+          multiple
+          accept=".pdf,.xml,application/pdf,text/xml,application/xml"
+          onChange={(e) => handleFiles(e.target.files)}
+          className="hidden"
+          data-testid="invoices-file-input"
+        />
+      </label>
+
+      <div className="flex items-center gap-2 mt-4">
+        <button onClick={submit} disabled={uploading || files.length === 0} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50" data-testid="invoices-upload-btn">
+          {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+          {uploading ? "Procesando…" : `Cargar ${files.length || ""} archivo(s)`}
+        </button>
+        {files.length > 0 && (
+          <button onClick={() => setFiles([])} className="btn-ghost text-sm">Limpiar selección</button>
+        )}
+      </div>
+
+      {err && (
+        <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5" /> {err}
+        </div>
+      )}
+      {result && (
+        <div className="mt-4 bg-neutral-50 border border-neutral-200 rounded-xl p-4 space-y-2">
+          <div className="flex items-center gap-2 text-sm">
+            <CheckCircle2 className="w-4 h-4 text-green-600" />
+            <span className="font-bold text-green-700">{result.uploaded} factura(s) procesadas</span>
+          </div>
+          {result.saved?.length > 0 && (
+            <div className="text-xs text-neutral-600 space-y-0.5 max-h-40 overflow-y-auto">
+              {result.saved.map((s, i) => (
+                <div key={i} className="font-mono">• <b>{s.n_doc}</b> → {s.empresa} <span className={`ml-2 ${s.estado === "vencido" ? "text-red-600" : "text-amber-600"}`}>[{s.estado}]</span></div>
+              ))}
+            </div>
+          )}
+          {result.skipped?.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 text-sm">
+                <AlertCircle className="w-4 h-4 text-amber-600" />
+                <span className="font-bold text-amber-700">{result.skipped.length} omitido(s)</span>
+              </div>
+              <div className="mt-1 text-xs text-neutral-600 space-y-0.5">
+                {result.skipped.map((s, i) => (
+                  <div key={i}>• <b>{s.base}</b>: {s.reason}</div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
