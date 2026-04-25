@@ -13,9 +13,11 @@ const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
 const MENU = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
+  { group: "Flotas" },
   { to: "/reportes", label: "Control Integral", icon: ClipboardList, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-control-integral" },
   { to: "/reportes-consumo", label: "Reportes Consumo", icon: FileBarChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-reportes-consumo" },
   { to: "/qr", label: "Descarga tus QR", icon: QrCode, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-qr" },
+  { groupEnd: true },
   { to: "/centro-monitoreo", label: "Centro Monitoreo", icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
   { to: "/analitica", label: "Analítica", icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
   { to: "/facturacion", label: "Estado Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
@@ -135,7 +137,7 @@ export default function Layout({ children }) {
 
   if (!user) return null;
 
-  const items = MENU.filter((i) => i.roles.includes(user.role));
+  const items = MENU.filter((i) => i.group || i.groupEnd || (i.roles && i.roles.includes(user.role)));
   const isAdmin = user.role === "admin_enered";
 
   const handleLogout = async () => {
@@ -168,13 +170,23 @@ export default function Layout({ children }) {
       <div className="mx-5 h-px bg-white/15 mb-1 flex-shrink-0" />
 
       <nav className="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto" data-testid="sidebar-nav">
-        {items.map((item) => (
-          <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
-        ))}
+        {items.map((item, idx) => {
+          if (item.group) {
+            return (
+              <div key={`g-${idx}`} className="mx-1 mt-2 mb-1 pt-2 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-cyan-300 text-center" data-testid="sidebar-group-flotas">
+                {item.group}
+              </div>
+            );
+          }
+          if (item.groupEnd) {
+            return <div key={`ge-${idx}`} className="mx-1 my-1 border-b border-white/15" />;
+          }
+          return <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />;
+        })}
 
         {isAdmin && (
           <>
-            <div className="mx-2 mt-2 mb-1 pt-2 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
+            <div className="mx-1 mt-2 mb-1 pt-2 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
               Admin
             </div>
             {ADMIN_ITEMS.map((item) => (
