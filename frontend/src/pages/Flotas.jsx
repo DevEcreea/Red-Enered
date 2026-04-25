@@ -1,18 +1,18 @@
 import React, { useState } from "react";
 import { ClipboardList, FileBarChart, QrCode } from "lucide-react";
-import Reportes from "./Reportes";
+import ControlIntegral from "./ControlIntegral";
 import ReportesConsumo from "./ReportesConsumo";
 import QRDescarga from "./QRDescarga";
 
 const TABS = [
-  { id: "control", label: "Control Integral", icon: ClipboardList, Component: Reportes, testid: "tab-control-integral" },
+  { id: "control", label: "Control Integral", icon: ClipboardList, Component: ControlIntegral, testid: "tab-control-integral" },
   { id: "consumo", label: "Reportes Consumo", icon: FileBarChart, Component: ReportesConsumo, testid: "tab-reportes-consumo" },
   { id: "qr", label: "Descarga tus QR", icon: QrCode, Component: QRDescarga, testid: "tab-qr" },
 ];
 
 export default function Flotas() {
   const [active, setActive] = useState("control");
-  const Current = TABS.find((t) => t.id === active)?.Component || Reportes;
+  const Current = TABS.find((t) => t.id === active)?.Component || ControlIntegral;
 
   return (
     <div className="space-y-6" data-testid="flotas-page">
