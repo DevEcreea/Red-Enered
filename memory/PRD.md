@@ -35,14 +35,32 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 - Layout: Sidebar colapsable mobile, header sticky con blur, responsive completo
 
 ## Verified (backend)
-- 26/26 pytest backend tests PASSED (auth, dashboard, consumptions tenant isolation, CRUDs, role gating, CSV upload)
+- 36/36 pytest backend tests PASSED (auth, dashboard contract, consumptions tenant isolation, CRUDs, role gating, CSV upload, QR bulk-upload/list/download/delete, multi-tenant QR isolation, dashboard gasto fields)
+
+## Implemented Iteration 2 (Apr 2026 - UI Major Refactor)
+- **Sidebar reorg**: nuevo logo ENERED (purple), módulo "Flotas" dividido en 3 ítems independientes:
+  - Control Integral → `/reportes` (administración de placas, vista existente reusada)
+  - Reportes Consumo → `/reportes-consumo` (NUEVA: tabla detallada paginada, KPIs, export CSV, filtros placa/semana/estación/producto/empresa)
+  - Descarga tus QR → `/qr` (NUEVA: grid de QR por placa, descarga directa, multi-tenant)
+- **Dashboard refactor radical**: eliminados todos los gráficos excepto los 4 principales:
+  - Consumo en el tiempo (line chart)
+  - Top 5 placas por consumo (bar horizontal)
+  - Consumo por ciudad (bar vertical)
+  - Consumo por estación (bar horizontal)
+  - Cada gráfico con toggle Galones/Soles **multi-select** (ambos a la vez, mín 1 activo)
+- **Analítica extendida**: todos los gráficos quitados del Dashboard se movieron aquí (Gasto, Ahorro, Operativos, Producto, Comportamiento) — ahora Analítica concentra Pareto + Heatmap + Participación + 13 gráficos extra.
+- **Carga masiva de QR (admin)**: `/admin/qr` con drag&drop multi-archivo. Filename `[PLACA].png/jpg/svg/webp` se asocia automáticamente. Endpoint `POST /api/admin/qr/upload-bulk` (multipart). Storage: `/app/backend/uploads/qr/{empresa}/{placa}.{ext}` + Mongo `qr_codes`. Endpoints `GET /api/qr/list`, `GET /api/qr/download/{placa}`, `DELETE /api/admin/qr/{placa}` con tenant isolation.
+- **Backend dashboard contract**: agregado campo `gasto` (S/) a `consumo_ciudad` y `consumo_estacion` para soportar el toggle Soles. Filtro `semana` agregado a `/api/consumptions`.
 
 ## Backlog / Future
-- ~~**P1**: Integración directa Google Sheets via service account~~ ✅ COMPLETADO Feb 2026 — `/api/admin/sheets/sync` con modos replace/append, normalización robusta de columnas (tildes, paréntesis, strings "S/")
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
+- **P2**: Magic-byte validation en upload de QR (rechazar payloads disfrazados)
 - **P2**: Aggregation pipeline en Mongo para dashboards a escala (>50k rows)
-- **P2**: Modularizar server.py (actualmente ~900 líneas) en routers separados
+- **P2**: Modularizar server.py (actualmente ~1609 líneas) en routers separados (auth/dashboard/qr/consumptions/admin)
 - **P2**: Subida real de PDF de facturas con object storage
+- **P2**: Tooltips explicativos en KPIs (hover interactions)
+- **P2**: Export Dashboard a PDF
+- **P2**: Benchmarks comparativos (unidad vs promedio flota)
 - **P3**: Notificaciones por email (forgot password actualmente solo loggea)
 - **P3**: Reportes programados / enviados por correo
 
