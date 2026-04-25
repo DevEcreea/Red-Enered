@@ -1390,7 +1390,7 @@ def _parse_sunat_xml(xml_bytes: bytes) -> dict:
         "ruc_cliente": ruc,
         "razon_social_cliente": razon_social,
         "tipo_doc": tipo_doc,
-        "producto": producto or "Combustible",
+        "producto": "Comb. Liq. Livianos",
     }
 
 
@@ -1411,12 +1411,17 @@ async def admin_invoices_upload_bulk(
     If empresa_override is provided, all uploaded invoices are assigned to that
     empresa (skips RUC matching).
     """
-    by_base: dict = {}
+    # Separar XMLs (procesar primero) y PDFs (matching posterior)
+    xmls: List[tuple] = []   # (filename_base, content, original_name)
+    pdfs: dict = {}          # base_normalized -> (content, original_name)
     for f in files:
-        base = _safe_doc(f.filename)
         ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
         content = await f.read()
-        by_base.setdefault(base, {})[ext] = (f.filename, content)
+        base = _safe_doc(f.filename)
+        if ext == "xml":
+            xmls.append((base, content, f.filename))
+        elif ext == "pdf":
+            pdfs[base.upper()] = (content, f.filename)
 
     saved: List[dict] = []
     skipped: List[dict] = []
@@ -1443,12 +1448,24 @@ async def admin_invoices_upload_bulk(
         if c.get("empresa"):
             name_to_empresa[_clean_name(c["empresa"])] = c["empresa"]
 
-    for base, parts in by_base.items():
-        if "xml" not in parts:
-            skipped.append({"base": base, "reason": "falta XML"})
-            continue
+    def _find_pdf_for(base: str, n_doc: str):
+        """Try multiple strategies to match a PDF for the given XML."""
+        # 1) Exact basename
+        if base.upper() in pdfs:
+            return pdfs[base.upper()]
+        # 2) PDF whose normalized base contains n_doc (or vice versa)
+        if n_doc:
+            n = _safe_doc(n_doc).upper()
+            for k, v in pdfs.items():
+                if n and (n in k or k in n):
+                    return v
+        # 3) If only one XML and one PDF in this batch, pair them
+        if len(xmls) == 1 and len(pdfs) == 1:
+            return list(pdfs.values())[0]
+        return None
+
+    for base, xml_bytes, xml_orig in xmls:
         try:
-            xml_name, xml_bytes = parts["xml"]
             meta = _parse_sunat_xml(xml_bytes)
         except Exception as e:
             skipped.append({"base": base, "reason": f"XML no parseable: {e}"})
@@ -1486,8 +1503,9 @@ async def admin_invoices_upload_bulk(
             out.write(xml_bytes)
 
         pdf_filename = None
-        if "pdf" in parts:
-            pdf_name, pdf_bytes = parts["pdf"]
+        pdf_match = _find_pdf_for(base, n_doc)
+        if pdf_match:
+            pdf_bytes, pdf_orig = pdf_match
             pdf_path = empresa_dir / f"{_safe_doc(n_doc)}.pdf"
             with open(pdf_path, "wb") as out:
                 out.write(pdf_bytes)
