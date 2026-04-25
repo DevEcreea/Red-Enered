@@ -1486,19 +1486,6 @@ async def admin_invoices_upload_bulk(
         else:
             await db.invoices.insert_one(record)
 
-        # Mark consumptions in [f_emision - 7d, f_emision] as facturado
-        if meta.get("f_emision"):
-            try:
-                fe = _date.fromisoformat(meta["f_emision"])
-                start = (fe - timedelta(days=14)).isoformat()
-                end = fe.isoformat()
-                await db.consumptions.update_many(
-                    {"EMPRESA": empresa, "FECHA": {"$gte": start, "$lte": end}, "facturado": {"$ne": True}},
-                    {"$set": {"facturado": True, "factura_n_doc": n_doc}},
-                )
-            except Exception:
-                pass
-
         saved.append({"n_doc": n_doc, "empresa": empresa, "estado": estado})
 
     return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
@@ -1551,7 +1538,8 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     inv_q = {"empresa": target} if target else {}
     invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
 
-    cons_q = {"facturado": {"$ne": True}}
+    # Notas de despacho = consumos NO facturados (ESTADO != "FACTURADO" en el sheet)
+    cons_q = {"ESTADO": {"$ne": "FACTURADO"}}
     if target:
         cons_q["EMPRESA"] = target
     elif user["role"] != "admin_enered":
