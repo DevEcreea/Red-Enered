@@ -22,35 +22,40 @@ function OverviewSection({ overview, alerts }) {
     : "—";
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 text-xs text-neutral-500 font-semibold justify-end">
+        <Clock className="w-3.5 h-3.5" />
+        Información generada el <span className="font-bold text-neutral-800">{syncFmt}</span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Estado General */}
-        <div className="lg:col-span-3 bg-white border border-neutral-200 rounded-2xl p-5" data-testid="estado-general">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-8 h-8 rounded-lg bg-brand-50 text-brand flex items-center justify-center">
-              <AlertCircle className="w-4 h-4" />
+        <div className="lg:col-span-4 bg-white border border-neutral-200 rounded-2xl p-6" data-testid="estado-general">
+          <div className="flex items-center gap-2.5 mb-5">
+            <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand flex items-center justify-center">
+              <AlertCircle className="w-5 h-5" />
             </div>
-            <h3 className="font-cabinet font-bold text-base text-neutral-900">Estado General</h3>
+            <h3 className="font-cabinet font-bold text-lg text-neutral-900">Estado General</h3>
           </div>
           {alerts.length === 0 ? (
-            <div className="flex items-start gap-2 bg-green-50 border border-green-100 rounded-lg p-3">
-              <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
-              <div className="text-xs">
-                <div className="font-bold text-green-800">Felicitaciones</div>
-                <div className="text-green-700">La configuración está completa</div>
+            <div className="flex items-start gap-3 bg-green-50 border border-green-100 rounded-lg p-4">
+              <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-bold text-green-800 text-sm">Felicitaciones</div>
+                <div className="text-green-700 text-xs mt-0.5">La configuración está completa</div>
               </div>
             </div>
           ) : (
-            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
               {alerts.slice(0, 6).map((a, i) => {
                 const col = a.nivel === "red" ? { bg: "bg-red-50", bd: "border-red-100", tx: "text-red-700", Ic: XCircle }
                   : a.nivel === "green" ? { bg: "bg-green-50", bd: "border-green-100", tx: "text-green-700", Ic: CheckCircle2 }
                   : { bg: "bg-amber-50", bd: "border-amber-100", tx: "text-amber-700", Ic: AlertTriangle };
                 const Ic = col.Ic;
                 return (
-                  <div key={i} className={`flex items-start gap-2 ${col.bg} border ${col.bd} rounded-lg p-2.5`}>
-                    <Ic className={`w-3.5 h-3.5 ${col.tx} mt-0.5 flex-shrink-0`} />
-                    <div className="text-[11px] leading-tight">
+                  <div key={i} className={`flex items-start gap-2.5 ${col.bg} border ${col.bd} rounded-lg p-3`}>
+                    <Ic className={`w-4 h-4 ${col.tx} mt-0.5 flex-shrink-0`} />
+                    <div className="text-xs leading-snug">
                       <div className={`font-bold ${col.tx}`}>{a.titulo}</div>
                       <div className="text-neutral-700 mt-0.5">{a.mensaje}</div>
                     </div>
@@ -61,78 +66,76 @@ function OverviewSection({ overview, alerts }) {
           )}
         </div>
 
-        {/* Línea de Crédito + Ahorro + Consumo */}
-        <div className="lg:col-span-5 rounded-2xl p-5 text-white" style={{ background: "linear-gradient(135deg, #9933FF 0%, #6B23B1 100%)" }} data-testid="linea-credito">
-          <div className="flex items-center gap-2 mb-3">
-            <Coins className="w-5 h-5" />
-            <h3 className="font-cabinet font-bold text-base">Línea de Crédito</h3>
+        {/* Línea de Crédito */}
+        <div className="lg:col-span-4 rounded-2xl p-6 text-white relative overflow-hidden" style={{ background: "linear-gradient(135deg, #9933FF 0%, #6B23B1 100%)" }} data-testid="linea-credito">
+          <div className="flex items-center gap-2.5 mb-5">
+            <Coins className="w-6 h-6" />
+            <h3 className="font-cabinet font-bold text-lg">Línea de Crédito</h3>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-3 mb-5">
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Total</div>
-              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5">{formatSoles(linea_credito.total)}</div>
+              <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Total</div>
+              <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight">{formatSoles(linea_credito.total)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Disponible</div>
-              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5 text-cyan-200">{formatSoles(linea_credito.disponible)}</div>
+              <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Disponible</div>
+              <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight text-cyan-200">{formatSoles(linea_credito.disponible)}</div>
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold">Utilizada</div>
-              <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-0.5 text-amber-200">{formatSoles(linea_credito.utilizada)}</div>
+              <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Utilizada</div>
+              <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight text-amber-200">{formatSoles(linea_credito.utilizada)}</div>
             </div>
           </div>
 
-          <div className="h-1.5 bg-white/15 rounded-full overflow-hidden mb-4">
-            <div className="h-full rounded-full bg-amber-300" style={{ width: `${Math.min(100, pctUsado)}%` }} />
+          <div className="h-2 bg-white/15 rounded-full overflow-hidden">
+            <div className="h-full rounded-full bg-amber-300 transition-all" style={{ width: `${Math.min(100, pctUsado)}%` }} />
           </div>
-
-          <div className="border-t border-white/15 pt-3 grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold mb-1">Ahorro</div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-cabinet font-black text-base">{formatSoles(ahorro.soles)}</span>
-                <span className="text-[10px] text-white/60 font-semibold">{formatNumber(ahorro.galones, 2)} gal</span>
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-white/70 font-bold mb-1">Consumo</div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-cabinet font-black text-base">{formatSoles(consumo.soles)}</span>
-                <span className="text-[10px] text-white/60 font-semibold">{formatNumber(consumo.galones, 2)} gal</span>
-              </div>
-            </div>
+          <div className="mt-2 text-[11px] font-semibold text-white/70">
+            {pctUsado.toFixed(1)}% utilizado · {linea_credito.total === 0 ? "sin línea configurada" : "de tu línea aprobada"}
           </div>
         </div>
 
-        {/* Mini metrics: Ticket / Carga / Precio + Unidades / Cargas / Red */}
-        <div className="lg:col-span-4 grid grid-cols-3 gap-3">
-          <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" />
-          <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} gal`} testid="mini-carga" />
-          <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" />
-          <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" />
-          <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" />
-          <MiniMetric
-            label="Red"
-            value={formatNumber(red_estaciones, 0)}
-            icon={Building2}
-            cyan
-            onClick={() => window.open(MAPS_LINK, "_blank")}
-            testid="mini-red"
-          />
+        {/* Ahorro + Consumo */}
+        <div className="lg:col-span-4 rounded-2xl p-6 text-white relative overflow-hidden" style={{ background: "linear-gradient(135deg, #6B23B1 0%, #4A148C 100%)" }} data-testid="ahorro-consumo">
+          <div className="flex items-center gap-2.5 mb-5">
+            <TrendingDown className="w-6 h-6" />
+            <h3 className="font-cabinet font-bold text-lg">Ahorro & Consumo</h3>
+          </div>
+
+          <div className="mb-5">
+            <div className="text-[11px] uppercase tracking-widest text-cyan-300 font-bold mb-1">Ahorro</div>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <span className="font-cabinet font-black text-2xl lg:text-3xl leading-tight text-cyan-200">{formatSoles(ahorro.soles)}</span>
+              <span className="text-sm text-white/80 font-bold">{formatNumber(ahorro.galones, 2)} gal</span>
+            </div>
+          </div>
+
+          <div className="border-t border-white/20 pt-4">
+            <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Consumo</div>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <span className="font-cabinet font-black text-2xl lg:text-3xl leading-tight">{formatSoles(consumo.soles)}</span>
+              <span className="text-sm text-white/70 font-bold">{formatNumber(consumo.galones, 2)} gal</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-[11px] text-neutral-500 font-medium">
-        <Clock className="w-3 h-3" />
-        Información generada el {syncFmt}
+      {/* Mini metrics row (6 cards horizontal) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <MiniMetric label="Ticket Prom." value={formatSoles(promedios.ticket)} testid="mini-ticket" />
+        <MiniMetric label="Carga Prom." value={`${formatNumber(promedios.carga_gal, 0)} gal`} testid="mini-carga" />
+        <MiniMetric label="Precio Prom." value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" />
+        <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" />
+        <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" />
+        <MiniMetric label="Red" value={formatNumber(red_estaciones, 0)} icon={Building2} cyan onClick={() => window.open(MAPS_LINK, "_blank")} testid="mini-red" />
       </div>
     </div>
   );
 }
 
 function MiniMetric({ label, value, icon: Icon, cyan = false, onClick, testid }) {
-  const base = "rounded-xl p-3 flex flex-col justify-center transition-all";
+  const base = "rounded-xl p-4 flex flex-col justify-between min-h-[100px] transition-all";
   const cls = cyan
     ? "bg-cyan-300 text-[#1e1b4b] border border-cyan-300 hover:bg-cyan-400 hover:-translate-y-0.5 cursor-pointer"
     : "bg-[#2B1C4A] text-white border border-[#2B1C4A]";
@@ -140,11 +143,11 @@ function MiniMetric({ label, value, icon: Icon, cyan = false, onClick, testid })
   return (
     <Wrapper onClick={onClick} data-testid={testid} className={`${base} ${cls} ${onClick ? "text-left" : ""}`}>
       <div className="flex items-center justify-between">
-        <div className={`text-[10px] uppercase tracking-widest font-bold ${cyan ? "text-[#1e1b4b]/70" : "text-white/60"}`}>{label}</div>
-        {Icon && <Icon className={`w-3.5 h-3.5 ${cyan ? "text-[#1e1b4b]/70" : "text-white/50"}`} />}
+        <div className={`text-[11px] uppercase tracking-widest font-bold ${cyan ? "text-[#1e1b4b]/70" : "text-white/60"}`}>{label}</div>
+        {Icon && <Icon className={`w-4 h-4 ${cyan ? "text-[#1e1b4b]/70" : "text-white/50"}`} />}
       </div>
-      <div className="font-cabinet font-black text-lg md:text-xl leading-tight mt-1">{value}</div>
-      {cyan && onClick && <div className="text-[9px] font-bold text-[#1e1b4b]/70 mt-0.5 flex items-center gap-0.5">Cobertura <ArrowUpRight className="w-2.5 h-2.5" /></div>}
+      <div className="font-cabinet font-black text-2xl leading-tight mt-2">{value}</div>
+      {cyan && onClick && <div className="text-[10px] font-bold text-[#1e1b4b]/70 mt-1 flex items-center gap-0.5">Cobertura <ArrowUpRight className="w-3 h-3" /></div>}
     </Wrapper>
   );
 }
@@ -261,7 +264,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header + Filtros globales */}
+      {/* Header + título */}
       <div>
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
           <div>
@@ -281,47 +284,46 @@ export default function Dashboard() {
             </select>
           )}
         </div>
-
-        <div className="bg-white border border-border rounded-lg p-3 md:p-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-neutral-600 uppercase tracking-wider">
-            <Filter className="w-4 h-4" /> Filtros
-          </div>
-          <select value={filters.placa} onChange={(e) => setFilters({ ...filters, placa: e.target.value })}
-            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[140px]" data-testid="filter-placa">
-            <option value="">Placa</option>
-            {options.placas.map((v) => <option key={v}>{v}</option>)}
-          </select>
-          <select value={filters.semana} onChange={(e) => setFilters({ ...filters, semana: e.target.value })}
-            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[140px]" data-testid="filter-semana">
-            <option value="">Semana</option>
-            {options.semanas.map((v) => <option key={v}>{v}</option>)}
-          </select>
-          <select value={filters.estacion} onChange={(e) => setFilters({ ...filters, estacion: e.target.value })}
-            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[180px]" data-testid="filter-estacion">
-            <option value="">Estación</option>
-            {options.estaciones.map((v) => <option key={v}>{v}</option>)}
-          </select>
-          <select value={filters.producto} onChange={(e) => setFilters({ ...filters, producto: e.target.value })}
-            className="h-9 px-3 border border-border rounded-md bg-white text-sm font-medium min-w-[160px]" data-testid="filter-producto">
-            <option value="">Producto</option>
-            {options.productos.map((v) => <option key={v}>{v}</option>)}
-          </select>
-          {activeFiltersCount > 0 && (
-            <button
-              onClick={() => setFilters({ empresa: filters.empresa, placa: "", semana: "", estacion: "", producto: "" })}
-              className="h-9 px-3 border border-border rounded-md text-xs font-bold flex items-center gap-1 hover:bg-neutral-50"
-              data-testid="filter-clear"
-            >
-              <X className="w-3 h-3" /> Limpiar ({activeFiltersCount})
-            </button>
-          )}
-        </div>
       </div>
 
-      {/* ========== OVERVIEW (Estado General + Línea Crédito + Metrics) ========== */}
-      {overview && (
-        <OverviewSection overview={overview} alerts={alerts} />
-      )}
+      {/* ========== OVERVIEW (Estado General + Línea Crédito + Ahorro) ========== */}
+      {overview && <OverviewSection overview={overview} alerts={alerts} />}
+
+      {/* Filtros globales (movidos después del overview) */}
+      <div className="bg-white border border-border rounded-lg p-3 md:p-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2 text-xs font-bold text-neutral-600 uppercase tracking-wider">
+          <Filter className="w-4 h-4" /> Filtros
+        </div>
+        <select value={filters.placa} onChange={(e) => setFilters({ ...filters, placa: e.target.value })}
+          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[140px]" data-testid="filter-placa">
+          <option value="">Placa</option>
+          {options.placas.map((v) => <option key={v}>{v}</option>)}
+        </select>
+        <select value={filters.semana} onChange={(e) => setFilters({ ...filters, semana: e.target.value })}
+          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[140px]" data-testid="filter-semana">
+          <option value="">Semana</option>
+          {options.semanas.map((v) => <option key={v}>{v}</option>)}
+        </select>
+        <select value={filters.estacion} onChange={(e) => setFilters({ ...filters, estacion: e.target.value })}
+          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[180px]" data-testid="filter-estacion">
+          <option value="">Estación</option>
+          {options.estaciones.map((v) => <option key={v}>{v}</option>)}
+        </select>
+        <select value={filters.producto} onChange={(e) => setFilters({ ...filters, producto: e.target.value })}
+          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold min-w-[160px]" data-testid="filter-producto">
+          <option value="">Producto</option>
+          {options.productos.map((v) => <option key={v}>{v}</option>)}
+        </select>
+        {activeFiltersCount > 0 && (
+          <button
+            onClick={() => setFilters({ empresa: filters.empresa, placa: "", semana: "", estacion: "", producto: "" })}
+            className="h-10 px-3 border border-border rounded-md text-xs font-bold flex items-center gap-1 hover:bg-neutral-50"
+            data-testid="filter-clear"
+          >
+            <X className="w-3 h-3" /> Limpiar ({activeFiltersCount})
+          </button>
+        )}
+      </div>
 
 
       {/* ========== CONSUMO ========== */}

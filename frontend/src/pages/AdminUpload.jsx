@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { formatApiError, formatDate } from "../lib/utils";
+import { formatApiError, formatDate, formatSoles } from "../lib/utils";
 import {
   Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
-  Cloud, RefreshCw, Clock, ExternalLink,
+  Cloud, RefreshCw, Clock, ExternalLink, Settings, Save, Building2, Receipt,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];
 
@@ -60,8 +61,10 @@ export default function AdminUpload() {
       <div>
         <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Administración</div>
         <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Fuente de datos</h1>
-        <p className="text-neutral-500 mt-1 text-sm">Sincroniza desde Google Sheets o sube manualmente CSV / Excel.</p>
+        <p className="text-neutral-500 mt-1 text-sm">Sincroniza desde Google Sheets, configura empresas y gestiona facturación.</p>
       </div>
+
+      <EmpresaConfigManager />
 
       {/* Google Sheets Sync */}
       <div className="chart-card border-l-4 border-l-brand" data-testid="sheets-sync-card">
@@ -218,6 +221,145 @@ export default function AdminUpload() {
             <b>Tip Google Sheets:</b> Archivo → Descargar → CSV. O mejor: usa la sincronización directa de arriba ⬆
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const PLAN_OPTIONS = [
+  { value: "tracking", label: "Plan Tracking" },
+  { value: "advanced", label: "Plan Advanced" },
+  { value: "integral", label: "Plan Integral" },
+];
+
+function EmpresaConfigManager() {
+  const [items, setItems] = useState([]);
+  const [empresasDisponibles, setEmpresasDisponibles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0 });
+  const [err, setErr] = useState("");
+  const [editing, setEditing] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [a, b] = await Promise.all([api.get("/empresas-config"), api.get("/empresas")]);
+      setItems(a.data); setEmpresasDisponibles(b.data);
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const openNew = () => {
+    setEditing(null);
+    setForm({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0 });
+    setShowForm(true); setErr("");
+  };
+
+  const openEdit = (cfg) => {
+    setEditing(cfg.empresa);
+    setForm({
+      empresa: cfg.empresa,
+      ruc: cfg.ruc || "",
+      plan: cfg.plan || "tracking",
+      linea_credito: cfg.linea_credito || 0,
+      unidades_contratadas: cfg.unidades_contratadas || 0,
+    });
+    setShowForm(true); setErr("");
+  };
+
+  const submit = async (e) => {
+    e.preventDefault(); setErr("");
+    try {
+      setSaving(form.empresa);
+      await api.post("/empresas-config", {
+        ...form,
+        linea_credito: parseFloat(form.linea_credito) || 0,
+        unidades_contratadas: parseInt(form.unidades_contratadas) || 0,
+      });
+      setShowForm(false);
+      load();
+    } catch (e2) { setErr(formatApiError(e2.response?.data?.detail)); }
+    finally { setSaving(null); }
+  };
+
+  return (
+    <div className="chart-card border-l-4 border-l-amber-400" data-testid="empresa-config-card">
+      <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-neutral-100">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-md bg-amber-50 border border-amber-100 flex items-center justify-center">
+            <Settings className="w-5 h-5 text-amber-600" strokeWidth={2.5} />
+          </div>
+          <div>
+            <h3 className="font-cabinet font-bold text-lg text-neutral-900">Configuración por empresa</h3>
+            <p className="text-xs text-neutral-500 mt-1">Plan contratado · línea de crédito · unidades · RUC</p>
+          </div>
+        </div>
+        <button onClick={openNew} className="btn-brand text-sm flex items-center gap-2" data-testid="empresa-config-new-btn">
+          + Nueva configuración
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={submit} className="bg-neutral-50 border border-border rounded-lg p-4 mb-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="empresa-config-form">
+          {editing ? (
+            <input value={form.empresa} disabled className="h-10 px-3 border border-border rounded-md text-sm bg-white font-mono" />
+          ) : (
+            <select required value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm bg-white">
+              <option value="">Empresa (del sheet)</option>
+              {empresasDisponibles.map((e) => <option key={e}>{e}</option>)}
+            </select>
+          )}
+          <input placeholder="RUC" value={form.ruc} onChange={(e) => setForm({ ...form, ruc: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm font-mono" />
+          <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm bg-white">
+            {PLAN_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+          <input type="number" step="0.01" placeholder="Línea de crédito (S/)" value={form.linea_credito} onChange={(e) => setForm({ ...form, linea_credito: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
+          <input type="number" placeholder="Unidades contratadas" value={form.unidades_contratadas} onChange={(e) => setForm({ ...form, unidades_contratadas: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
+          {err && <div className="md:col-span-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{err}</div>}
+          <div className="md:col-span-3 flex gap-2">
+            <button type="submit" disabled={saving} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-60" data-testid="empresa-config-save">
+              <Save className="w-4 h-4" /> {editing ? "Guardar cambios" : "Crear configuración"}
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancelar</button>
+          </div>
+        </form>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="enered-table" data-testid="empresa-config-table">
+          <thead>
+            <tr>
+              <th>Empresa</th><th>RUC</th><th>Plan</th>
+              <th className="text-right">Línea de crédito</th>
+              <th className="text-right">Unidades</th>
+              <th className="text-right">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? <tr><td colSpan={6} className="text-center py-6 text-neutral-500">Cargando...</td></tr>
+              : items.length === 0 ? <tr><td colSpan={6} className="text-center py-6 text-neutral-500">Sin empresas configuradas</td></tr>
+              : items.map((cfg) => (
+                <tr key={cfg.empresa}>
+                  <td className="font-bold flex items-center gap-2"><Building2 className="w-3.5 h-3.5 text-brand" />{cfg.empresa}</td>
+                  <td className="font-mono text-xs">{cfg.ruc || "—"}</td>
+                  <td><span className="text-xs font-bold px-2 py-1 bg-brand-50 text-brand rounded-full border border-brand-100 capitalize">{cfg.plan}</span></td>
+                  <td className="text-right font-bold">{formatSoles(cfg.linea_credito)}</td>
+                  <td className="text-right font-bold">{cfg.unidades_contratadas}</td>
+                  <td className="text-right">
+                    <button onClick={() => openEdit(cfg)} className="text-xs font-bold text-brand hover:underline" data-testid={`empresa-config-edit-${cfg.empresa}`}>Editar</button>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 p-3 bg-brand-50 border border-brand-100 rounded-md text-xs text-brand">
+        <Receipt className="w-4 h-4 flex-shrink-0" />
+        <span><b>Facturas pendientes de pago</b> se gestionan en el módulo <Link to="/facturacion" className="font-bold underline">Estado de Cuenta</Link>. La línea utilizada se calcula automáticamente sumando facturas con estado <b>pendiente</b> o <b>vencida</b>.</span>
       </div>
     </div>
   );
