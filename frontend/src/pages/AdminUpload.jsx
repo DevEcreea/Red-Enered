@@ -458,7 +458,7 @@ function InvoicesBulkUpload() {
         <input
           type="file"
           multiple
-          accept=".pdf,.xml,application/pdf,text/xml,application/xml"
+          accept=".pdf,.xml,application/pdf,text/xml,application/xml,*/*"
           onChange={(e) => handleFiles(e.target.files)}
           className="hidden"
           data-testid="invoices-file-input"
