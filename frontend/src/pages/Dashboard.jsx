@@ -105,19 +105,15 @@ function OverviewSection({ overview, alerts }) {
           </div>
         </div>
 
-        {/* Mini KPIs verticales (Ticket / Carga / Precio) */}
-        <div className="lg:col-span-3 grid grid-cols-3 lg:grid-cols-1 gap-3">
+        {/* Mini KPIs (Ticket / Carga / Precio + Unidades / Cargas / Red) - 2 columnas x 3 filas */}
+        <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-3 auto-rows-fr">
           <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" small />
+          <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" white small />
           <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} GAL`} testid="mini-carga" small />
+          <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" white small />
           <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" small />
+          <MiniMetric label="Red" value={formatNumber(red_estaciones, 0)} icon={Building2} cyan onClick={() => window.open(MAPS_LINK, "_blank")} testid="mini-red" small />
         </div>
-      </div>
-
-      {/* Fila inferior: Unidades / Cargas / Red */}
-      <div className="grid grid-cols-3 gap-3">
-        <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" white />
-        <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" white />
-        <MiniMetric label="Red" value={formatNumber(red_estaciones, 0)} icon={Building2} cyan onClick={() => window.open(MAPS_LINK, "_blank")} testid="mini-red" />
       </div>
     </div>
   );
