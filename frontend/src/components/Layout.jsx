@@ -88,7 +88,8 @@ function SidebarLink({ item, onClick }) {
 }
 
 function PlanCard({ label, title, color = "violet", testid, onClick, active = false, wide = false }) {
-  const base = "rounded-2xl px-4 py-3 border flex flex-col justify-center transition-all " + (wide ? "min-w-[200px]" : "min-w-[140px]");
+  // Fixed dimensions: 165 x 60 px, border-radius 20 px
+  const base = "rounded-[20px] px-3 py-2 border flex flex-col justify-center transition-all w-[165px] h-[60px] flex-shrink-0";
   const styles = {
     gray: "bg-neutral-100 text-neutral-800 border-neutral-200",
     violet: "bg-brand text-white border-brand hover:bg-brand-hover cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
@@ -100,11 +101,11 @@ function PlanCard({ label, title, color = "violet", testid, onClick, active = fa
 
   const content = (
     <>
-      <div className={`text-[10px] font-semibold uppercase tracking-wider ${color === "gray" ? "text-neutral-500" : color === "cyan" ? "text-[#1e1b4b]/70" : "text-white/75"}`}>
+      <div className={`text-[10px] font-semibold uppercase tracking-wider truncate ${color === "gray" ? "text-neutral-500" : color === "cyan" ? "text-[#1e1b4b]/70" : "text-white/75"}`}>
         {label}
       </div>
-      <div className={`font-bold text-sm mt-0.5 leading-tight ${color === "cyan" ? "text-[#1e1b4b]" : ""}`}>{title}</div>
-      {active && <div className="text-[9px] font-black uppercase tracking-widest text-cyan-300 mt-1">● Tu Plan</div>}
+      <div className={`font-bold text-sm mt-0.5 leading-tight truncate ${color === "cyan" ? "text-[#1e1b4b]" : ""}`} title={title}>{title}</div>
+      {active && <div className="text-[9px] font-black uppercase tracking-widest text-cyan-300 mt-0.5">● Tu Plan</div>}
     </>
   );
 
