@@ -149,15 +149,13 @@ export default function Layout({ children }) {
 
   const SidebarContent = () => (
     <>
-      {/* Logo + tagline */}
-      <div className="px-2 pt-3 pb-2 text-center flex-shrink-0">
-        <div className="w-20 h-20 mx-auto rounded-xl overflow-hidden bg-white/0 flex items-center justify-center">
-          <img
-            src={LOGO_IMG}
-            alt="ENERED"
-            className="w-full h-full object-contain"
-          />
-        </div>
+      {/* Logo */}
+      <div className="px-4 pt-4 pb-3 flex-shrink-0">
+        <img
+          src={LOGO_IMG}
+          alt="ENERED"
+          className="w-full max-w-[180px] mx-auto h-auto object-contain"
+        />
       </div>
 
       {/* Divider */}

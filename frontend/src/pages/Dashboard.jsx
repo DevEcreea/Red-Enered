@@ -282,14 +282,9 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-        <div>
-          <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Panel operativo</div>
-          <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Resumen de consumo</h1>
-          <p className="text-neutral-500 mt-1 text-sm">Decisiones claras a partir de cada carga de combustible.</p>
-        </div>
-        {user?.role === "admin_enered" && empresas.length > 0 && (
+      {/* Header — empresa filter only (admin) */}
+      {user?.role === "admin_enered" && empresas.length > 0 && (
+        <div className="flex justify-end">
           <select
             value={filters.empresa}
             onChange={(e) => setFilters({ ...filters, empresa: e.target.value })}
@@ -299,8 +294,8 @@ export default function Dashboard() {
             <option value="">Todas las empresas</option>
             {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
           </select>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Overview */}
       {overview && <OverviewSection overview={overview} alerts={alerts} />}

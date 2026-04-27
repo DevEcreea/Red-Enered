@@ -102,10 +102,10 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify Dashboard layout after login - ensure 6 mini metric cards (Ticket, Unidades, Carga, Cargas, Precio, Red) are arranged in a 2x3 grid in the right column, not in a separate bottom row."
+user_problem_statement: "Verify Dashboard visual changes: 1) Remove old header texts ('Panel operativo', 'Resumen de consumo', 'Decisiones claras...') - only show 'Todas las empresas' dropdown for admin. First content should be Estado General / Línea de Crédito / mini KPIs. 2) New ENERED logo in sidebar (white text, horizontal banner, transparent background) - no old square logo."
 
 frontend:
-  - task: "Dashboard Layout - 6 Mini Metric Cards in Right Column"
+  - task: "Dashboard Header Removal"
     implemented: true
     working: true
     file: "frontend/src/pages/Dashboard.jsx"
@@ -115,21 +115,34 @@ frontend:
     status_history:
         - working: true
           agent: "testing"
-          comment: "✅ Dashboard layout verified successfully. All 6 mini cards (mini-ticket, mini-unidades, mini-carga, mini-cargas, mini-precio, mini-red) are present in the right column (lg:col-span-3) arranged in a 2x3 grid. Layout structure confirmed: Left=Estado General, Middle=Línea de Crédito (purple), Right=6 mini cards. No separate bottom row. All data-testid selectors present. Screenshot captured at 1920x1080 viewport."
+          comment: "✅ Dashboard header changes verified successfully. Old header texts removed: 'Panel operativo' (0 occurrences), 'Resumen de consumo' (0 occurrences), 'Decisiones claras...' (0 occurrences). For admin user, 'Todas las empresas' dropdown is present and working (1 occurrence). First visible dashboard content is correctly Estado General section, Línea de Crédito card, and 6 mini KPI cards in 2x3 grid. Screenshot captured at 1920x1080 viewport."
+
+  - task: "New ENERED Logo in Sidebar"
+    implemented: true
+    working: true
+    file: "frontend/src/components/Layout.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ New ENERED logo verified successfully in sidebar. Logo file '/assets/enered-logo.png' is correctly loaded and displayed. Logo appears as white ENERED text in horizontal banner style on purple gradient sidebar background. No black square or old logo visible. Logo positioning and styling are correct with transparent background blending properly with sidebar gradient."
 
 metadata:
   created_by: "testing_agent"
-  version: "1.0"
-  test_sequence: 1
+  version: "1.1"
+  test_sequence: 2
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Dashboard Layout - 6 Mini Metric Cards in Right Column"
+    - "Dashboard Header Removal"
+    - "New ENERED Logo in Sidebar"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "testing"
-      message: "Dashboard layout verification complete. Login flow working correctly with credentials from test_credentials.md. All 6 mini metric cards are properly arranged in the right column as a 2x3 grid. Layout matches requirements: Estado General (left), Línea de Crédito (middle, purple), and 6 mini cards (right) with no separate bottom row. Full-page screenshot saved at .screenshots/dashboard_layout.png."
+      message: "Visual verification complete for Dashboard changes. Both requirements successfully implemented: 1) Old header texts ('Panel operativo', 'Resumen de consumo', 'Decisiones claras...') completely removed. Only 'Todas las empresas' dropdown visible for admin users. First dashboard content correctly shows Estado General, Línea de Crédito, and mini KPIs. 2) New ENERED logo (white horizontal banner style) correctly displayed in sidebar with transparent background on purple gradient. No old square logo present. Full-page screenshot saved at .screenshots/dashboard_visual_verification.png. Login flow working with admin@enered.com credentials."
