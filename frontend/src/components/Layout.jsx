@@ -63,7 +63,7 @@ function SidebarLink({ item, onClick }) {
   if (item.disabled) {
     return (
       <div
-        className="flex flex-col items-center justify-center py-1.5 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
+        className="flex flex-col items-center justify-center py-2.5 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
         data-testid={item.testid}
       >
         {content(false)}
@@ -77,7 +77,7 @@ function SidebarLink({ item, onClick }) {
       onClick={onClick}
       data-testid={item.testid}
       className={({ isActive }) =>
-        `flex flex-col items-center justify-center py-1.5 px-1.5 rounded-lg transition-all ${
+        `flex flex-col items-center justify-center py-2.5 px-1.5 rounded-lg transition-all ${
           isActive ? "bg-white/15 shadow-inner" : "hover:bg-white/10"
         }`
       }
@@ -88,10 +88,10 @@ function SidebarLink({ item, onClick }) {
 }
 
 function PlanCard({ label, title, color = "violet", testid, onClick, active = false, wide = false }) {
-  // wide cards (Cliente, Tipo de Producto): 250 px ancho, alto auto
+  // wide cards (Cliente, Tipo de Producto): 294 px ancho — 2 juntos + gap = 600 px (igual que Estado General)
   // tarjetas de plan (4): 200 x 60 px, border-radius 20 px
   const base = wide
-    ? "rounded-2xl px-4 py-3 border flex flex-col justify-center transition-all w-[250px] flex-shrink-0"
+    ? "rounded-2xl px-4 py-3 border flex flex-col justify-center transition-all w-[294px] flex-shrink-0"
     : "rounded-[20px] px-3 py-2 border flex flex-col justify-center transition-all w-[200px] h-[60px] flex-shrink-0";
   const styles = {
     gray: "bg-neutral-100 text-neutral-800 border-neutral-200",
@@ -153,26 +153,26 @@ export default function Layout({ children }) {
 
   const SidebarContent = () => (
     <>
-      {/* Logo */}
-      <div className="px-4 pt-4 pb-3 flex-shrink-0">
+      {/* Logo - con más espacio respiratorio arriba/abajo */}
+      <div className="px-2 pt-7 pb-7 flex-shrink-0">
         <img
           src={LOGO_IMG}
           alt="ENERED"
-          className="w-full max-w-[180px] mx-auto h-auto object-contain"
+          className="w-full max-w-[110px] mx-auto h-auto object-contain"
         />
       </div>
 
       {/* Divider */}
       <div className="mx-5 h-px bg-white/15 mb-1 flex-shrink-0" />
 
-      <nav className="flex-1 px-2 py-1 space-y-0.5 overflow-y-auto" data-testid="sidebar-nav">
+      <nav className="flex-1 px-2 py-2 flex flex-col justify-center space-y-2 overflow-y-auto" data-testid="sidebar-nav">
         {items.map((item) => (
           <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
         ))}
 
         {isAdmin && (
           <>
-            <div className="mx-1 mt-2 mb-1 pt-2 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
+            <div className="mx-1 mt-3 mb-1 pt-3 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
               Admin
             </div>
             {ADMIN_ITEMS.map((item) => (
