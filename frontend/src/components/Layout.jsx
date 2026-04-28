@@ -100,7 +100,7 @@ function PlanCard({ label, title, color = "violet", testid, onClick, active = fa
     cyan: "bg-cyan-300 text-[#1e1b4b] border-cyan-300 hover:bg-cyan-400 cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
   }[color];
 
-  const activeRing = active ? "shadow-lg" : "";
+  const activeRing = "";
 
   const content = (
     <>
