@@ -5,14 +5,14 @@ import ReportesConsumo from "./ReportesConsumo";
 import QRDescarga from "./QRDescarga";
 
 const TABS = [
-  { id: "control", label: "Control Integral", icon: ClipboardList, Component: ControlIntegral, testid: "tab-control-integral" },
   { id: "consumo", label: "Reportes Consumo", icon: FileBarChart, Component: ReportesConsumo, testid: "tab-reportes-consumo" },
+  { id: "control", label: "Control Integral", icon: ClipboardList, Component: ControlIntegral, testid: "tab-control-integral" },
   { id: "qr", label: "Descarga tus QR", icon: QrCode, Component: QRDescarga, testid: "tab-qr" },
 ];
 
 export default function Flotas() {
-  const [active, setActive] = useState("control");
-  const Current = TABS.find((t) => t.id === active)?.Component || ControlIntegral;
+  const [active, setActive] = useState("consumo");
+  const Current = TABS.find((t) => t.id === active)?.Component || ReportesConsumo;
 
   return (
     <div className="space-y-6" data-testid="flotas-page">
