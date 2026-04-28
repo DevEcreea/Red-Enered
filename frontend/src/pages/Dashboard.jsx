@@ -190,10 +190,16 @@ function ChartCard({ title, subtitle, units, setUnits, children, testid }) {
 }
 
 /* ---------------- Helpers para combinar series ---------------- */
-const G_COLOR = "#8039F4";
-const S_COLOR = "#10B981"; // verde-cyan, similar al mockup
+const G_COLOR = "#8039F4";          // Galones consumo
+const S_COLOR = "#10B981";          // Soles consumo
+const G_AHORRO_COLOR = "#06B6D4";   // Ahorro en galones (cyan-500)
+const S_AHORRO_COLOR = "#F59E0B";   // Ahorro en soles (amber-500)
 
 const fmtVal = (v, k) => k === "soles" ? formatSoles(v) : `${formatNumber(v, 2)} gal`;
+const fmtName = (name) => {
+  if (name === "Galones" || name === "Ahorro Gal") return "galones";
+  return "soles";
+};
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -251,14 +257,36 @@ export default function Dashboard() {
     semana: d.semana,
     galones: d.consumo,
     soles: d.gasto,
+    ahorro_galones: d.ahorro_galones || 0,
+    ahorro_soles: d.ahorro || 0,
   }));
 
   // Top 5 placas: re-uso top_placas_consumo (gal) + gasto_placa (S/)
   const placasMap = {};
-  (data.top_placas_consumo || []).forEach((p) => { placasMap[p.placa] = { placa: p.placa, galones: p.galones, soles: 0 }; });
+  (data.top_placas_consumo || []).forEach((p) => {
+    placasMap[p.placa] = {
+      placa: p.placa,
+      galones: p.galones,
+      soles: 0,
+      ahorro_galones: p.ahorro_galones || 0,
+      ahorro_soles: p.ahorro || 0,
+    };
+  });
   (data.gasto_placa || []).forEach((p) => {
-    if (placasMap[p.placa]) placasMap[p.placa].soles = p.gasto;
-    else placasMap[p.placa] = { placa: p.placa, galones: 0, soles: p.gasto };
+    if (placasMap[p.placa]) {
+      placasMap[p.placa].soles = p.gasto;
+      // si no veníamos del top consumo, guardamos ahorro de aquí
+      if (!placasMap[p.placa].ahorro_soles) placasMap[p.placa].ahorro_soles = p.ahorro || 0;
+      if (!placasMap[p.placa].ahorro_galones) placasMap[p.placa].ahorro_galones = p.ahorro_galones || 0;
+    } else {
+      placasMap[p.placa] = {
+        placa: p.placa,
+        galones: 0,
+        soles: p.gasto,
+        ahorro_galones: p.ahorro_galones || 0,
+        ahorro_soles: p.ahorro || 0,
+      };
+    }
   });
   const placasData = Object.values(placasMap)
     .sort((a, b) => (b.galones + b.soles) - (a.galones + a.soles))
@@ -269,6 +297,8 @@ export default function Dashboard() {
     ciudad: c.ciudad,
     galones: c.galones,
     soles: c.gasto || c.soles || (c.galones * (data.totals?.precio_enered || 0)),
+    ahorro_galones: c.ahorro_galones || 0,
+    ahorro_soles: c.ahorro || 0,
   }));
 
   // Consumo por estación (gal). Igual que arriba
@@ -276,6 +306,8 @@ export default function Dashboard() {
     estacion: e.estacion,
     galones: e.galones,
     soles: e.gasto || e.soles || (e.galones * (data.totals?.precio_enered || 0)),
+    ahorro_galones: e.ahorro_galones || 0,
+    ahorro_soles: e.ahorro || 0,
   }));
 
   return (
@@ -337,7 +369,7 @@ export default function Dashboard() {
       {/* ============== 4 GRÁFICOS PRINCIPALES ============== */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* 1. Consumo en el tiempo */}
-        <ChartCard title="Consumo en el tiempo" subtitle="Por semana" units={unitsTiempo} setUnits={setUnitsTiempo} testid="chart-consumo-tiempo">
+        <ChartCard title="Consumo en el tiempo" subtitle="Por semana · incluye ahorro" units={unitsTiempo} setUnits={setUnitsTiempo} testid="chart-consumo-tiempo">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={tiempoData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -348,74 +380,101 @@ export default function Dashboard() {
               )}
               <Tooltip
                 contentStyle={{ borderRadius: 8, fontSize: 12 }}
-                formatter={(v, name) => [fmtVal(v, name === "Galones" ? "galones" : "soles"), name]}
+                formatter={(v, name) => [fmtVal(v, fmtName(name)), name]}
               />
               <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
               {unitsTiempo.includes("galones") && (
-                <Line yAxisId="left" type="monotone" dataKey="galones" stroke={G_COLOR} strokeWidth={3} dot={{ r: 3 }} name="Galones" />
+                <>
+                  <Line yAxisId="left" type="monotone" dataKey="galones" stroke={G_COLOR} strokeWidth={3} dot={{ r: 3 }} name="Galones" />
+                  <Line yAxisId="left" type="monotone" dataKey="ahorro_galones" stroke={G_AHORRO_COLOR} strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 2.5 }} name="Ahorro Gal" />
+                </>
               )}
               {unitsTiempo.includes("soles") && (
-                <Line
-                  yAxisId={unitsTiempo.includes("galones") ? "right" : "left"}
-                  type="monotone" dataKey="soles" stroke={S_COLOR} strokeWidth={3} dot={{ r: 3 }} name="Soles"
-                />
+                <>
+                  <Line
+                    yAxisId={unitsTiempo.includes("galones") ? "right" : "left"}
+                    type="monotone" dataKey="soles" stroke={S_COLOR} strokeWidth={3} dot={{ r: 3 }} name="Soles"
+                  />
+                  <Line
+                    yAxisId={unitsTiempo.includes("galones") ? "right" : "left"}
+                    type="monotone" dataKey="ahorro_soles" stroke={S_AHORRO_COLOR} strokeWidth={2.5} strokeDasharray="5 4" dot={{ r: 2.5 }} name="Ahorro S/"
+                  />
+                </>
               )}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
         {/* 2. Top 5 placas por consumo */}
-        <ChartCard title="Top 5 placas por consumo" subtitle="Unidades a revisar" units={unitsPlacas} setUnits={setUnitsPlacas} testid="chart-top-placas">
+        <ChartCard title="Top 5 placas por consumo" subtitle="Unidades a revisar · incluye ahorro" units={unitsPlacas} setUnits={setUnitsPlacas} testid="chart-top-placas">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={placasData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 11 }} stroke="#a3a3a3" />
               <YAxis type="category" dataKey="placa" tick={{ fontSize: 12, fontWeight: 700 }} width={80} stroke="#525252" />
-              <Tooltip formatter={(v, name) => [fmtVal(v, name === "Galones" ? "galones" : "soles"), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Tooltip formatter={(v, name) => [fmtVal(v, fmtName(name)), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
               {unitsPlacas.includes("galones") && (
-                <Bar dataKey="galones" fill={G_COLOR} radius={[0, 4, 4, 0]} name="Galones" />
+                <>
+                  <Bar dataKey="galones" fill={G_COLOR} radius={[0, 4, 4, 0]} name="Galones" />
+                  <Bar dataKey="ahorro_galones" fill={G_AHORRO_COLOR} radius={[0, 4, 4, 0]} name="Ahorro Gal" />
+                </>
               )}
               {unitsPlacas.includes("soles") && (
-                <Bar dataKey="soles" fill={S_COLOR} radius={[0, 4, 4, 0]} name="Soles" />
+                <>
+                  <Bar dataKey="soles" fill={S_COLOR} radius={[0, 4, 4, 0]} name="Soles" />
+                  <Bar dataKey="ahorro_soles" fill={S_AHORRO_COLOR} radius={[0, 4, 4, 0]} name="Ahorro S/" />
+                </>
               )}
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
         {/* 3. Consumo por ciudad */}
-        <ChartCard title="Consumo por ciudad" subtitle="Zonas críticas" units={unitsCiudad} setUnits={setUnitsCiudad} testid="chart-ciudad">
+        <ChartCard title="Consumo por ciudad" subtitle="Zonas críticas · incluye ahorro" units={unitsCiudad} setUnits={setUnitsCiudad} testid="chart-ciudad">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={ciudadData} margin={{ top: 5, right: 10, left: 0, bottom: 50 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
               <XAxis dataKey="ciudad" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-30} textAnchor="end" height={55} />
               <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" />
-              <Tooltip formatter={(v, name) => [fmtVal(v, name === "Galones" ? "galones" : "soles"), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Tooltip formatter={(v, name) => [fmtVal(v, fmtName(name)), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
               {unitsCiudad.includes("galones") && (
-                <Bar dataKey="galones" fill={G_COLOR} radius={[6, 6, 0, 0]} name="Galones" />
+                <>
+                  <Bar dataKey="galones" fill={G_COLOR} radius={[6, 6, 0, 0]} name="Galones" />
+                  <Bar dataKey="ahorro_galones" fill={G_AHORRO_COLOR} radius={[6, 6, 0, 0]} name="Ahorro Gal" />
+                </>
               )}
               {unitsCiudad.includes("soles") && (
-                <Bar dataKey="soles" fill={S_COLOR} radius={[6, 6, 0, 0]} name="Soles" />
+                <>
+                  <Bar dataKey="soles" fill={S_COLOR} radius={[6, 6, 0, 0]} name="Soles" />
+                  <Bar dataKey="ahorro_soles" fill={S_AHORRO_COLOR} radius={[6, 6, 0, 0]} name="Ahorro S/" />
+                </>
               )}
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
         {/* 4. Consumo por estación */}
-        <ChartCard title="Consumo por estación" subtitle="Top 10 dependencia operativa" units={unitsEstacion} setUnits={setUnitsEstacion} testid="chart-estacion-consumo">
+        <ChartCard title="Consumo por estación" subtitle="Top 10 dependencia operativa · incluye ahorro" units={unitsEstacion} setUnits={setUnitsEstacion} testid="chart-estacion-consumo">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={estacionData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
               <YAxis type="category" dataKey="estacion" tick={{ fontSize: 10, fontWeight: 700 }} width={140} stroke="#525252" />
-              <Tooltip formatter={(v, name) => [fmtVal(v, name === "Galones" ? "galones" : "soles"), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+              <Tooltip formatter={(v, name) => [fmtVal(v, fmtName(name)), name]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
               {unitsEstacion.includes("galones") && (
-                <Bar dataKey="galones" fill={G_COLOR} radius={[0, 4, 4, 0]} name="Galones" />
+                <>
+                  <Bar dataKey="galones" fill={G_COLOR} radius={[0, 4, 4, 0]} name="Galones" />
+                  <Bar dataKey="ahorro_galones" fill={G_AHORRO_COLOR} radius={[0, 4, 4, 0]} name="Ahorro Gal" />
+                </>
               )}
               {unitsEstacion.includes("soles") && (
-                <Bar dataKey="soles" fill={S_COLOR} radius={[0, 4, 4, 0]} name="Soles" />
+                <>
+                  <Bar dataKey="soles" fill={S_COLOR} radius={[0, 4, 4, 0]} name="Soles" />
+                  <Bar dataKey="ahorro_soles" fill={S_AHORRO_COLOR} radius={[0, 4, 4, 0]} name="Ahorro S/" />
+                </>
               )}
             </BarChart>
           </ResponsiveContainer>

@@ -558,15 +558,19 @@ async def dashboard_kpis(
     pizarra_pond = {}
     for r in rows:
         s = r.get("SEMANA", "Sin semana")
-        d = by_week.setdefault(s, {"consumo": 0.0, "gasto": 0.0, "ahorro": 0.0, "cargas": 0})
+        d = by_week.setdefault(s, {"consumo": 0.0, "gasto": 0.0, "ahorro": 0.0, "ahorro_gal": 0.0, "cargas": 0})
         g = _f(r.get("CANTIDAD_GL"))
+        ah = _f(r.get("AHORRO"))
         d["consumo"] += g
         d["gasto"] += _f(r.get("IMPORTE_TOTAL"))
-        d["ahorro"] += _f(r.get("AHORRO"))
+        d["ahorro"] += ah
         d["cargas"] += 1
 
         pu = _f(r.get("PRECIO_UNITARIO"))
         pp = _f(r.get("PRECIO_PIZARRA"))
+        # Galones equivalentes ahorrados = ahorro_S/ / precio_pizarra
+        if pp > 0 and ah > 0:
+            d["ahorro_gal"] += ah / pp
         if pu > 0 and g > 0:
             pw = precios_pond.setdefault(s, {"pond": 0.0, "gal": 0.0})
             pw["pond"] += pu * g
@@ -589,6 +593,7 @@ async def dashboard_kpis(
             "consumo": round(d["consumo"], 2),
             "gasto": round(d["gasto"], 2),
             "ahorro": round(d["ahorro"], 2),
+            "ahorro_galones": round(d["ahorro_gal"], 2),
             "cargas": d["cargas"],
             "ticket_prom": round(ticket, 2),
             "gal_por_carga": round(gal_carga, 2),
@@ -601,17 +606,22 @@ async def dashboard_kpis(
     for r in rows:
         p = r.get("PLACA")
         if not p: continue
-        d = by_placa.setdefault(p, {"consumo": 0.0, "gasto": 0.0, "cargas": 0})
+        d = by_placa.setdefault(p, {"consumo": 0.0, "gasto": 0.0, "ahorro": 0.0, "ahorro_gal": 0.0, "cargas": 0})
         d["consumo"] += _f(r.get("CANTIDAD_GL"))
         d["gasto"] += _f(r.get("IMPORTE_TOTAL"))
+        ah = _f(r.get("AHORRO"))
+        pp = _f(r.get("PRECIO_PIZARRA"))
+        d["ahorro"] += ah
+        if pp > 0 and ah > 0:
+            d["ahorro_gal"] += ah / pp
         d["cargas"] += 1
 
     top_placas_consumo = sorted(
-        [{"placa": p, "galones": round(v["consumo"], 2)} for p, v in by_placa.items()],
+        [{"placa": p, "galones": round(v["consumo"], 2), "ahorro": round(v["ahorro"], 2), "ahorro_galones": round(v["ahorro_gal"], 2)} for p, v in by_placa.items()],
         key=lambda x: -x["galones"]
     )[:5]
     gasto_placa = sorted(
-        [{"placa": p, "gasto": round(v["gasto"], 2)} for p, v in by_placa.items()],
+        [{"placa": p, "gasto": round(v["gasto"], 2), "ahorro": round(v["ahorro"], 2), "ahorro_galones": round(v["ahorro_gal"], 2)} for p, v in by_placa.items()],
         key=lambda x: -x["gasto"]
     )[:10]
     cargas_placa = sorted(
@@ -622,20 +632,41 @@ async def dashboard_kpis(
     # ---- Ciudad / Estación ----
     ciudades = {}
     ciudades_gasto = {}
+    ciudades_ahorro = {}
+    ciudades_ahorro_gal = {}
     est_consumo = {}
     est_gasto = {}
     est_ahorro = {}
+    est_ahorro_gal = {}
     for r in rows:
         c = r.get("CIUDAD", "Sin ciudad")
+        ah = _f(r.get("AHORRO"))
+        pp = _f(r.get("PRECIO_PIZARRA"))
+        ah_gal = (ah / pp) if (pp > 0 and ah > 0) else 0.0
         ciudades[c] = ciudades.get(c, 0) + _f(r.get("CANTIDAD_GL"))
         ciudades_gasto[c] = ciudades_gasto.get(c, 0) + _f(r.get("IMPORTE_TOTAL"))
+        ciudades_ahorro[c] = ciudades_ahorro.get(c, 0) + ah
+        ciudades_ahorro_gal[c] = ciudades_ahorro_gal.get(c, 0) + ah_gal
         e = r.get("ESTACION", "Sin estación")
         est_consumo[e] = est_consumo.get(e, 0) + _f(r.get("CANTIDAD_GL"))
         est_gasto[e] = est_gasto.get(e, 0) + _f(r.get("IMPORTE_TOTAL"))
-        est_ahorro[e] = est_ahorro.get(e, 0) + _f(r.get("AHORRO"))
+        est_ahorro[e] = est_ahorro.get(e, 0) + ah
+        est_ahorro_gal[e] = est_ahorro_gal.get(e, 0) + ah_gal
 
-    consumo_ciudad = [{"ciudad": c, "galones": round(v, 2), "gasto": round(ciudades_gasto.get(c, 0), 2)} for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]]
-    consumo_estacion = [{"estacion": e, "galones": round(v, 2), "gasto": round(est_gasto.get(e, 0), 2)} for e, v in sorted(est_consumo.items(), key=lambda x: -x[1])[:10]]
+    consumo_ciudad = [{
+        "ciudad": c,
+        "galones": round(v, 2),
+        "gasto": round(ciudades_gasto.get(c, 0), 2),
+        "ahorro": round(ciudades_ahorro.get(c, 0), 2),
+        "ahorro_galones": round(ciudades_ahorro_gal.get(c, 0), 2),
+    } for c, v in sorted(ciudades.items(), key=lambda x: -x[1])[:10]]
+    consumo_estacion = [{
+        "estacion": e,
+        "galones": round(v, 2),
+        "gasto": round(est_gasto.get(e, 0), 2),
+        "ahorro": round(est_ahorro.get(e, 0), 2),
+        "ahorro_galones": round(est_ahorro_gal.get(e, 0), 2),
+    } for e, v in sorted(est_consumo.items(), key=lambda x: -x[1])[:10]]
     ahorro_estacion = [{"estacion": e, "ahorro": round(v, 2)} for e, v in sorted(est_ahorro.items(), key=lambda x: -x[1])[:10]]
 
     # ---- Producto ----
