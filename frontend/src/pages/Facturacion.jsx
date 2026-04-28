@@ -191,43 +191,50 @@ export default function Facturacion() {
             </div>
 
             {/* Donut a la derecha del card */}
-            <div className="relative w-full h-[280px]" data-testid="ec-donut">
+            <div className="w-full" data-testid="ec-donut">
               {donutData.length === 0 ? (
                 <div className="text-sm text-neutral-400 text-center pt-20">Sin datos</div>
               ) : (
                 <>
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie
-                        data={donutData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={70}
-                        outerRadius={130}
-                        paddingAngle={1}
-                        startAngle={90}
-                        endAngle={-270}
-                        stroke="#fff"
-                        strokeWidth={3}
-                      >
-                        {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                      </Pie>
-                      <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="absolute inset-0 flex items-start justify-center pt-6 pointer-events-none">
-                    <div className="font-cabinet font-black text-base text-white drop-shadow-md">
-                      {formatSoles(state.linea_credito_total)}
+                  <div className="relative w-full h-[240px]">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <PieChart>
+                        <Pie
+                          data={donutData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={78}
+                          outerRadius={115}
+                          paddingAngle={2}
+                          startAngle={90}
+                          endAngle={-270}
+                          stroke="#fff"
+                          strokeWidth={2}
+                        >
+                          {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                        </Pie>
+                        <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    {/* Label centrado en el hueco del donut */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <div className="text-[10px] uppercase tracking-widest text-neutral-400 font-bold">Línea Total</div>
+                      <div className="font-cabinet font-black text-[22px] text-neutral-900 leading-tight mt-1">
+                        {formatSoles(state.linea_credito_total)}
+                      </div>
                     </div>
                   </div>
-                  {/* Etiquetas de los segmentos pequeños */}
-                  <div className="absolute bottom-4 left-4 flex flex-col gap-1 pointer-events-none">
-                    {donutData.filter((d) => d.name !== "Disponible").map((d) => (
-                      <div key={d.name} className="text-[10px] font-bold flex items-center gap-1.5">
-                        <span className="w-2 h-2 rounded-sm" style={{ background: d.color }} />
-                        <span className="text-neutral-700">{d.name}: <b>{formatSoles(d.value)}</b></span>
+                  {/* Leyenda limpia debajo del donut */}
+                  <div className="mt-3 space-y-1.5 px-1">
+                    {donutData.map((d) => (
+                      <div key={d.name} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: d.color }} />
+                          <span className="text-neutral-600 font-semibold truncate">{d.name}</span>
+                        </div>
+                        <span className="font-bold text-neutral-900 ml-2 flex-shrink-0">{formatSoles(d.value)}</span>
                       </div>
                     ))}
                   </div>
