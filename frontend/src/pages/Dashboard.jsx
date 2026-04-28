@@ -283,7 +283,7 @@ export default function Dashboard() {
   }));
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-2.5">
       {/* Header — empresa filter only (admin) */}
       {user?.role === "admin_enered" && empresas.length > 0 && (
         <div className="flex justify-end">

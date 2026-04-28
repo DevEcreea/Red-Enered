@@ -102,30 +102,30 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify sidebar spacing improvements (logo breathing space ≥20px, navigation modules vertically centered with more spacing) and plan cards alignment (plan-cliente + plan-producto = 600px total, aligning with Estado General card below)."
+user_problem_statement: "Measure vertical gaps on Dashboard: (1) Mini KPIs row bottom to Filters bar top, (2) Filters bar bottom to Charts row top. Both should be ~10px (space-y-2.5 change verification)."
 
 frontend:
-  - task: "Sidebar Spacing & Plan Cards Alignment Verification"
+  - task: "Dashboard Vertical Gap Measurements (Mini KPIs → Filters → Charts)"
     implemented: true
     working: true
-    file: "frontend/src/components/Layout.jsx, frontend/src/pages/Dashboard.jsx"
+    file: "frontend/src/pages/Dashboard.jsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "testing"
-          comment: "✅ ALL VISUAL REQUIREMENTS VERIFIED! Tested at 1920x1080 viewport. SIDEBAR: Logo breathing space 28px top + 28px bottom (≥20px required) ✅. Navigation modules vertically centered with justify-content: center, offset diff 0.0px ✅. Module spacing 8px between items (space-y-2) ✅. PLAN CARDS: plan-cliente 294px ✅, plan-producto 294px ✅, gap 12px ✅. Combined width: 294 + 12 + 294 = 600px exactly ✅. Fixed plan cards (tracking, advanced, integral, prueba): all 200×60px ✅. ALIGNMENT: plan-cliente left edge and plan-producto right edge align PERFECTLY with Estado General card (600px wide) - 0.0px difference on both left and right edges ✅. Screenshots: .screenshots/dashboard_full_view.png, .screenshots/plan_cards_alignment.png"
+          comment: "✅ VERTICAL GAP MEASUREMENTS VERIFIED! Tested at 1920x1080 viewport. GAP 1 (Mini KPIs → Filters): EXACTLY 10.0px ✅ - Bottom Y of mini-cargas: 559.5px, Top Y of filters container: 569.5px. GAP 2 (Filters → Charts): EXACTLY 10.0px ✅ - Bottom Y of filters container: 643.5px, Top Y of first chart (Consumo en el tiempo): 653.5px. Both gaps within tolerance (10 ± 2px). The space-y-2.5 change is working PERFECTLY. No visual issues - cards not touching, no overlap, spacing looks clean and professional. Screenshot: .screenshots/gap_measurements_dashboard.png. Login: admin@enered.com/admin123 ✅"
 
 metadata:
   created_by: "testing_agent"
-  version: "1.6"
-  test_sequence: 7
+  version: "1.7"
+  test_sequence: 8
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Sidebar Spacing & Plan Cards Alignment Verification"
+    - "Dashboard Vertical Gap Measurements (Mini KPIs → Filters → Charts)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -141,3 +141,5 @@ agent_communication:
       message: "✅ UPDATED DASHBOARD LAYOUT VERIFICATION COMPLETE! Tested at 1920x1080 viewport. All 8 cards measured with exact dimensions: Estado General (600×270px), Línea de Crédito (600×270px), all 6 mini cards (150×130px). Vertical centering verified: all mini card values centered within ±10px tolerance (Ticket/Carga/Precio: 8px, Unidades/Cargas: 8px, Red: 1px). Estado General shows ~3 alerts visible with scroll working (6 total alerts, scrollHeight 382px > clientHeight 180px). Línea de Crédito bottom space 48px (acceptable padding). Grid height calculation confirmed: 2×130 + 10 gap = 270px. Screenshot: .screenshots/dashboard_dimensions_verification.png. Login: admin@enered.com/admin123 ✅"
     - agent: "testing"
       message: "✅ SIDEBAR SPACING & PLAN CARDS ALIGNMENT VERIFICATION COMPLETE! Tested at 1920x1080 viewport. SIDEBAR: Logo breathing space 28px top + 28px bottom (exceeds ≥20px requirement) ✅. Navigation modules vertically centered with justify-content: center, perfect centering (0.0px offset difference between top and bottom) ✅. Module spacing 8px between each item (space-y-2 = 8px in Tailwind) ✅. PLAN CARDS: plan-cliente 294px ✅, plan-producto 294px ✅, gap-3 = 12px ✅. Combined width calculation: 294 + 12 + 294 = 600px exactly ✅. Fixed plan cards (tracking, advanced, integral, prueba): all exactly 200×60px ✅. ALIGNMENT: plan-cliente left edge (144.0px) aligns PERFECTLY with Estado General left edge (144.0px) - 0.0px difference ✅. plan-producto right edge (744.0px) aligns PERFECTLY with Estado General right edge (744.0px) - 0.0px difference ✅. Estado General card confirmed 600px wide ✅. Screenshots: .screenshots/dashboard_full_view.png, .screenshots/plan_cards_alignment.png. Login: admin@enered.com/admin123 ✅"
+    - agent: "testing"
+      message: "✅ DASHBOARD VERTICAL GAP MEASUREMENTS COMPLETE! Tested at 1920x1080 viewport. Measured exact pixel gaps between dashboard sections: GAP 1 (Mini KPIs row → Filters bar): 10.0px exactly (mini-cargas bottom 559.5px → filters top 569.5px) ✅. GAP 2 (Filters bar → Charts row): 10.0px exactly (filters bottom 643.5px → first chart top 653.5px) ✅. Both gaps within 10 ± 2px tolerance. The space-y-2.5 Tailwind class change is working perfectly. Visual inspection: no cards touching, no overlap, spacing is clean and professional. Screenshot shows full dashboard area from KPI cards through filters to charts: .screenshots/gap_measurements_dashboard.png. Login: admin@enered.com/admin123 ✅"
