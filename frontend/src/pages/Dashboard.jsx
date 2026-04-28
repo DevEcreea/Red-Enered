@@ -90,13 +90,13 @@ function OverviewSection({ overview, alerts }) {
           <div className="border-t border-white/20 pt-3 grid grid-cols-2 gap-4">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-cyan-300 font-bold mb-1">Ahorro</div>
-              <div className="font-cabinet font-black text-lg lg:text-xl leading-tight text-cyan-200">{formatSoles(ahorro.soles)}</div>
-              <div className="text-xs text-white/70 font-bold">{formatNumber(ahorro.galones, 0)} GAL</div>
+              <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight text-cyan-200">{formatSoles(ahorro.soles)}</div>
+              <div className="text-lg lg:text-xl text-white/70 font-bold">{formatNumber(ahorro.galones, 0)} GAL</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Consumo</div>
-              <div className="font-cabinet font-black text-lg lg:text-xl leading-tight">{formatSoles(consumo.soles)}</div>
-              <div className="text-xs text-white/70 font-bold">{formatNumber(consumo.galones, 0)} GAL</div>
+              <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight">{formatSoles(consumo.soles)}</div>
+              <div className="text-lg lg:text-xl text-white/70 font-bold">{formatNumber(consumo.galones, 0)} GAL</div>
             </div>
           </div>
         </div>
