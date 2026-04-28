@@ -157,7 +157,7 @@ function UnitToggle({ units, setUnits }) {
         type="button"
         onClick={() => toggle("galones")}
         data-testid="toggle-galones"
-        className={`${baseBtn} ${isOn("galones") ? "bg-fuchsia-500 text-white shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}
+        className={`${baseBtn} ${isOn("galones") ? "bg-brand text-white shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}
       >
         Galones
       </button>
@@ -165,7 +165,7 @@ function UnitToggle({ units, setUnits }) {
         type="button"
         onClick={() => toggle("soles")}
         data-testid="toggle-soles"
-        className={`${baseBtn} ${isOn("soles") ? "bg-fuchsia-500 text-white shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}
+        className={`${baseBtn} ${isOn("soles") ? "bg-brand text-white shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}
       >
         Soles
       </button>

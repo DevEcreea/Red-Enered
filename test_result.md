@@ -102,46 +102,47 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify icon replacements on Dashboard: (1) Sidebar 8 menu items using custom PNG icons (white on purple, active=cyan), (2) Estado General card icon, (3) Línea de Crédito card icon, (4) 6 mini cards with new layout (icon top, value middle, label bottom) and correct icon colors."
+user_problem_statement: "Verify GALONES/SOLES toggle buttons use new brand color #8039F4 (NOT old fuchsia #D946EF) and Línea de Crédito card has only 1 thin divider (no progress bar)."
 
 frontend:
-  - task: "Dashboard Icon Replacements Verification (Sidebar + Cards)"
+  - task: "Toggle Buttons Brand Color Update (#8039F4)"
     implemented: true
     working: true
-    file: "frontend/src/components/Layout.jsx, frontend/src/pages/Dashboard.jsx"
+    file: "frontend/src/pages/Dashboard.jsx, frontend/tailwind.config.js"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "testing"
-          comment: "✅ ALL ICON REPLACEMENTS VERIFIED SUCCESSFULLY! Tested at 1920x1080 viewport. ICON FILES: All 16 PNG icons accessible (HTTP 200) ✅. SIDEBAR (8 items): All using custom PNG icons from /assets/icons/ - Dashboard (ACTIVE with cyan tint), Flotas, Centro Monitoreo, Analítica, Estado Cuenta, Seguridad, Capacitación, Soporte (all WHITE on purple) ✅. ESTADO GENERAL CARD: Using /assets/icons/estado-general.png in purple-tinted box ✅. LÍNEA DE CRÉDITO CARD: Using /assets/icons/linea-credito.png (white on purple #8039F4) ✅. MINI CARDS (6): All using PNG icons with CORRECT layout (icon TOP → value MIDDLE → label BOTTOM) and correct dimensions (150x130px) ✅. Icon colors verified: Ticket/Carga/Precio (WHITE on dark blue), Unidades/Cargas (DARK BLUE/PURPLE on white), Red (DARK BLUE/PURPLE on cyan) ✅. No lucide-react icons found, all replaced with custom PNGs. Screenshot: .screenshots/dashboard_icon_verification.png. Login: admin@enered.com/admin123 ✅"
+          comment: "✅ TOGGLE BUTTONS COLOR VERIFIED! Tested at 1920x1080 viewport. Found 4 GALONES and 4 SOLES toggle buttons (one per chart). ALL active buttons use CORRECT brand color: rgb(128, 57, 244) = #8039F4 ✅. Text color: white rgb(255, 255, 255) ✅. NO buttons use old fuchsia color rgb(217, 70, 239) = #D946EF ✅. Toggle interaction tested: clicking switches active state and maintains correct color ✅. Tailwind config confirmed: brand.DEFAULT = #8039F4. Screenshots: dashboard_full_toggles.png, dashboard_after_toggle_click.png, toggle_buttons_closeup.png. Login: admin@enered.com/admin123 ✅"
+  
+  - task: "Línea de Crédito Card Divider Simplification"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/Dashboard.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "testing"
+          comment: "✅ LÍNEA DE CRÉDITO CARD STRUCTURE VERIFIED! Tested at 1920x1080 viewport. Card has exactly 1 divider: 1px solid rgba(255, 255, 255, 0.2) using border-t border-white/20 class ✅. Divider correctly positioned between top KPIs (Total/Disponible/Utilizada) and bottom KPIs (Ahorro/Consumo) ✅. NO progress bars found (0) ✅. NO thick amber bars found (0) - old progress bar successfully removed ✅. Card structure: 3 children (header, top KPIs grid, bottom section with divider) ✅. Visual inspection confirms clean, simplified design with single thin white separator. Screenshots: linea_credito_final.png, dashboard_final.png. Login: admin@enered.com/admin123 ✅"
 
 metadata:
   created_by: "testing_agent"
-  version: "1.8"
-  test_sequence: 9
+  version: "1.9"
+  test_sequence: 10
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Dashboard Icon Replacements Verification (Sidebar + Cards)"
+    - "Toggle Buttons Brand Color Update (#8039F4)"
+    - "Línea de Crédito Card Divider Simplification"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "testing"
-      message: "Plan cards dimension verification complete. DIMENSIONS: ✅ All 6 cards have correct dimensions - Wide cards (plan-cliente, plan-producto) are 200x61px with 16px border-radius. Fixed cards (plan-tracking, plan-advanced, plan-integral, plan-prueba) are exactly 165x60px with 20px border-radius. ACTIVE CARD ISSUE: ❌ plan-tracking active card has shadow-lg effect that needs removal. Line 103 in Layout.jsx applies shadow when active=true. This creates an outline/elevation effect. Fix: Change line 103 from 'const activeRing = active ? \"shadow-lg\" : \"\";' to 'const activeRing = \"\";'. The '● Tu Plan' text is correctly visible. Screenshot: .screenshots/plan_cards_verification.png. Login working with admin@enered.com."
-    - agent: "testing"
-      message: "Dashboard measurements complete. ✅ All 8 dashboard elements measured at 1920x1080 viewport: Estado General (568×366px), Línea de Crédito (715×366px), Ticket/Carga/Precio/Unidades/Cargas/Red (all 205×114px). ✅ Vertical gap verified: 10px between 'Información generada el ...' text and Estado General card, confirming space-y-2.5 change is correct. All data-testid attributes working. Screenshots: .screenshots/dashboard_measurements.png, .screenshots/gap_measurement_final.png. Login working with admin@enered.com/admin123."
-    - agent: "testing"
-      message: "Dashboard layout verification COMPLETE ✅. All requirements met at 1920x1080 viewport: Estado General (600×310px, white, 30px radius), Línea de Crédito (600×310px, #8039F4, 30px radius), 6 mini cards (150×150px, 30px radius) in correct 3×2 grid (top: Ticket/Carga/Precio, bottom: Unidades/Cargas/Red). All colors verified: Ticket/Carga/Precio rgb(9,32,135) white text, Unidades/Cargas white bg, Red rgb(0,255,255). No overflow or text-cutoff issues. Screenshot: .screenshots/dashboard_layout_verification.png"
-    - agent: "testing"
-      message: "✅ UPDATED DASHBOARD LAYOUT VERIFICATION COMPLETE! Tested at 1920x1080 viewport. All 8 cards measured with exact dimensions: Estado General (600×270px), Línea de Crédito (600×270px), all 6 mini cards (150×130px). Vertical centering verified: all mini card values centered within ±10px tolerance (Ticket/Carga/Precio: 8px, Unidades/Cargas: 8px, Red: 1px). Estado General shows ~3 alerts visible with scroll working (6 total alerts, scrollHeight 382px > clientHeight 180px). Línea de Crédito bottom space 48px (acceptable padding). Grid height calculation confirmed: 2×130 + 10 gap = 270px. Screenshot: .screenshots/dashboard_dimensions_verification.png. Login: admin@enered.com/admin123 ✅"
-    - agent: "testing"
-      message: "✅ SIDEBAR SPACING & PLAN CARDS ALIGNMENT VERIFICATION COMPLETE! Tested at 1920x1080 viewport. SIDEBAR: Logo breathing space 28px top + 28px bottom (exceeds ≥20px requirement) ✅. Navigation modules vertically centered with justify-content: center, perfect centering (0.0px offset difference between top and bottom) ✅. Module spacing 8px between each item (space-y-2 = 8px in Tailwind) ✅. PLAN CARDS: plan-cliente 294px ✅, plan-producto 294px ✅, gap-3 = 12px ✅. Combined width calculation: 294 + 12 + 294 = 600px exactly ✅. Fixed plan cards (tracking, advanced, integral, prueba): all exactly 200×60px ✅. ALIGNMENT: plan-cliente left edge (144.0px) aligns PERFECTLY with Estado General left edge (144.0px) - 0.0px difference ✅. plan-producto right edge (744.0px) aligns PERFECTLY with Estado General right edge (744.0px) - 0.0px difference ✅. Estado General card confirmed 600px wide ✅. Screenshots: .screenshots/dashboard_full_view.png, .screenshots/plan_cards_alignment.png. Login: admin@enered.com/admin123 ✅"
-    - agent: "testing"
-      message: "✅ DASHBOARD VERTICAL GAP MEASUREMENTS COMPLETE! Tested at 1920x1080 viewport. Measured exact pixel gaps between dashboard sections: GAP 1 (Mini KPIs row → Filters bar): 10.0px exactly (mini-cargas bottom 559.5px → filters top 569.5px) ✅. GAP 2 (Filters bar → Charts row): 10.0px exactly (filters bottom 643.5px → first chart top 653.5px) ✅. Both gaps within 10 ± 2px tolerance. The space-y-2.5 Tailwind class change is working perfectly. Visual inspection: no cards touching, no overlap, spacing is clean and professional. Screenshot shows full dashboard area from KPI cards through filters to charts: .screenshots/gap_measurements_dashboard.png. Login: admin@enered.com/admin123 ✅"
-    - agent: "testing"
-      message: "✅ ICON REPLACEMENTS VERIFICATION COMPLETE! All 16 PNG icon files accessible (HTTP 200). SIDEBAR: All 8 menu items using custom PNG icons (Dashboard with cyan tint when active, all others white on purple). CARDS: Estado General using estado-general.png (purple box), Línea de Crédito using linea-credito.png (white on purple). MINI CARDS: All 6 cards (Ticket, Carga, Precio, Unidades, Cargas, Red) using PNG icons with correct layout (icon top → value middle → label bottom), correct dimensions (150x130px), and correct icon colors (white on dark blue for Ticket/Carga/Precio, dark blue/purple on white for Unidades/Cargas, dark blue/purple on cyan for Red). No lucide-react icons found. Screenshot: .screenshots/dashboard_icon_verification.png ✅"
+      message: "✅ TOGGLE BUTTONS & LÍNEA DE CRÉDITO VERIFICATION COMPLETE! Tested at 1920x1080 viewport. TOGGLE BUTTONS: All 4 GALONES buttons use CORRECT brand color rgb(128, 57, 244) = #8039F4 (NOT old fuchsia #D946EF) ✅. Text color white ✅. Toggle interaction works correctly ✅. LÍNEA DE CRÉDITO CARD: Exactly 1 divider found (1px solid rgba(255,255,255,0.2) using border-t border-white/20) ✅. Divider correctly positioned between top KPIs and bottom KPIs ✅. NO progress bars (0) ✅. NO thick amber bars (0) - old progress bar removed ✅. Card structure clean with 3 children. Screenshots: dashboard_full_toggles.png, dashboard_after_toggle_click.png, toggle_buttons_closeup.png, linea_credito_final.png, dashboard_final.png. Login: admin@enered.com/admin123 ✅"
