@@ -21,7 +21,7 @@ function OverviewSection({ overview, alerts }) {
     : "—";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-2.5">
       <div className="flex items-center gap-2 text-xs text-neutral-500 font-semibold justify-end">
         <Clock className="w-3.5 h-3.5" />
         Información generada el <span className="font-bold text-neutral-800">{syncFmt}</span>

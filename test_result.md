@@ -102,43 +102,43 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify plan cards dimensions and styling: 1) plan-cliente & plan-producto must have flexible sizing (width >= 200px, height auto ~70-80px, border-radius 16px). 2) plan-tracking, plan-advanced, plan-integral, plan-prueba must be exact 165x60px with border-radius 20px. 3) Remove cyan ring/outline from active plan-tracking card (no box-shadow outline, no transform scale) - should look same as other plan cards except for '● Tu Plan' text."
+user_problem_statement: "Measure bounding boxes of 8 dashboard elements (Estado General, Línea de Crédito, Ticket, Carga, Precio, Unidades, Cargas, Red) at 1920x1080 viewport. Also measure vertical gap between 'Información generada el ...' text and Estado General card (should be ~10px after space-y-5 → space-y-2.5 change)."
 
 frontend:
-  - task: "Plan Cards Dimension Verification"
+  - task: "Dashboard Elements Bounding Box Measurements"
     implemented: true
     working: true
-    file: "frontend/src/components/Layout.jsx"
+    file: "frontend/src/components/Dashboard.jsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "testing"
-          comment: "✅ Plan cards dimensions verified successfully. Wide cards (plan-cliente, plan-producto): Width 200px (>= 200px ✓), Height 61px (~70-80px ✓), Border-radius 16px ✓. Fixed size cards (plan-tracking, plan-advanced, plan-integral, plan-prueba): Width 165px ✓, Height 60px ✓, Border-radius 20px ✓. All 6 cards found in correct order in container with data-testid='plan-cards'. Screenshot captured at 1920x1080 viewport."
+          comment: "✅ All 8 dashboard elements measured successfully at 1920x1080 viewport using getBoundingClientRect(). Estado General: 568×366px, Línea de Crédito: 715×366px, Ticket: 205×114px, Carga: 205×114px, Precio: 205×114px, Unidades: 205×114px, Cargas: 205×114px, Red: 205×114px. All elements found with correct data-testid attributes."
 
-  - task: "Remove Active Card Shadow Effect"
+  - task: "Vertical Gap Measurement (Información text to Estado General)"
     implemented: true
-    working: false
-    file: "frontend/src/components/Layout.jsx"
+    working: true
+    file: "frontend/src/components/Dashboard.jsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
-        - working: false
+        - working: true
           agent: "testing"
-          comment: "❌ Active plan-tracking card still has shadow-lg effect applied. Line 103 in Layout.jsx applies 'shadow-lg' class when active=true, creating box-shadow: 'rgba(0, 0, 0, 0.1) 0px 10px 15px -3px, rgba(0, 0, 0, 0.1) 0px 4px 6px -4px'. This shadow creates an outline/elevation effect that should be removed. The active card should look identical to other plan cards except for the '● Tu Plan' text inside. FIX: Remove or empty the activeRing variable on line 103 (change 'const activeRing = active ? \"shadow-lg\" : \"\";' to 'const activeRing = \"\";'). The '● Tu Plan' text is correctly visible in cyan-300 color."
+          comment: "✅ Gap measurement verified: 10px between 'Información generada el ...' text (bottom: 302px) and Estado General card (top: 312px). This confirms the space-y-5 → space-y-2.5 change is working correctly (2.5 × 4px = 10px in Tailwind). Screenshot captured showing proper spacing."
 
 metadata:
   created_by: "testing_agent"
-  version: "1.2"
-  test_sequence: 3
+  version: "1.3"
+  test_sequence: 4
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Plan Cards Dimension Verification"
-    - "Remove Active Card Shadow Effect"
+    - "Dashboard Elements Bounding Box Measurements"
+    - "Vertical Gap Measurement (Información text to Estado General)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -146,3 +146,5 @@ test_plan:
 agent_communication:
     - agent: "testing"
       message: "Plan cards dimension verification complete. DIMENSIONS: ✅ All 6 cards have correct dimensions - Wide cards (plan-cliente, plan-producto) are 200x61px with 16px border-radius. Fixed cards (plan-tracking, plan-advanced, plan-integral, plan-prueba) are exactly 165x60px with 20px border-radius. ACTIVE CARD ISSUE: ❌ plan-tracking active card has shadow-lg effect that needs removal. Line 103 in Layout.jsx applies shadow when active=true. This creates an outline/elevation effect. Fix: Change line 103 from 'const activeRing = active ? \"shadow-lg\" : \"\";' to 'const activeRing = \"\";'. The '● Tu Plan' text is correctly visible. Screenshot: .screenshots/plan_cards_verification.png. Login working with admin@enered.com."
+    - agent: "testing"
+      message: "Dashboard measurements complete. ✅ All 8 dashboard elements measured at 1920x1080 viewport: Estado General (568×366px), Línea de Crédito (715×366px), Ticket/Carga/Precio/Unidades/Cargas/Red (all 205×114px). ✅ Vertical gap verified: 10px between 'Información generada el ...' text and Estado General card, confirming space-y-2.5 change is correct. All data-testid attributes working. Screenshots: .screenshots/dashboard_measurements.png, .screenshots/gap_measurement_final.png. Login working with admin@enered.com/admin123."
