@@ -102,43 +102,30 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Measure bounding boxes of 8 dashboard elements (Estado General, Línea de Crédito, Ticket, Carga, Precio, Unidades, Cargas, Red) at 1920x1080 viewport. Also measure vertical gap between 'Información generada el ...' text and Estado General card (should be ~10px after space-y-5 → space-y-2.5 change)."
+user_problem_statement: "Verify new dashboard layout at 1920x1080 viewport: Estado General (600×310px, white, 30px radius), Línea de Crédito (600×310px, #8039F4, 30px radius), 6 mini cards (150×150px each, 30px radius) in 3×2 grid layout. Check colors: Ticket/Carga/Precio (#092087, white text), Unidades/Cargas (white bg), Red (#00FFFF). Verify no overflow/text-cutoff."
 
 frontend:
-  - task: "Dashboard Elements Bounding Box Measurements"
+  - task: "Dashboard Layout Verification - Exact Dimensions & Colors"
     implemented: true
     working: true
-    file: "frontend/src/components/Dashboard.jsx"
+    file: "frontend/src/pages/Dashboard.jsx"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "testing"
-          comment: "✅ All 8 dashboard elements measured successfully at 1920x1080 viewport using getBoundingClientRect(). Estado General: 568×366px, Línea de Crédito: 715×366px, Ticket: 205×114px, Carga: 205×114px, Precio: 205×114px, Unidades: 205×114px, Cargas: 205×114px, Red: 205×114px. All elements found with correct data-testid attributes."
-
-  - task: "Vertical Gap Measurement (Información text to Estado General)"
-    implemented: true
-    working: true
-    file: "frontend/src/components/Dashboard.jsx"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: true
-          agent: "testing"
-          comment: "✅ Gap measurement verified: 10px between 'Información generada el ...' text (bottom: 302px) and Estado General card (top: 312px). This confirms the space-y-5 → space-y-2.5 change is working correctly (2.5 × 4px = 10px in Tailwind). Screenshot captured showing proper spacing."
+          comment: "✅ ALL REQUIREMENTS MET! Verified at 1920x1080 viewport using getBoundingClientRect() and getComputedStyle(). Estado General: 600×310px, white bg, 30px radius ✅. Línea de Crédito: 600×310px, rgb(128,57,244) bg, 30px radius ✅. All 6 mini cards: exactly 150×150px, 30px radius ✅. Colors verified: Ticket/Carga/Precio rgb(9,32,135) with white text ✅, Unidades/Cargas white bg ✅, Red rgb(0,255,255) ✅. Layout: 3×2 grid confirmed (top row: Ticket, Carga, Precio at top=312px; bottom row: Unidades, Cargas, Red at top=472px) ✅. No overflow detected (Estado General: 308px scroll=client, Línea de Crédito: 310px scroll=client) ✅. All elements fit in one horizontal row. Screenshot: .screenshots/dashboard_layout_verification.png"
 
 metadata:
   created_by: "testing_agent"
-  version: "1.3"
-  test_sequence: 4
+  version: "1.4"
+  test_sequence: 5
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Dashboard Elements Bounding Box Measurements"
-    - "Vertical Gap Measurement (Información text to Estado General)"
+    - "Dashboard Layout Verification - Exact Dimensions & Colors"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -148,3 +135,5 @@ agent_communication:
       message: "Plan cards dimension verification complete. DIMENSIONS: ✅ All 6 cards have correct dimensions - Wide cards (plan-cliente, plan-producto) are 200x61px with 16px border-radius. Fixed cards (plan-tracking, plan-advanced, plan-integral, plan-prueba) are exactly 165x60px with 20px border-radius. ACTIVE CARD ISSUE: ❌ plan-tracking active card has shadow-lg effect that needs removal. Line 103 in Layout.jsx applies shadow when active=true. This creates an outline/elevation effect. Fix: Change line 103 from 'const activeRing = active ? \"shadow-lg\" : \"\";' to 'const activeRing = \"\";'. The '● Tu Plan' text is correctly visible. Screenshot: .screenshots/plan_cards_verification.png. Login working with admin@enered.com."
     - agent: "testing"
       message: "Dashboard measurements complete. ✅ All 8 dashboard elements measured at 1920x1080 viewport: Estado General (568×366px), Línea de Crédito (715×366px), Ticket/Carga/Precio/Unidades/Cargas/Red (all 205×114px). ✅ Vertical gap verified: 10px between 'Información generada el ...' text and Estado General card, confirming space-y-2.5 change is correct. All data-testid attributes working. Screenshots: .screenshots/dashboard_measurements.png, .screenshots/gap_measurement_final.png. Login working with admin@enered.com/admin123."
+    - agent: "testing"
+      message: "Dashboard layout verification COMPLETE ✅. All requirements met at 1920x1080 viewport: Estado General (600×310px, white, 30px radius), Línea de Crédito (600×310px, #8039F4, 30px radius), 6 mini cards (150×150px, 30px radius) in correct 3×2 grid (top: Ticket/Carga/Precio, bottom: Unidades/Cargas/Red). All colors verified: Ticket/Carga/Precio rgb(9,32,135) white text, Unidades/Cargas white bg, Red rgb(0,255,255). No overflow or text-cutoff issues. Screenshot: .screenshots/dashboard_layout_verification.png"

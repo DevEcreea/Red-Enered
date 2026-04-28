@@ -27,10 +27,10 @@ function OverviewSection({ overview, alerts }) {
         Información generada el <span className="font-bold text-neutral-800">{syncFmt}</span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Estado General */}
-        <div className="lg:col-span-4 bg-white border border-neutral-200 rounded-2xl p-6" data-testid="estado-general">
-          <div className="flex items-center gap-2.5 mb-5">
+      <div className="flex flex-wrap gap-3">
+        {/* Estado General — 600x310, blanco, border-radius 30px */}
+        <div className="w-full lg:w-[600px] lg:h-[310px] bg-white border border-neutral-200 rounded-[30px] p-5 flex flex-col" data-testid="estado-general">
+          <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
             <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand flex items-center justify-center">
               <AlertCircle className="w-5 h-5" />
             </div>
@@ -45,14 +45,14 @@ function OverviewSection({ overview, alerts }) {
               </div>
             </div>
           ) : (
-            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+            <div className="space-y-2 overflow-y-auto pr-1 flex-1 min-h-0">
               {alerts.slice(0, 6).map((a, i) => {
                 const col = a.nivel === "red" ? { bg: "bg-red-50", bd: "border-red-100", tx: "text-red-700", Ic: XCircle }
                   : a.nivel === "green" ? { bg: "bg-green-50", bd: "border-green-100", tx: "text-green-700", Ic: CheckCircle2 }
                   : { bg: "bg-amber-50", bd: "border-amber-100", tx: "text-amber-700", Ic: AlertTriangle };
                 const Ic = col.Ic;
                 return (
-                  <div key={i} className={`flex items-start gap-2.5 ${col.bg} border ${col.bd} rounded-lg p-3`}>
+                  <div key={i} className={`flex items-start gap-2.5 ${col.bg} border ${col.bd} rounded-lg p-2.5`}>
                     <Ic className={`w-4 h-4 ${col.tx} mt-0.5 flex-shrink-0`} />
                     <div className="text-xs leading-snug">
                       <div className={`font-bold ${col.tx}`}>{a.titulo}</div>
@@ -65,14 +65,14 @@ function OverviewSection({ overview, alerts }) {
           )}
         </div>
 
-        {/* Línea de Crédito + Ahorro/Consumo (en una sola card destacada) */}
-        <div className="lg:col-span-5 rounded-2xl p-6 text-white relative overflow-hidden" style={{ background: "linear-gradient(135deg, #9933FF 0%, #6B23B1 100%)" }} data-testid="linea-credito">
-          <div className="flex items-center gap-2.5 mb-5">
+        {/* Línea de Crédito — 600x310, #8039F4 sólido, border-radius 30px */}
+        <div className="w-full lg:w-[600px] lg:h-[310px] rounded-[30px] p-5 text-white relative overflow-hidden bg-[#8039F4] flex flex-col" data-testid="linea-credito">
+          <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
             <Coins className="w-6 h-6" />
             <h3 className="font-cabinet font-bold text-lg">Línea de Crédito</h3>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-3 mb-3">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-white/70 font-bold mb-1">Total</div>
               <div className="font-cabinet font-black text-xl lg:text-2xl leading-tight">{formatSoles(linea_credito.total)}</div>
@@ -87,11 +87,11 @@ function OverviewSection({ overview, alerts }) {
             </div>
           </div>
 
-          <div className="h-2 bg-white/15 rounded-full overflow-hidden mb-4">
+          <div className="h-2 bg-white/15 rounded-full overflow-hidden mb-3">
             <div className="h-full rounded-full bg-amber-300 transition-all" style={{ width: `${Math.min(100, pctUsado)}%` }} />
           </div>
 
-          <div className="border-t border-white/20 pt-4 grid grid-cols-2 gap-4">
+          <div className="border-t border-white/20 pt-3 grid grid-cols-2 gap-4">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-cyan-300 font-bold mb-1">Ahorro</div>
               <div className="font-cabinet font-black text-lg lg:text-xl leading-tight text-cyan-200">{formatSoles(ahorro.soles)}</div>
@@ -105,36 +105,36 @@ function OverviewSection({ overview, alerts }) {
           </div>
         </div>
 
-        {/* Mini KPIs (Ticket / Carga / Precio + Unidades / Cargas / Red) - 2 columnas x 3 filas */}
-        <div className="lg:col-span-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 gap-3 auto-rows-fr">
-          <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" small />
-          <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" white small />
-          <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} GAL`} testid="mini-carga" small />
-          <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" white small />
-          <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" small />
-          <MiniMetric label="Red" value={formatNumber(red_estaciones, 0)} icon={Building2} cyan onClick={() => window.open(MAPS_LINK, "_blank")} testid="mini-red" small />
+        {/* Mini KPIs — 3 columnas x 2 filas, 150x150 cada una */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 lg:w-[470px] lg:h-[310px]">
+          <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" />
+          <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} GAL`} testid="mini-carga" />
+          <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" />
+          <MiniMetric label="Unidades" value={formatNumber(unidades_contratadas, 0)} icon={Truck} testid="mini-unidades" white />
+          <MiniMetric label="Cargas" value={formatNumber(cargas, 0)} icon={FuelIcon} testid="mini-cargas" white />
+          <MiniMetric label="Red" value={formatNumber(red_estaciones, 0)} icon={Building2} cyan onClick={() => window.open(MAPS_LINK, "_blank")} testid="mini-red" />
         </div>
       </div>
     </div>
   );
 }
 
-function MiniMetric({ label, value, icon: Icon, cyan = false, white = false, onClick, testid, small = false }) {
-  const base = "rounded-xl p-4 flex flex-col justify-between transition-all";
-  const minH = small ? "min-h-[80px]" : "min-h-[100px]";
+function MiniMetric({ label, value, icon: Icon, cyan = false, white = false, onClick, testid }) {
+  // Fixed 150x150, border-radius 30
+  const base = "rounded-[30px] p-4 flex flex-col justify-between transition-all w-full lg:w-[150px] lg:h-[150px] aspect-square lg:aspect-auto";
   const cls = cyan
-    ? "bg-cyan-300 text-[#1e1b4b] border border-cyan-300 hover:bg-cyan-400 hover:-translate-y-0.5 cursor-pointer"
+    ? "bg-[#00FFFF] text-[#1e1b4b] border border-[#00FFFF] hover:brightness-95 hover:-translate-y-0.5 cursor-pointer"
     : white
     ? "bg-white text-[#1e1b4b] border border-neutral-200"
-    : "bg-[#2B1C4A] text-white border border-[#2B1C4A]";
+    : "bg-[#092087] text-white border border-[#092087]";
   const Wrapper = onClick ? "button" : "div";
   return (
-    <Wrapper onClick={onClick} data-testid={testid} className={`${base} ${minH} ${cls} ${onClick ? "text-left" : ""}`}>
+    <Wrapper onClick={onClick} data-testid={testid} className={`${base} ${cls} ${onClick ? "text-left" : ""}`}>
       <div className="flex items-center justify-between">
         <div className={`text-[11px] uppercase tracking-widest font-bold ${cyan ? "text-[#1e1b4b]/70" : white ? "text-neutral-500" : "text-white/60"}`}>{label}</div>
         {Icon && <Icon className={`w-4 h-4 ${cyan ? "text-[#1e1b4b]/70" : white ? "text-neutral-400" : "text-white/50"}`} />}
       </div>
-      <div className={`font-cabinet font-black leading-tight mt-1 ${small ? "text-xl" : "text-2xl"}`}>{value}</div>
+      <div className="font-cabinet font-black leading-tight mt-1 text-2xl">{value}</div>
       {cyan && onClick && <div className="text-[10px] font-bold text-[#1e1b4b]/70 mt-1 flex items-center gap-0.5">Cobertura <ArrowUpRight className="w-3 h-3" /></div>}
     </Wrapper>
   );
