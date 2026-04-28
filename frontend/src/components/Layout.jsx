@@ -88,8 +88,11 @@ function SidebarLink({ item, onClick }) {
 }
 
 function PlanCard({ label, title, color = "violet", testid, onClick, active = false, wide = false }) {
-  // Fixed dimensions: 165 x 60 px, border-radius 20 px
-  const base = "rounded-[20px] px-3 py-2 border flex flex-col justify-center transition-all w-[165px] h-[60px] flex-shrink-0";
+  // wide cards (Cliente, Tipo de Producto): tamaño original adaptable
+  // tarjetas de plan (4): fijas 165x60 px con border-radius 20 px
+  const base = wide
+    ? "rounded-2xl px-4 py-3 border flex flex-col justify-center transition-all min-w-[200px] flex-shrink-0"
+    : "rounded-[20px] px-3 py-2 border flex flex-col justify-center transition-all w-[165px] h-[60px] flex-shrink-0";
   const styles = {
     gray: "bg-neutral-100 text-neutral-800 border-neutral-200",
     violet: "bg-brand text-white border-brand hover:bg-brand-hover cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
@@ -97,7 +100,7 @@ function PlanCard({ label, title, color = "violet", testid, onClick, active = fa
     cyan: "bg-cyan-300 text-[#1e1b4b] border-cyan-300 hover:bg-cyan-400 cursor-pointer hover:shadow-lg hover:-translate-y-0.5",
   }[color];
 
-  const activeRing = active ? "ring-4 ring-cyan-300 ring-offset-2 ring-offset-white shadow-lg scale-105" : "";
+  const activeRing = active ? "shadow-lg" : "";
 
   const content = (
     <>
