@@ -87,10 +87,6 @@ function OverviewSection({ overview, alerts }) {
             </div>
           </div>
 
-          <div className="h-2 bg-white/15 rounded-full overflow-hidden mb-3">
-            <div className="h-full rounded-full bg-amber-300 transition-all" style={{ width: `${Math.min(100, pctUsado)}%` }} />
-          </div>
-
           <div className="border-t border-white/20 pt-3 grid grid-cols-2 gap-4">
             <div>
               <div className="text-[11px] uppercase tracking-widest text-cyan-300 font-bold mb-1">Ahorro</div>
@@ -194,7 +190,7 @@ function ChartCard({ title, subtitle, units, setUnits, children, testid }) {
 }
 
 /* ---------------- Helpers para combinar series ---------------- */
-const G_COLOR = "#9933FF";
+const G_COLOR = "#8039F4";
 const S_COLOR = "#10B981"; // verde-cyan, similar al mockup
 
 const fmtVal = (v, k) => k === "soles" ? formatSoles(v) : `${formatNumber(v, 2)} gal`;

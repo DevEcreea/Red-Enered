@@ -40,4 +40,4 @@ export const ROLE_LABEL = {
   contabilidad: "Contabilidad",
 };
 
-export const BRAND_COLORS = ["#9933FF", "#16A34A", "#F59E0B", "#3B82F6", "#EC4899", "#06B6D4", "#EF4444"];
+export const BRAND_COLORS = ["#8039F4", "#16A34A", "#F59E0B", "#3B82F6", "#EC4899", "#06B6D4", "#EF4444"];

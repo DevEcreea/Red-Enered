@@ -212,7 +212,7 @@ export default function Layout({ children }) {
       {/* Desktop sidebar */}
       <aside
         className="hidden md:flex fixed inset-y-0 left-0 w-28 flex-col z-40"
-        style={{ background: "linear-gradient(180deg, #9933FF 0%, #7A2AD3 100%)" }}
+        style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
       >
         <SidebarContent />
       </aside>
@@ -223,7 +223,7 @@ export default function Layout({ children }) {
           <div className="fixed inset-0 bg-black/40 z-50 md:hidden" onClick={() => setMobileOpen(false)} />
           <aside
             className="fixed inset-y-0 left-0 w-28 z-50 flex flex-col md:hidden animate-fade-in"
-            style={{ background: "linear-gradient(180deg, #9933FF 0%, #7A2AD3 100%)" }}
+            style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
           >
             <SidebarContent />
           </aside>

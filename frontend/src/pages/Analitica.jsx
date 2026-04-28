@@ -125,10 +125,10 @@ export default function Analitica() {
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
             <XAxis dataKey="placa" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" angle={-45} textAnchor="end" height={60} />
             <YAxis yAxisId="left" tick={{ fontSize: 10 }} stroke="#a3a3a3" />
-            <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#9933FF" unit="%" />
+            <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 10 }} stroke="#8039F4" unit="%" />
             <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} formatter={(v, n) => n === "pct_acum" ? `${v}%` : `S/ ${formatNumber(v, 2)}`} />
             <Legend wrapperStyle={{ fontSize: 11, fontWeight: 600 }} />
-            <Bar yAxisId="left" dataKey="gasto" fill="#9933FF" name="Gasto (S/)" radius={[4, 4, 0, 0]} />
+            <Bar yAxisId="left" dataKey="gasto" fill="#8039F4" name="Gasto (S/)" radius={[4, 4, 0, 0]} />
             <Line yAxisId="right" type="monotone" dataKey="pct_acum" stroke="#DC2626" strokeWidth={2.5} dot={{ r: 3 }} name="% acumulado" />
           </ComposedChart>
         </ResponsiveContainer>
@@ -377,7 +377,7 @@ function ExtraSections({ data }) {
             <Tooltip formatter={(v) => `S/ ${v}`} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
             <Legend wrapperStyle={{ fontSize: 12, fontWeight: 600 }} />
             <Bar dataKey="pizarra" fill="#F59E0B" radius={[4, 4, 0, 0]} name="Precio Pizarra" />
-            <Bar dataKey="enered" fill="#9933FF" radius={[4, 4, 0, 0]} name="Precio ENERED" />
+            <Bar dataKey="enered" fill="#8039F4" radius={[4, 4, 0, 0]} name="Precio ENERED" />
           </BarChart>
         </ResponsiveContainer>
       </MiniCard>
@@ -474,7 +474,7 @@ function ExtraSections({ data }) {
               <XAxis dataKey="hora" tick={{ fontSize: 10, fontWeight: 700 }} stroke="#525252" />
               <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" allowDecimals={false} />
               <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="cargas" fill="#9933FF" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="cargas" fill="#8039F4" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </MiniCard>
@@ -499,7 +499,7 @@ function ExtraSections({ data }) {
             <XAxis dataKey="dia" tick={{ fontSize: 12, fontWeight: 700 }} stroke="#525252" />
             <YAxis tick={{ fontSize: 11 }} stroke="#a3a3a3" allowDecimals={false} />
             <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-            <Bar dataKey="cargas" fill="#9933FF" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="cargas" fill="#8039F4" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </MiniCard>
