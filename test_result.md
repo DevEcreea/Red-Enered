@@ -102,10 +102,10 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Verify new dashboard layout at 1920x1080 viewport: Estado General (600×310px, white, 30px radius), Línea de Crédito (600×310px, #8039F4, 30px radius), 6 mini cards (150×150px each, 30px radius) in 3×2 grid layout. Check colors: Ticket/Carga/Precio (#092087, white text), Unidades/Cargas (white bg), Red (#00FFFF). Verify no overflow/text-cutoff."
+user_problem_statement: "Verify updated dashboard layout at 1920x1080 viewport: Estado General (600×270px reduced from 310px, white, 30px radius, ~3 alerts visible with rest scrollable), Línea de Crédito (600×270px reduced from 310px, #8039F4, 30px radius, reduced bottom space), 6 mini cards (150×130px reduced from 150px, 30px radius) in 3×2 grid layout with numeric values vertically centered. Total grid height: 2×130 + 10 gap = 270px matching Estado General and Línea de Crédito."
 
 frontend:
-  - task: "Dashboard Layout Verification - Exact Dimensions & Colors"
+  - task: "Dashboard Layout Verification - Updated Dimensions & Vertical Centering"
     implemented: true
     working: true
     file: "frontend/src/pages/Dashboard.jsx"
@@ -116,16 +116,19 @@ frontend:
         - working: true
           agent: "testing"
           comment: "✅ ALL REQUIREMENTS MET! Verified at 1920x1080 viewport using getBoundingClientRect() and getComputedStyle(). Estado General: 600×310px, white bg, 30px radius ✅. Línea de Crédito: 600×310px, rgb(128,57,244) bg, 30px radius ✅. All 6 mini cards: exactly 150×150px, 30px radius ✅. Colors verified: Ticket/Carga/Precio rgb(9,32,135) with white text ✅, Unidades/Cargas white bg ✅, Red rgb(0,255,255) ✅. Layout: 3×2 grid confirmed (top row: Ticket, Carga, Precio at top=312px; bottom row: Unidades, Cargas, Red at top=472px) ✅. No overflow detected (Estado General: 308px scroll=client, Línea de Crédito: 310px scroll=client) ✅. All elements fit in one horizontal row. Screenshot: .screenshots/dashboard_layout_verification.png"
+        - working: true
+          agent: "testing"
+          comment: "✅ UPDATED DIMENSIONS VERIFIED! Tested at 1920x1080 viewport. Estado General: 600×270px (reduced from 310px) ✅, white bg, 30px radius ✅. Línea de Crédito: 600×270px (reduced from 310px) ✅, rgb(128,57,244) bg, 30px radius ✅. All 6 mini cards: 150×130px (reduced from 150px) ✅, 30px radius ✅. VERTICAL CENTERING: All mini card values perfectly centered within ±10px tolerance (Ticket/Carga/Precio: 8px offset, Unidades/Cargas: 8px offset, Red: 1px offset) ✅. Estado General: Shows 6 alerts total with ~3 visible at once, scroll container working (scrollHeight 382px > clientHeight 180px) ✅. Línea de Crédito: Bottom space 48px (acceptable padding, not excessive) ✅. Grid height calculation: 2×130 + 10 gap = 270px matches Estado General and Línea de Crédito heights perfectly ✅. Screenshot: .screenshots/dashboard_dimensions_verification.png"
 
 metadata:
   created_by: "testing_agent"
-  version: "1.4"
-  test_sequence: 5
+  version: "1.5"
+  test_sequence: 6
   run_ui: true
 
 test_plan:
   current_focus:
-    - "Dashboard Layout Verification - Exact Dimensions & Colors"
+    - "Dashboard Layout Verification - Updated Dimensions & Vertical Centering"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -137,3 +140,5 @@ agent_communication:
       message: "Dashboard measurements complete. ✅ All 8 dashboard elements measured at 1920x1080 viewport: Estado General (568×366px), Línea de Crédito (715×366px), Ticket/Carga/Precio/Unidades/Cargas/Red (all 205×114px). ✅ Vertical gap verified: 10px between 'Información generada el ...' text and Estado General card, confirming space-y-2.5 change is correct. All data-testid attributes working. Screenshots: .screenshots/dashboard_measurements.png, .screenshots/gap_measurement_final.png. Login working with admin@enered.com/admin123."
     - agent: "testing"
       message: "Dashboard layout verification COMPLETE ✅. All requirements met at 1920x1080 viewport: Estado General (600×310px, white, 30px radius), Línea de Crédito (600×310px, #8039F4, 30px radius), 6 mini cards (150×150px, 30px radius) in correct 3×2 grid (top: Ticket/Carga/Precio, bottom: Unidades/Cargas/Red). All colors verified: Ticket/Carga/Precio rgb(9,32,135) white text, Unidades/Cargas white bg, Red rgb(0,255,255). No overflow or text-cutoff issues. Screenshot: .screenshots/dashboard_layout_verification.png"
+    - agent: "testing"
+      message: "✅ UPDATED DASHBOARD LAYOUT VERIFICATION COMPLETE! Tested at 1920x1080 viewport. All 8 cards measured with exact dimensions: Estado General (600×270px), Línea de Crédito (600×270px), all 6 mini cards (150×130px). Vertical centering verified: all mini card values centered within ±10px tolerance (Ticket/Carga/Precio: 8px, Unidades/Cargas: 8px, Red: 1px). Estado General shows ~3 alerts visible with scroll working (6 total alerts, scrollHeight 382px > clientHeight 180px). Línea de Crédito bottom space 48px (acceptable padding). Grid height calculation confirmed: 2×130 + 10 gap = 270px. Screenshot: .screenshots/dashboard_dimensions_verification.png. Login: admin@enered.com/admin123 ✅"

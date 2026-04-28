@@ -28,8 +28,8 @@ function OverviewSection({ overview, alerts }) {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        {/* Estado General — 600x310, blanco, border-radius 30px */}
-        <div className="w-full lg:w-[600px] lg:h-[310px] bg-white border border-neutral-200 rounded-[30px] p-5 flex flex-col" data-testid="estado-general">
+        {/* Estado General — 600x270, blanco, border-radius 30px */}
+        <div className="w-full lg:w-[600px] lg:h-[270px] bg-white border border-neutral-200 rounded-[30px] p-5 flex flex-col" data-testid="estado-general">
           <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
             <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand flex items-center justify-center">
               <AlertCircle className="w-5 h-5" />
@@ -65,8 +65,8 @@ function OverviewSection({ overview, alerts }) {
           )}
         </div>
 
-        {/* Línea de Crédito — 600x310, #8039F4 sólido, border-radius 30px */}
-        <div className="w-full lg:w-[600px] lg:h-[310px] rounded-[30px] p-5 text-white relative overflow-hidden bg-[#8039F4] flex flex-col" data-testid="linea-credito">
+        {/* Línea de Crédito — 600x270, #8039F4 sólido, border-radius 30px */}
+        <div className="w-full lg:w-[600px] lg:h-[270px] rounded-[30px] p-5 text-white relative overflow-hidden bg-[#8039F4] flex flex-col" data-testid="linea-credito">
           <div className="flex items-center gap-2.5 mb-3 flex-shrink-0">
             <Coins className="w-6 h-6" />
             <h3 className="font-cabinet font-bold text-lg">Línea de Crédito</h3>
@@ -105,8 +105,8 @@ function OverviewSection({ overview, alerts }) {
           </div>
         </div>
 
-        {/* Mini KPIs — 3 columnas x 2 filas, 150x150 cada una */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 lg:w-[470px] lg:h-[310px]">
+        {/* Mini KPIs — 3 columnas x 2 filas, 150x130 cada una */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 lg:w-[470px] lg:h-[270px]">
           <MiniMetric label="Ticket" value={formatSoles(promedios.ticket)} testid="mini-ticket" />
           <MiniMetric label="Carga" value={`${formatNumber(promedios.carga_gal, 0)} GAL`} testid="mini-carga" />
           <MiniMetric label="Precio" value={`S/${formatNumber(promedios.precio, 2)}`} testid="mini-precio" />
@@ -120,8 +120,8 @@ function OverviewSection({ overview, alerts }) {
 }
 
 function MiniMetric({ label, value, icon: Icon, cyan = false, white = false, onClick, testid }) {
-  // Fixed 150x150, border-radius 30
-  const base = "rounded-[30px] p-4 flex flex-col justify-between transition-all w-full lg:w-[150px] lg:h-[150px] aspect-square lg:aspect-auto";
+  // 150 x 130, border-radius 30, valor centrado verticalmente
+  const base = "rounded-[30px] p-4 flex flex-col transition-all w-full lg:w-[150px] lg:h-[130px] aspect-square lg:aspect-auto";
   const cls = cyan
     ? "bg-[#00FFFF] text-[#1e1b4b] border border-[#00FFFF] hover:brightness-95 hover:-translate-y-0.5 cursor-pointer"
     : white
@@ -130,12 +130,14 @@ function MiniMetric({ label, value, icon: Icon, cyan = false, white = false, onC
   const Wrapper = onClick ? "button" : "div";
   return (
     <Wrapper onClick={onClick} data-testid={testid} className={`${base} ${cls} ${onClick ? "text-left" : ""}`}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-shrink-0">
         <div className={`text-[11px] uppercase tracking-widest font-bold ${cyan ? "text-[#1e1b4b]/70" : white ? "text-neutral-500" : "text-white/60"}`}>{label}</div>
         {Icon && <Icon className={`w-4 h-4 ${cyan ? "text-[#1e1b4b]/70" : white ? "text-neutral-400" : "text-white/50"}`} />}
       </div>
-      <div className="font-cabinet font-black leading-tight mt-1 text-2xl">{value}</div>
-      {cyan && onClick && <div className="text-[10px] font-bold text-[#1e1b4b]/70 mt-1 flex items-center gap-0.5">Cobertura <ArrowUpRight className="w-3 h-3" /></div>}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="font-cabinet font-black leading-tight text-2xl text-center">{value}</div>
+      </div>
+      {cyan && onClick && <div className="text-[10px] font-bold text-[#1e1b4b]/70 flex items-center justify-center gap-0.5 flex-shrink-0">Cobertura <ArrowUpRight className="w-3 h-3" /></div>}
     </Wrapper>
   );
 }
