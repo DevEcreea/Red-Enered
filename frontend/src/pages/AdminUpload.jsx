@@ -391,6 +391,7 @@ function InvoicesBulkUpload() {
   const [err, setErr] = useState("");
   const [empresas, setEmpresas] = useState([]);
   const [overrideEmpresa, setOverrideEmpresa] = useState("");
+  const [estadoOverride, setEstadoOverride] = useState("auto");
 
   useEffect(() => {
     api.get("/empresas-config").then((r) => setEmpresas((r.data || []).map((c) => c.empresa))).catch(() => {});
@@ -410,6 +411,7 @@ function InvoicesBulkUpload() {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f));
       if (overrideEmpresa) fd.append("empresa_override", overrideEmpresa);
+      if (estadoOverride && estadoOverride !== "auto") fd.append("estado_override", estadoOverride);
       const { data } = await api.post("/admin/invoices/upload-bulk", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
@@ -421,6 +423,14 @@ function InvoicesBulkUpload() {
 
   const pdfCount = files.filter((f) => f.name.toLowerCase().endsWith(".pdf")).length;
   const xmlCount = files.filter((f) => f.name.toLowerCase().endsWith(".xml")).length;
+  const zipCount = files.filter((f) => f.name.toLowerCase().endsWith(".zip")).length;
+
+  const ESTADO_OPTS = [
+    { v: "auto", label: "Auto (por fecha de vencimiento)", color: "bg-neutral-100 text-neutral-700 border-neutral-300" },
+    { v: "pagada", label: "Pagada", color: "bg-green-50 text-green-700 border-green-300" },
+    { v: "pendiente", label: "Pendiente (no vencida)", color: "bg-amber-50 text-amber-700 border-amber-300" },
+    { v: "vencida", label: "Vencida", color: "bg-red-50 text-red-700 border-red-300" },
+  ];
 
   return (
     <div className="chart-card border-l-4 border-l-cyan-400" data-testid="invoices-upload-card">
@@ -430,35 +440,61 @@ function InvoicesBulkUpload() {
         </div>
         <div>
           <h3 className="font-cabinet font-bold text-lg text-neutral-900">Carga masiva de facturas</h3>
-          <p className="text-xs text-neutral-500 mt-1">Adjunta los pares <b>PDF + XML</b> generados por tu facturador. Se parsea el XML SUNAT y se asigna a la empresa por <b>RUC</b>.</p>
+          <p className="text-xs text-neutral-500 mt-1">Adjunta los pares <b>PDF + XML</b> o el <b>.ZIP</b> generado por tu ERP (Odoo). Se parsea el XML SUNAT y se asigna la empresa por <b>RUC</b>.</p>
         </div>
       </div>
 
-      <div className="mb-4">
-        <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
-          Asignar a empresa <span className="text-neutral-400 font-medium normal-case tracking-normal">(opcional — si no, se intenta por RUC del XML)</span>
-        </label>
-        <select
-          value={overrideEmpresa}
-          onChange={(e) => setOverrideEmpresa(e.target.value)}
-          className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold w-full max-w-md"
-          data-testid="invoices-empresa-override"
-        >
-          <option value="">— Auto (por RUC) —</option>
-          {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
+            Asignar a empresa <span className="text-neutral-400 font-medium normal-case tracking-normal">(opcional — si no, por RUC)</span>
+          </label>
+          <select
+            value={overrideEmpresa}
+            onChange={(e) => setOverrideEmpresa(e.target.value)}
+            className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold w-full"
+            data-testid="invoices-empresa-override"
+          >
+            <option value="">— Auto (por RUC) —</option>
+            {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
+            Estado de la factura
+          </label>
+          <div className="flex flex-wrap gap-1.5" data-testid="invoices-estado-override">
+            {ESTADO_OPTS.map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                onClick={() => setEstadoOverride(o.v)}
+                className={`px-2.5 h-9 rounded-md border text-xs font-bold transition ${
+                  estadoOverride === o.v ? `${o.color} ring-2 ring-offset-1 ring-brand` : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"
+                }`}
+                data-testid={`invoices-estado-${o.v}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <label className="block border-2 border-dashed border-cyan-200 rounded-xl bg-cyan-50/40 hover:bg-cyan-50 p-8 text-center cursor-pointer transition-colors" data-testid="invoices-dropzone">
         <Upload className="w-8 h-8 text-cyan-600 mx-auto mb-2" />
         <div className="font-bold text-sm text-neutral-700">
-          {files.length > 0 ? `${files.length} archivo(s): ${pdfCount} PDF · ${xmlCount} XML` : "Selecciona o arrastra archivos PDF y XML"}
+          {files.length > 0
+            ? `${files.length} archivo(s): ${pdfCount} PDF · ${xmlCount} XML${zipCount ? ` · ${zipCount} ZIP` : ""}`
+            : "Selecciona o arrastra archivos PDF, XML o ZIP (Odoo)"}
         </div>
-        <div className="text-xs text-neutral-500 mt-1">Cada par debe tener el mismo nombre base (ej. <code>F001-123.pdf</code> + <code>F001-123.xml</code>)</div>
+        <div className="text-xs text-neutral-500 mt-1">
+          ZIP: el sistema extrae automáticamente los XML (ignora CDR-*.xml). PDF/XML: misma base — ej. <code>F003-217.pdf</code> + <code>F003-217.xml</code>
+        </div>
         <input
           type="file"
           multiple
-          accept=".pdf,.xml,application/pdf,text/xml,application/xml,*/*"
+          accept=".pdf,.xml,.zip,application/pdf,text/xml,application/xml,application/zip,application/x-zip-compressed,*/*"
           onChange={(e) => handleFiles(e.target.files)}
           className="hidden"
           data-testid="invoices-file-input"
@@ -492,7 +528,7 @@ function InvoicesBulkUpload() {
                 <div key={i} className="font-mono">
                   • <b>{s.n_doc}</b> → {s.empresa}
                   <span className="ml-2 text-[10px] text-neutral-400">[match: {s.match || "?"}]</span>
-                  <span className={`ml-2 ${s.estado === "vencido" ? "text-red-600" : "text-amber-600"}`}>[{s.estado}]</span>
+                  <span className={`ml-2 ${["vencida","vencido"].includes(s.estado) ? "text-red-600" : s.estado === "pagada" ? "text-green-600" : "text-amber-600"}`}>[{s.estado}]</span>
                 </div>
               ))}
             </div>

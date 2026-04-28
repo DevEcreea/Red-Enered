@@ -1434,25 +1434,50 @@ def _safe_doc(name: str) -> str:
 async def admin_invoices_upload_bulk(
     files: List[UploadFile] = File(...),
     empresa_override: Optional[str] = Form(None),
+    estado_override: Optional[str] = Form(None),
     user: dict = Depends(require_roles("admin_enered")),
 ):
-    """Bulk upload pairs of PDF + XML files. Files are matched by basename
-    (e.g. F001-123.pdf + F001-123.xml). Each XML is parsed (SUNAT UBL 2.1) to
+    """Bulk upload pairs of PDF + XML files (or .zip from Odoo containing both).
+    Files are matched by basename. Each XML is parsed (SUNAT UBL 2.1) to
     extract invoice metadata. Empresa is matched by RUC against empresas_config.
     If empresa_override is provided, all uploaded invoices are assigned to that
-    empresa (skips RUC matching).
+    empresa. If estado_override is one of (pagada/pendiente/vencida), it is
+    used as the manual status; otherwise estado is auto-calculated by due date.
     """
+    import io, zipfile
+
     # Separar XMLs (procesar primero) y PDFs (matching posterior)
     xmls: List[tuple] = []   # (filename_base, content, original_name)
     pdfs: dict = {}          # base_normalized -> (content, original_name)
+
+    def _consume(filename: str, content: bytes):
+        ext = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
+        base = _safe_doc(filename)
+        # Skip CDR (constancia de recepción SUNAT)
+        if filename.upper().startswith("CDR-") or filename.upper().startswith("R-"):
+            return
+        if ext == "xml":
+            xmls.append((base, content, filename))
+        elif ext == "pdf":
+            pdfs[base.upper()] = (content, filename)
+
     for f in files:
         ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "").lower()
         content = await f.read()
-        base = _safe_doc(f.filename)
-        if ext == "xml":
-            xmls.append((base, content, f.filename))
-        elif ext == "pdf":
-            pdfs[base.upper()] = (content, f.filename)
+        if ext == "zip":
+            try:
+                with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                    for zi in zf.infolist():
+                        if zi.is_dir():
+                            continue
+                        inner_name = os.path.basename(zi.filename)
+                        if not inner_name:
+                            continue
+                        _consume(inner_name, zf.read(zi))
+            except Exception as e:
+                logger.warning(f"ZIP inválido {f.filename}: {e}")
+        else:
+            _consume(f.filename, content)
 
     saved: List[dict] = []
     skipped: List[dict] = []
@@ -1546,16 +1571,27 @@ async def admin_invoices_upload_bulk(
         from datetime import date as _date
         today = _date.today()
         f_venc = meta.get("f_vencimiento") or meta.get("f_emision")
-        estado = "por_vencer"
         atraso_dias = 0
-        if f_venc:
-            try:
-                fv = _date.fromisoformat(f_venc)
-                if fv < today:
-                    estado = "vencido"
-                    atraso_dias = (today - fv).days
-            except Exception:
-                pass
+        # Manual override: pagada / pendiente / vencida
+        if estado_override in ("pagada", "pendiente", "vencida"):
+            estado = estado_override
+            if estado == "vencida" and f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    atraso_dias = max(0, (today - fv).days)
+                except Exception:
+                    pass
+        else:
+            # Auto: por fecha de vencimiento
+            estado = "pendiente"
+            if f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    if fv < today:
+                        estado = "vencida"
+                        atraso_dias = (today - fv).days
+                except Exception:
+                    pass
 
         record = {
             "id": str(uuid.uuid4()),
@@ -1650,9 +1686,14 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
         except Exception: return d
 
     total_facturado = sum(_f(i.get("monto_total")) for i in invs)
-    facturas_pendientes = sum(_f(i.get("saldo")) for i in invs if i.get("estado") != "pagado")
+    # Estados nuevos: pagada/pendiente/vencida. Compat con legacy: pagado/por_vencer/vencido.
+    PAID = {"pagada", "pagado"}
+    OVERDUE = {"vencida", "vencido"}
+    facturas_pendientes = sum(_f(i.get("saldo")) for i in invs if (i.get("estado") or "").lower() not in PAID)
     notas_despacho = sum(_f(c.get("IMPORTE_TOTAL")) for c in cons)
-    total_vencido = sum(_f(i.get("saldo")) for i in invs if i.get("estado") == "vencido")
+    notas_despacho_cnt = len(cons)
+    total_vencido = sum(_f(i.get("saldo")) for i in invs if (i.get("estado") or "").lower() in OVERDUE)
+    total_pagado = sum(_f(i.get("monto_total")) for i in invs if (i.get("estado") or "").lower() in PAID)
 
     linea_total = float(cfg.get("linea_credito") or 0)
     linea_utilizada = facturas_pendientes + notas_despacho
@@ -1667,7 +1708,9 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
         "linea_credito_utilizada": round(linea_utilizada, 2),
         "facturas_pendientes": round(facturas_pendientes, 2),
         "notas_despacho": round(notas_despacho, 2),
+        "notas_despacho_cnt": notas_despacho_cnt,
         "total_facturado": round(total_facturado, 2),
+        "total_pagado": round(total_pagado, 2),
         "total_vencido": round(total_vencido, 2),
         "pct_utilizada": pct,
         "dias_credito": int(cfg.get("dias_credito") or 0),

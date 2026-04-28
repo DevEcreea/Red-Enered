@@ -14,9 +14,19 @@ import autoTable from "jspdf-autotable";
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
 const ESTADO_BADGE = {
+  // Nuevos
+  vencida: "bg-red-100 text-red-700 border-red-200",
+  pendiente: "bg-amber-50 text-amber-700 border-amber-200",
+  pagada: "bg-green-50 text-green-700 border-green-200",
+  // Legacy (datos antiguos)
   vencido: "bg-red-100 text-red-700 border-red-200",
   por_vencer: "bg-amber-50 text-amber-700 border-amber-200",
   pagado: "bg-green-50 text-green-700 border-green-200",
+};
+
+const ESTADO_LABEL = {
+  vencida: "VENCIDA", pendiente: "PENDIENTE", pagada: "PAGADA",
+  vencido: "VENCIDA", por_vencer: "PENDIENTE", pagado: "PAGADA",
 };
 
 export default function Facturacion() {
@@ -279,7 +289,7 @@ export default function Facturacion() {
                     <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
                     <td className="px-3 py-2.5 text-center">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
-                        {(inv.estado || "—").toUpperCase().replace("_", " ")}
+                        {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ")}
                       </span>
                     </td>
                     <td className="px-3 py-2.5">
