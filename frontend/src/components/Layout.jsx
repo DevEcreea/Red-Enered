@@ -11,15 +11,17 @@ import { ROLE_LABEL } from "../lib/utils";
 const LOGO_IMG = "/assets/enered-logo.png";
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
+const ICON_BASE = "/assets/icons";
+
 const MENU = [
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
-  { to: "/flotas", label: "Flotas", icon: Truck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
-  { to: "/centro-monitoreo", label: "Centro Monitoreo", icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
-  { to: "/analitica", label: "Analítica", icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
-  { to: "/facturacion", label: "Estado Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
-  { to: "/control", label: "Seguridad", icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica"], testid: "nav-seguridad" },
-  { to: "/capacitacion", label: "Capacitación", icon: GraduationCap, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-capacitacion" },
-  { to: "/soporte", label: "Soporte", icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
+  { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
+  { to: "/flotas", label: "Flotas", iconImg: `${ICON_BASE}/flotas.png`, icon: Truck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
+  { to: "/centro-monitoreo", label: "Centro Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
+  { to: "/analitica", label: "Analítica", iconImg: `${ICON_BASE}/analitica.png`, icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
+  { to: "/facturacion", label: "Estado Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
+  { to: "/control", label: "Seguridad", iconImg: `${ICON_BASE}/seguridad.png`, icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica"], testid: "nav-seguridad" },
+  { to: "/capacitacion", label: "Capacitación", iconImg: `${ICON_BASE}/capacitacion.png`, icon: GraduationCap, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-capacitacion" },
+  { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
 ];
 
 const ADMIN_ITEMS = [
@@ -47,7 +49,16 @@ function SidebarLink({ item, onClick }) {
   const content = (active) => (
     <>
       <div className="relative">
-        <Ic className={`w-5 h-5 mb-0.5 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+        {item.iconImg ? (
+          <img
+            src={item.iconImg}
+            alt=""
+            className={`w-6 h-6 mb-0.5 object-contain ${active ? "opacity-100" : "opacity-90"}`}
+            style={active ? { filter: "brightness(0) saturate(100%) invert(78%) sepia(60%) saturate(427%) hue-rotate(135deg) brightness(102%) contrast(98%)" } : undefined}
+          />
+        ) : (
+          <Ic className={`w-5 h-5 mb-0.5 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+        )}
       </div>
       <span className={`text-[9.5px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
