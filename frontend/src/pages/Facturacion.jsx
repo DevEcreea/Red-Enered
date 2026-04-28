@@ -162,11 +162,11 @@ export default function Facturacion() {
       </div>
 
       {/* CARD PRINCIPAL: KPIs + Donut a la izquierda · 4 botones violetas verticales a la derecha */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
-        <div className="bg-white border border-neutral-200 rounded-2xl p-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1500px)_280px] gap-5">
+        <div className="bg-white border border-neutral-200 rounded-2xl p-6 w-full">
           <h2 className="font-cabinet font-black text-2xl text-brand mb-5">Estado de Cuenta</h2>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 items-center">
             {/* KPIs en 2 columnas con divisores */}
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-x-10">
@@ -196,8 +196,8 @@ export default function Facturacion() {
                 <div className="text-sm text-neutral-400 text-center pt-20">Sin datos</div>
               ) : (
                 <>
-                  <div className="relative w-full h-[240px]">
-                    <ResponsiveContainer width="100%" height={240}>
+                  <div className="relative w-full h-[280px]">
+                    <ResponsiveContainer width="100%" height={280}>
                       <PieChart>
                         <Pie
                           data={donutData}
@@ -205,8 +205,8 @@ export default function Facturacion() {
                           nameKey="name"
                           cx="50%"
                           cy="50%"
-                          innerRadius={78}
-                          outerRadius={115}
+                          innerRadius={92}
+                          outerRadius={135}
                           paddingAngle={2}
                           startAngle={90}
                           endAngle={-270}
@@ -221,7 +221,7 @@ export default function Facturacion() {
                     {/* Label centrado en el hueco del donut */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <div className="text-[10px] uppercase tracking-widest text-neutral-400 font-bold">Línea Total</div>
-                      <div className="font-cabinet font-black text-[22px] text-neutral-900 leading-tight mt-1">
+                      <div className="font-cabinet font-black text-[24px] text-neutral-900 leading-tight mt-1">
                         {formatSoles(state.linea_credito_total)}
                       </div>
                     </div>
