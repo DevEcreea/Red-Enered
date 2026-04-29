@@ -161,10 +161,10 @@ export default function Facturacion() {
         )}
       </div>
 
-      {/* CARD PRINCIPAL: KPIs + Donut a la izquierda · 4 botones violetas verticales a la derecha */}
+      {/* CARD PRINCIPAL: KPIs + Donut a la izquierda · botones violetas verticales a la derecha */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1500px)_280px] gap-5">
-        <div className="bg-white border border-neutral-200 rounded-2xl p-6 w-full">
-          <h2 className="font-cabinet font-black text-2xl text-brand mb-5">Estado de Cuenta</h2>
+        <div className="bg-white border border-neutral-200 rounded-2xl p-7 w-full">
+          <h2 className="font-cabinet font-black text-[32px] text-brand mb-6 leading-tight">Estado de Cuenta</h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 items-center">
             {/* KPIs en 2 columnas con divisores */}
@@ -247,7 +247,6 @@ export default function Facturacion() {
         {/* Acciones laterales (columna vertical) */}
         <div className="flex flex-col gap-4">
           <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
-          <ActionCardEmail onClick={(email) => { setEmailInput(email); setComingSoon("email"); }} testid="ec-action-email" />
           <ActionCardLarge onClick={() => setComingSoon("historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
           <ActionCardLarge onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a realizar el pago masivo de tus facturas" body="Conoce cómo hacerlo paso a paso" cta="Aprende cómo" testid="ec-action-aprende" />
         </div>
