@@ -54,7 +54,7 @@ const FAQ = [
     cat: "Liberación de Pedidos",
     items: [
       { q: "¿Cómo se libera un pedido?", a: "La liberación la realiza el área de Operaciones de ENERED una vez confirmados los datos del despacho y la disponibilidad en el terminal asignado." },
-      { q: "¿Cuánto demora la liberación?", a: "Habitualmente entre 30 minutos y 2 horas dependiendo del terminal y la hora del día. Consulta los horarios oficiales de cada terminal en la tabla de la derecha." },
+      { q: "¿Cuánto demora la liberación?", a: "Habitualmente entre 30 minutos y 2 horas dependiendo del terminal y la hora del día." },
     ],
   },
   {
