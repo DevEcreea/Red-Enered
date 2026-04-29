@@ -19,7 +19,7 @@ const MENU = [
   { to: "/centro-monitoreo", label: "Centro Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
   { to: "/analitica", label: "Analítica", iconImg: `${ICON_BASE}/analitica.png`, icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
   { to: "/facturacion", label: "Estado Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
-  { to: "/control", label: "Seguridad", iconImg: `${ICON_BASE}/seguridad.png`, icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica"], testid: "nav-seguridad" },
+  { to: "/seguridad", label: "Seguridad", iconImg: `${ICON_BASE}/seguridad.png`, icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-seguridad" },
   { to: "/capacitacion", label: "Capacitación", iconImg: `${ICON_BASE}/capacitacion.png`, icon: GraduationCap, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-capacitacion" },
   { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
 ];
@@ -36,7 +36,7 @@ const ROUTE_TITLES = {
   "/centro-monitoreo": "Centro Monitoreo",
   "/analitica": "Analítica",
   "/facturacion": "Estado de Cuenta",
-  "/control": "Seguridad",
+  "/seguridad": "Seguridad",
   "/capacitacion": "Capacitación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",

@@ -1718,6 +1718,102 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     }
 
 
+# ---------- Security / Training Documents ----------
+SEC_DIR = ROOT_DIR / "uploads" / "security"
+SEC_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@api.get("/security-docs")
+async def list_security_docs(
+    q: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """List all security/training documents. Available to all authenticated users."""
+    query = {}
+    if q:
+        query["$or"] = [
+            {"codigo": {"$regex": q, "$options": "i"}},
+            {"nombre": {"$regex": q, "$options": "i"}},
+            {"descripcion": {"$regex": q, "$options": "i"}},
+        ]
+    docs = await db.security_docs.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return docs
+
+
+@api.post("/admin/security-docs")
+async def upload_security_doc(
+    nombre: str = Form(...),
+    descripcion: str = Form(""),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    """Upload a PDF training document (admin only)."""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Solo se permiten archivos PDF")
+
+    # Auto-generate código M00001, M00002...
+    last = await db.security_docs.find_one({}, sort=[("counter", -1)])
+    next_n = (last.get("counter", 0) + 1) if last else 1
+    codigo = f"M{next_n:05d}"
+
+    doc_id = str(uuid.uuid4())
+    safe_name = "".join(c for c in file.filename if c.isalnum() or c in ("-", "_", "."))
+    stored_filename = f"{doc_id}_{safe_name}"
+    file_path = SEC_DIR / stored_filename
+    content = await file.read()
+    file_path.write_bytes(content)
+
+    record = {
+        "id": doc_id,
+        "counter": next_n,
+        "codigo": codigo,
+        "nombre": nombre.strip(),
+        "descripcion": descripcion.strip(),
+        "filename_original": file.filename,
+        "filename_stored": stored_filename,
+        "size_bytes": len(content),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": user.get("email"),
+    }
+    await db.security_docs.insert_one(record)
+    return {k: v for k, v in record.items() if k not in ("filename_stored", "counter", "_id")}
+
+
+@api.get("/security-docs/{doc_id}/download")
+async def download_security_doc(
+    doc_id: str,
+    user: dict = Depends(get_current_user),
+):
+    record = await db.security_docs.find_one({"id": doc_id})
+    if not record:
+        raise HTTPException(404, "Documento no encontrado")
+    file_path = SEC_DIR / record["filename_stored"]
+    if not file_path.exists():
+        raise HTTPException(404, "Archivo no encontrado en disco")
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/pdf",
+        filename=record["filename_original"],
+    )
+
+
+@api.delete("/admin/security-docs/{doc_id}")
+async def delete_security_doc(
+    doc_id: str,
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    record = await db.security_docs.find_one({"id": doc_id})
+    if not record:
+        raise HTTPException(404, "Documento no encontrado")
+    file_path = SEC_DIR / record["filename_stored"]
+    if file_path.exists():
+        try: file_path.unlink()
+        except Exception: pass
+    await db.security_docs.delete_one({"id": doc_id})
+    return {"ok": True}
+
+
 # ---------- QR Code Bulk Upload / Download ----------
 QR_DIR = ROOT_DIR / "uploads" / "qr"
 QR_DIR.mkdir(parents=True, exist_ok=True)
