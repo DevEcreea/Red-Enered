@@ -1228,7 +1228,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
         raise HTTPException(status_code=403, detail="Sin acceso a facturación")
     else:
         q["empresa"] = user.get("empresa")
-    rows = await db.invoices.find(q, {"_id": 0}).sort("fecha_emision", -1).to_list(1000)
+    rows = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
     return rows
 
 
