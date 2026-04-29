@@ -52,6 +52,14 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 - **Carga masiva de QR (admin)**: `/admin/qr` con drag&drop multi-archivo. Filename `[PLACA].png/jpg/svg/webp` se asocia automáticamente. Endpoint `POST /api/admin/qr/upload-bulk` (multipart). Storage: `/app/backend/uploads/qr/{empresa}/{placa}.{ext}` + Mongo `qr_codes`. Endpoints `GET /api/qr/list`, `GET /api/qr/download/{placa}`, `DELETE /api/admin/qr/{placa}` con tenant isolation.
 - **Backend dashboard contract**: agregado campo `gasto` (S/) a `consumo_ciudad` y `consumo_estacion` para soportar el toggle Soles. Filtro `semana` agregado a `/api/consumptions`.
 
+## Implemented Iteration 3 (Feb 2026 - Soporte rediseñado)
+- Soporte (`/soporte`): 4 cards con imágenes Pexels (Pedidos / Liberación / Programación / Estado de Cuenta) que abren WhatsApp con mensaje pre-llenado.
+- Tarjeta morada full-width con WhatsApp +51 972 228 870 + Correo comercial@enered.pe (estilo mockup, decoración SVG, texto cian).
+- Pie con soporte@enered.pe, (01) 203-7300 y 996 207 533.
+- FAQ con buscador y acordeón por categorías (General, Pedidos, Liberación, Programación, Estado de Cuenta).
+- Botón flotante WhatsApp (FAB).
+- Sin tabla de horarios de Terminales (eliminada por pedido del usuario).
+
 ## Backlog / Future
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
 - **P2**: Magic-byte validation en upload de QR (rechazar payloads disfrazados)
