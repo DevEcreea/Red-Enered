@@ -466,10 +466,24 @@ async def dashboard_overview(
     gal_por_carga = total_gal / cargas if cargas else 0
     ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
 
-    # Línea de crédito: utilizada = facturas no pagadas
+    # Línea de crédito: utilizada = facturas pendientes/vencidas (saldo) + notas de despacho
+    # (alineado con /api/account-state para mostrar los mismos valores que Estado de Cuenta)
     inv_q = {"empresa": target_empresa} if target_empresa else {}
-    facturas = await db.invoices.find(inv_q, {"_id": 0}).to_list(1000)
-    utilizada = sum(float(f.get("monto", 0) or 0) for f in facturas if f.get("estado") != "pagada")
+    facturas = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
+    PAID = {"pagada", "pagado"}
+    facturas_pendientes = sum(
+        float(f.get("saldo", f.get("monto_total", f.get("monto", 0))) or 0)
+        for f in facturas
+        if (f.get("estado") or "").lower() not in PAID
+    )
+    cons_nd_q = {"ESTADO": {"$ne": "FACTURADO"}}
+    if target_empresa:
+        cons_nd_q["EMPRESA"] = target_empresa
+    elif user["role"] != "admin_enered":
+        cons_nd_q["EMPRESA"] = user.get("empresa")
+    cons_nd = await db.consumptions.find(cons_nd_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
+    notas_despacho = sum(_f(c.get("IMPORTE_TOTAL")) for c in cons_nd)
+    utilizada = facturas_pendientes + notas_despacho
     total_credito = float(cfg.get("linea_credito", 0) or 0)
     disponible = max(0, total_credito - utilizada)
 
