@@ -9,17 +9,17 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
-const ESTADO_BADGE = {
-  pagada: "bg-green-50 text-green-700 border-green-200",
-  pendiente: "bg-amber-50 text-amber-700 border-amber-200",
-  vencida: "bg-red-100 text-red-700 border-red-200",
-  pagado: "bg-green-50 text-green-700 border-green-200",
-  por_vencer: "bg-amber-50 text-amber-700 border-amber-200",
-  vencido: "bg-red-100 text-red-700 border-red-200",
+const ESTADO_TEXT_COLOR = {
+  pagada: "text-green-600",
+  pendiente: "text-amber-600",
+  vencida: "text-red-600",
+  pagado: "text-green-600",
+  por_vencer: "text-amber-600",
+  vencido: "text-red-600",
 };
 const ESTADO_LABEL = {
-  pagada: "PAGADA", pendiente: "PENDIENTE", vencida: "VENCIDA",
-  pagado: "PAGADA", por_vencer: "PENDIENTE", vencido: "VENCIDA",
+  pagada: "PAGADO", pendiente: "POR VENCER", vencida: "VENCIDO",
+  pagado: "PAGADO", por_vencer: "POR VENCER", vencido: "VENCIDO",
 };
 
 const TIPO_DOC_LABEL = {
@@ -46,6 +46,9 @@ export default function EstadoCuentaHistorial() {
   const [fFechaIni, setFFechaIni] = useState("");
   const [fFechaFin, setFFechaFin] = useState("");
   const [resultadosVisibles, setResultadosVisibles] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [generatedAt, setGeneratedAt] = useState(null);
 
   useEffect(() => {
     if (user?.role === "admin_enered") {
@@ -92,6 +95,8 @@ export default function EstadoCuentaHistorial() {
 
   const consultar = () => {
     setResultadosVisibles(true);
+    setPage(1);
+    setGeneratedAt(new Date());
   };
 
   const limpiar = () => {
@@ -333,85 +338,154 @@ export default function EstadoCuentaHistorial() {
       </div>
 
       {/* RESULTADOS */}
-      <div className="bg-white border border-neutral-200 rounded-2xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-16 text-center text-sm text-neutral-500">Cargando…</div>
-        ) : !resultadosVisibles ? (
-          <div className="p-16 text-center" data-testid="historial-empty">
-            <Inbox className="w-16 h-16 text-neutral-300 mx-auto mb-3" />
-            <h3 className="font-cabinet font-bold text-lg text-neutral-700 mb-1">Sin resultados</h3>
-            <p className="text-sm text-neutral-500">Realiza la consulta de tu historial usando los filtros en la parte superior.</p>
-          </div>
-        ) : filteredInvoices.length === 0 ? (
-          <div className="p-16 text-center" data-testid="historial-noresults">
-            <Inbox className="w-16 h-16 text-neutral-300 mx-auto mb-3" />
-            <h3 className="font-cabinet font-bold text-lg text-neutral-700 mb-1">Sin resultados</h3>
-            <p className="text-sm text-neutral-500">No se encontraron documentos con los filtros aplicados.</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <div className="px-5 py-3 bg-brand/5 border-b border-brand/20 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-brand">
-                {filteredInvoices.length} documento{filteredInvoices.length !== 1 ? "s" : ""} encontrado{filteredInvoices.length !== 1 ? "s" : ""}
+      {loading ? (
+        <div className="bg-white border border-neutral-200 rounded-2xl p-16 text-center text-sm text-neutral-500 shadow-sm">Cargando…</div>
+      ) : !resultadosVisibles ? (
+        <div className="bg-white border border-neutral-200 rounded-2xl p-16 text-center shadow-sm" data-testid="historial-empty">
+          <Inbox className="w-16 h-16 text-neutral-300 mx-auto mb-3" />
+          <h3 className="font-cabinet font-bold text-lg text-neutral-700 mb-1">Sin resultados</h3>
+          <p className="text-sm text-neutral-500">Realiza la consulta de tu historial usando los filtros en la parte superior.</p>
+        </div>
+      ) : filteredInvoices.length === 0 ? (
+        <div className="bg-white border border-neutral-200 rounded-2xl p-16 text-center shadow-sm" data-testid="historial-noresults">
+          <Inbox className="w-16 h-16 text-neutral-300 mx-auto mb-3" />
+          <h3 className="font-cabinet font-bold text-lg text-neutral-700 mb-1">Sin resultados</h3>
+          <p className="text-sm text-neutral-500">No se encontraron documentos con los filtros aplicados.</p>
+        </div>
+      ) : (
+        // Frame morado brand alrededor de la tarjeta
+        <div className="rounded-3xl p-3 shadow-sm" style={{ background: "#8039F4" }} data-testid="historial-results-frame">
+          {/* Header morado dentro del frame: 2 líneas a cada lado */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 px-5 py-4 text-white">
+            <div>
+              <h3 className="font-cabinet font-bold text-base leading-tight">
+                Detalle de los documentos pendientes de pago (vencido y por vencer)
               </h3>
-              <p className="text-xs text-neutral-500">Total: <b className="text-neutral-900">{formatSoles(filteredInvoices.reduce((a, i) => a + (i.monto_total || 0), 0))}</b></p>
+              <p className="text-[11px] italic opacity-90 mt-1">(*) Monto total incluye IGV.</p>
             </div>
-            <table className="w-full text-sm" data-testid="historial-table">
-              <thead className="bg-[#1E1B4B] text-white">
-                <tr className="text-[11px] font-bold uppercase tracking-wider">
-                  {user?.role === "admin_enered" && <th className="px-3 py-3 text-left">Empresa</th>}
-                  <th className="px-3 py-3 text-left">Tipo Doc</th>
-                  <th className="px-3 py-3 text-left">N° Doc</th>
-                  <th className="px-3 py-3 text-left">F. Emisión</th>
-                  <th className="px-3 py-3 text-left">F. Vencimiento</th>
-                  <th className="px-3 py-3 text-center">Moneda</th>
-                  <th className="px-3 py-3 text-right">Monto Total</th>
-                  <th className="px-3 py-3 text-right">Saldo</th>
-                  <th className="px-3 py-3 text-center">Estado</th>
-                  <th className="px-3 py-3 text-center">Descargar</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInvoices.map((inv) => (
-                  <tr key={inv.id} className="border-b border-neutral-100 hover:bg-brand/5 transition-colors">
-                    {user?.role === "admin_enered" && <td className="px-3 py-2.5 text-xs font-semibold">{inv.empresa}</td>}
-                    <td className="px-3 py-2.5">{TIPO_DOC_LABEL[inv.tipo_doc] || "Factura"}</td>
-                    <td className="px-3 py-2.5 font-bold text-brand">{inv.n_doc}</td>
-                    <td className="px-3 py-2.5">{formatDate(inv.f_emision)}</td>
-                    <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento)}</td>
-                    <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
-                    <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
-                    <td className="px-3 py-2.5 text-right">{formatSoles(inv.saldo)}</td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
-                        {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <div className="inline-flex gap-1.5">
-                        <button
-                          onClick={() => downloadDoc(inv.id, "pdf")}
-                          title="Descargar PDF"
-                          className="w-7 h-7 rounded-md bg-red-50 text-red-700 hover:bg-red-100 flex items-center justify-center"
-                        >
-                          <FileText className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => downloadDoc(inv.id, "xml")}
-                          title="Descargar XML"
-                          className="w-7 h-7 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="text-right md:text-right text-xs">
+              <p>
+                Información generada el:{" "}
+                <b className="font-bold">
+                  {generatedAt ? `${generatedAt.toLocaleDateString("es-PE")} ${generatedAt.toLocaleTimeString("es-PE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
+                </b>
+              </p>
+              <p className="opacity-90 mt-0.5">Se visualizan documentos con 1 año de antigüedad desde la fecha de consulta.</p>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Tabla con header navy */}
+          <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="historial-table">
+                <thead style={{ background: "#1E1B4B" }} className="text-white">
+                  <tr className="text-[11px] font-bold uppercase tracking-wider">
+                    {user?.role === "admin_enered" && <th className="px-3 py-3 text-left">Empresa</th>}
+                    <th className="px-3 py-3 text-left">Tipo Doc</th>
+                    <th className="px-3 py-3 text-left">N° Doc</th>
+                    <th className="px-3 py-3 text-left">F. Emisión</th>
+                    <th className="px-3 py-3 text-left">F. Vencimiento</th>
+                    <th className="px-3 py-3 text-center">Atraso</th>
+                    <th className="px-3 py-3 text-center">Moneda</th>
+                    <th className="px-3 py-3 text-right">Monto Total *</th>
+                    <th className="px-3 py-3 text-right">Saldo</th>
+                    <th className="px-3 py-3 text-center">Estado</th>
+                    <th className="px-3 py-3 text-center">Descargar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredInvoices
+                    .slice((page - 1) * pageSize, page * pageSize)
+                    .map((inv) => {
+                      const colorEstado = ESTADO_TEXT_COLOR[inv.estado] || "text-neutral-600";
+                      // Calcular atraso si está vencida
+                      let atrasoDias = inv.atraso_dias || 0;
+                      if (!atrasoDias && inv.f_vencimiento) {
+                        const fv = new Date(inv.f_vencimiento);
+                        const hoy = new Date();
+                        const diff = Math.floor((hoy - fv) / (1000 * 60 * 60 * 24));
+                        if (diff > 0) atrasoDias = diff;
+                      }
+                      return (
+                        <tr key={inv.id} className="border-b border-neutral-100 hover:bg-brand/5 transition-colors">
+                          {user?.role === "admin_enered" && <td className="px-3 py-2.5 text-xs font-semibold">{inv.empresa}</td>}
+                          <td className="px-3 py-2.5 text-neutral-700">{TIPO_DOC_LABEL[inv.tipo_doc] || "Factura"}</td>
+                          <td className="px-3 py-2.5 font-bold" style={{ color: "#1E1B4B" }}>{inv.n_doc}</td>
+                          <td className="px-3 py-2.5 text-neutral-700">{formatDate(inv.f_emision)}</td>
+                          <td className="px-3 py-2.5 text-neutral-700">{formatDate(inv.f_vencimiento)}</td>
+                          <td className="px-3 py-2.5 text-center text-xs text-neutral-700">{atrasoDias} día{atrasoDias === 1 ? "" : "s"}</td>
+                          <td className="px-3 py-2.5 text-center text-xs font-bold text-neutral-700">{inv.moneda || "PEN"}</td>
+                          <td className="px-3 py-2.5 text-right font-bold text-neutral-900">{formatSoles(inv.monto_total).replace("S/ ", "")}</td>
+                          <td className="px-3 py-2.5 text-right text-neutral-700">{formatSoles(inv.saldo).replace("S/ ", "")}</td>
+                          <td className={`px-3 py-2.5 text-center text-[11px] font-bold ${colorEstado}`}>
+                            {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase()}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <div className="inline-flex gap-1.5">
+                              <button
+                                onClick={() => downloadDoc(inv.id, "pdf")}
+                                title="Descargar PDF"
+                                className="w-7 h-7 rounded-md bg-red-50 text-red-700 hover:bg-red-100 flex items-center justify-center"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => downloadDoc(inv.id, "xml")}
+                                title="Descargar XML"
+                                className="w-7 h-7 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center"
+                              >
+                                <FileSpreadsheet className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Paginación al pie */}
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-5 py-3 border-t border-neutral-100 bg-neutral-50">
+              <div className="flex items-center gap-2 text-xs text-neutral-700">
+                <span className="font-semibold">Filas por página</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+                  className="h-8 px-2 border border-neutral-300 rounded text-sm font-semibold bg-white focus:border-brand outline-none"
+                  data-testid="historial-pagesize"
+                >
+                  {[10, 25, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                <span className="text-neutral-700 font-semibold">
+                  {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredInvoices.length)} de {filteredInvoices.length} registros
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="w-7 h-7 rounded-md border border-neutral-300 text-neutral-700 disabled:opacity-40 hover:border-brand hover:text-brand flex items-center justify-center"
+                    data-testid="historial-prev"
+                  >
+                    ‹
+                  </button>
+                  <span className="px-2.5 h-7 inline-flex items-center font-bold text-brand text-sm">{page}</span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(Math.ceil(filteredInvoices.length / pageSize), p + 1))}
+                    disabled={page >= Math.ceil(filteredInvoices.length / pageSize)}
+                    className="w-7 h-7 rounded-md border border-neutral-300 text-neutral-700 disabled:opacity-40 hover:border-brand hover:text-brand flex items-center justify-center"
+                    data-testid="historial-next"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
