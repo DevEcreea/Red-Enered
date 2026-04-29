@@ -10,6 +10,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
 import Reportes from "./pages/Reportes";
 import Facturacion from "./pages/Facturacion";
+import EstadoCuentaHistorial from "./pages/EstadoCuentaHistorial";
 import ControlIntegral from "./pages/ControlIntegral";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
@@ -43,6 +44,7 @@ function App() {
           <Route path="/qr" element={<Navigate to="/flotas" replace />} />
           <Route path="/analitica" element={<Shell><Analitica /></Shell>} />
           <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
+          <Route path="/facturacion/historial" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><EstadoCuentaHistorial /></Shell>} />
           <Route path="/control" element={<Shell roles={["admin_enered", "administrador", "logistica"]}><ControlIntegral /></Shell>} />
           <Route path="/capacitacion" element={<Shell><Capacitacion /></Shell>} />
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />

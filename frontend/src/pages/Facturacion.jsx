@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
@@ -31,6 +32,7 @@ const ESTADO_LABEL = {
 
 export default function Facturacion() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [state, setState] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [empresas, setEmpresas] = useState([]);
@@ -247,7 +249,7 @@ export default function Facturacion() {
         {/* Acciones laterales (columna vertical) */}
         <div className="flex flex-col gap-4">
           <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
-          <ActionCardLarge onClick={() => setComingSoon("historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
+          <ActionCardLarge onClick={() => navigate("/facturacion/historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
           <ActionCardLarge onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a realizar el pago masivo de tus facturas" body="Conoce cómo hacerlo paso a paso" cta="Aprende cómo" testid="ec-action-aprende" />
         </div>
       </div>
