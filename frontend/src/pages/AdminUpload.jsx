@@ -393,6 +393,9 @@ function InvoicesBulkUpload() {
   const [overrideEmpresa, setOverrideEmpresa] = useState("");
   const [estadoOverride, setEstadoOverride] = useState("auto");
 
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = React.useRef(null);
+
   useEffect(() => {
     api.get("/empresas-config").then((r) => setEmpresas((r.data || []).map((c) => c.empresa))).catch(() => {});
   }, []);
@@ -402,6 +405,25 @@ function InvoicesBulkUpload() {
     setFiles(arr);
     setResult(null);
     setErr("");
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dragActive) setDragActive(true);
+  };
+  const onDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  };
+  const onDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
+    }
   };
 
   const submit = async () => {
@@ -481,17 +503,28 @@ function InvoicesBulkUpload() {
         </div>
       </div>
 
-      <label className="block border-2 border-dashed border-cyan-200 rounded-xl bg-cyan-50/40 hover:bg-cyan-50 p-8 text-center cursor-pointer transition-colors" data-testid="invoices-dropzone">
-        <Upload className="w-8 h-8 text-cyan-600 mx-auto mb-2" />
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={onDragOver}
+        onDragEnter={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+          dragActive ? "border-brand bg-brand-50/50" : "border-cyan-200 bg-cyan-50/40 hover:bg-cyan-50"
+        }`}
+        data-testid="invoices-dropzone"
+      >
+        <Upload className={`w-8 h-8 mx-auto mb-2 ${dragActive ? "text-brand" : "text-cyan-600"}`} />
         <div className="font-bold text-sm text-neutral-700">
           {files.length > 0
             ? `${files.length} archivo(s): ${pdfCount} PDF · ${xmlCount} XML${zipCount ? ` · ${zipCount} ZIP` : ""}`
-            : "Selecciona o arrastra archivos PDF, XML o ZIP (Odoo)"}
+            : dragActive ? "Suelta los archivos aquí…" : "Selecciona o arrastra archivos PDF, XML o ZIP (Odoo)"}
         </div>
         <div className="text-xs text-neutral-500 mt-1">
           ZIP: el sistema extrae automáticamente los XML (ignora CDR-*.xml). PDF/XML: misma base — ej. <code>F003-217.pdf</code> + <code>F003-217.xml</code>
         </div>
         <input
+          ref={fileInputRef}
           type="file"
           multiple
           accept=".pdf,.xml,.zip,application/pdf,text/xml,application/xml,application/zip,application/x-zip-compressed,*/*"
@@ -499,7 +532,7 @@ function InvoicesBulkUpload() {
           className="hidden"
           data-testid="invoices-file-input"
         />
-      </label>
+      </div>
 
       <div className="flex items-center gap-2 mt-4">
         <button onClick={submit} disabled={uploading || files.length === 0} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50" data-testid="invoices-upload-btn">

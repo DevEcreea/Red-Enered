@@ -295,9 +295,21 @@ export default function Facturacion() {
                     <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
                     <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
                     <td className="px-3 py-2.5 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
-                        {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ")}
-                      </span>
+                      {user?.role === "admin_enered" ? (
+                        <EstadoEditor
+                          inv={inv}
+                          onUpdated={(newEstado) => {
+                            setInvoices((prev) => prev.map((x) => x.id === inv.id ? { ...x, estado: newEstado } : x));
+                            // Refrescar account-state porque cambia disponible/utilizada/vencido
+                            const params = empresa ? { empresa } : {};
+                            api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
+                          }}
+                        />
+                      ) : (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
+                          {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ")}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-center gap-1.5">
@@ -433,6 +445,73 @@ function ActionCardLarge({ onClick, icon: Icon, title, body, cta, testid }) {
         <Icon className="w-3.5 h-3.5" strokeWidth={2} />
         {cta}
       </button>
+    </div>
+  );
+}
+
+
+/* ---------------- Editor inline de estado (admin_enered) ---------------- */
+function EstadoEditor({ inv, onUpdated }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const ref = React.useRef(null);
+
+  // Cerrar al click fuera
+  React.useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const change = async (nuevo) => {
+    if (nuevo === inv.estado) { setOpen(false); return; }
+    setSaving(true);
+    try {
+      await api.put(`/invoices/${inv.id}`, { estado: nuevo });
+      onUpdated && onUpdated(nuevo);
+      toast.success(`Estado cambiado a ${nuevo.toUpperCase()}`);
+    } catch (e) {
+      toast.error("Error al cambiar estado");
+    } finally {
+      setSaving(false);
+      setOpen(false);
+    }
+  };
+
+  const opts = [
+    { v: "pagada", label: "PAGADA", cls: "bg-green-50 text-green-700 border-green-200" },
+    { v: "pendiente", label: "PENDIENTE", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    { v: "vencida", label: "VENCIDA", cls: "bg-red-100 text-red-700 border-red-200" },
+  ];
+  const currentCls = ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200";
+  const currentLbl = ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ");
+
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        disabled={saving}
+        className={`px-2 py-0.5 rounded-full text-[10px] font-bold border cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-brand transition disabled:opacity-50 ${currentCls}`}
+        title="Cambiar estado"
+      >
+        {saving ? "..." : currentLbl} ▾
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 right-0 bg-white border border-neutral-200 rounded-lg shadow-lg py-1 min-w-[120px]">
+          {opts.map((o) => (
+            <button
+              key={o.v}
+              onClick={(e) => { e.stopPropagation(); change(o.v); }}
+              className={`block w-full text-left px-3 py-1.5 text-[11px] font-bold hover:bg-neutral-50 ${
+                inv.estado === o.v ? "ring-1 ring-inset ring-brand" : ""
+              }`}
+            >
+              <span className={`inline-block px-2 py-0.5 rounded-full border text-[10px] ${o.cls}`}>{o.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
