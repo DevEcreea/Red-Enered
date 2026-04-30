@@ -1213,6 +1213,25 @@ async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_
     return {"ok": True}
 
 
+@api.post("/admin/invoices/{inv_id}/attach-pdf")
+async def admin_invoice_attach_pdf(inv_id: str, file: UploadFile = File(...),
+                                    user: dict = Depends(require_roles("admin_enered"))):
+    """Adjuntar/reemplazar el PDF de una factura existente."""
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="El archivo debe ser .pdf")
+    content = await file.read()
+    empresa_dir = INV_DIR / _safe_doc(inv["empresa"])
+    empresa_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = empresa_dir / f"{_safe_doc(inv['n_doc'])}.pdf"
+    with open(pdf_path, "wb") as out:
+        out.write(content)
+    await db.invoices.update_one({"id": inv_id}, {"$set": {"pdf_filename": pdf_path.name}})
+    return {"ok": True, "pdf_filename": pdf_path.name}
+
+
 @api.post("/admin/invoices/{inv_id}/reassign")
 async def admin_invoice_reassign(inv_id: str, empresa: str = Form(...),
                                   user: dict = Depends(require_roles("admin_enered"))):

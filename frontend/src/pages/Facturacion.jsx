@@ -122,6 +122,23 @@ export default function Facturacion() {
     }
   };
 
+  const handleAttachPdf = async (inv, file) => {
+    if (!file) return;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await api.post(`/admin/invoices/${inv.id}/attach-pdf`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      toast.success(`PDF adjuntado a ${inv.n_doc}`);
+      const params = empresa ? { empresa } : {};
+      const r = await api.get("/invoices", { params });
+      setInvoices(r.data);
+    } catch (e) {
+      toast.error("No se pudo adjuntar el PDF");
+    }
+  };
+
   if (loading || !state) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -207,9 +224,10 @@ export default function Facturacion() {
                       <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="absolute inset-0 flex items-start justify-center pt-6 pointer-events-none">
-                    <div className="font-cabinet font-black text-base text-white drop-shadow-md">
-                      {formatSoles(state.linea_credito_total)}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="text-center">
+                      <div className="text-[9px] uppercase tracking-widest text-neutral-500 font-bold">Total</div>
+                      <div className="font-cabinet font-black text-base text-neutral-900">{formatSoles(state.linea_credito_total)}</div>
                     </div>
                   </div>
                   {/* Etiquetas de los segmentos pequeños */}
@@ -284,11 +302,22 @@ export default function Facturacion() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-center gap-1.5">
-                        {inv.pdf_filename && (
+                        {inv.pdf_filename ? (
                           <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
                             <FileText className="w-4 h-4" />
                           </button>
-                        )}
+                        ) : user?.role === "admin_enered" ? (
+                          <label className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-md cursor-pointer" title="Adjuntar PDF">
+                            <FileText className="w-4 h-4 opacity-50" />
+                            <input
+                              type="file"
+                              accept=".pdf,application/pdf"
+                              className="hidden"
+                              onChange={(e) => handleAttachPdf(inv, e.target.files?.[0])}
+                              data-testid={`ec-attach-pdf-${inv.n_doc}`}
+                            />
+                          </label>
+                        ) : null}
                         {inv.xml_filename && (
                           <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                             <FileSpreadsheet className="w-4 h-4" />
