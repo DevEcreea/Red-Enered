@@ -1373,8 +1373,13 @@ async def my_results(user: dict = Depends(get_current_user)):
 
 
 # ---------- Invoices: Bulk Upload (PDF + XML SUNAT) ----------
-INV_DIR = ROOT_DIR / "uploads" / "invoices"
-INV_DIR.mkdir(parents=True, exist_ok=True)
+import storage  # storage abstraction (local FS or Cloudflare R2)
+
+INV_PREFIX = "invoices"  # storage key prefix
+
+
+def _inv_key(empresa: str, filename: str) -> str:
+    return f"{INV_PREFIX}/{_safe_doc(empresa)}/{filename}"
 
 
 def _parse_sunat_xml(xml_bytes: bytes) -> dict:
@@ -1564,22 +1569,19 @@ async def admin_invoices_upload_bulk(
             })
             continue
 
-        # Save files
-        empresa_dir = INV_DIR / _safe_doc(empresa)
-        empresa_dir.mkdir(parents=True, exist_ok=True)
+        # Save files via storage abstraction
         n_doc = meta.get("n_doc") or base
-        xml_path = empresa_dir / f"{_safe_doc(n_doc)}.xml"
-        with open(xml_path, "wb") as out:
-            out.write(xml_bytes)
+        xml_filename = f"{_safe_doc(n_doc)}.xml"
+        xml_key = _inv_key(empresa, xml_filename)
+        storage.save_object(xml_key, xml_bytes, "application/xml")
 
         pdf_filename = None
         pdf_match = _find_pdf_for(base, n_doc)
         if pdf_match:
             pdf_bytes, pdf_orig = pdf_match
-            pdf_path = empresa_dir / f"{_safe_doc(n_doc)}.pdf"
-            with open(pdf_path, "wb") as out:
-                out.write(pdf_bytes)
-            pdf_filename = pdf_path.name
+            pdf_filename = f"{_safe_doc(n_doc)}.pdf"
+            pdf_key = _inv_key(empresa, pdf_filename)
+            storage.save_object(pdf_key, pdf_bytes, "application/pdf")
 
         # Determine status & atraso
         from datetime import date as _date
@@ -1623,7 +1625,7 @@ async def admin_invoices_upload_bulk(
             "estado": estado,  # vencido | por_vencer | pagado
             "atraso_dias": atraso_dias,
             "pdf_filename": pdf_filename,
-            "xml_filename": xml_path.name,
+            "xml_filename": xml_filename,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "uploaded_by": user["email"],
         }
@@ -1642,7 +1644,6 @@ async def admin_invoices_upload_bulk(
 
 @api.get("/invoices/{inv_id}/download/{kind}")
 async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_current_user)):
-    from fastapi.responses import FileResponse
     if kind not in ("pdf", "xml"):
         raise HTTPException(status_code=400, detail="kind inválido")
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
@@ -1653,11 +1654,9 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     fname = inv.get(f"{kind}_filename")
     if not fname:
         raise HTTPException(status_code=404, detail=f"Sin archivo {kind}")
-    file_path = INV_DIR / _safe_doc(inv["empresa"]) / fname
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Archivo no existe")
     media = "application/pdf" if kind == "pdf" else "application/xml"
-    return FileResponse(path=str(file_path), filename=fname, media_type=media)
+    key = _inv_key(inv["empresa"], fname)
+    return storage.download_response(key, fname, media)
 
 
 @api.get("/account-state")
@@ -1733,8 +1732,11 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
 
 
 # ---------- Security / Training Documents ----------
-SEC_DIR = ROOT_DIR / "uploads" / "security"
-SEC_DIR.mkdir(parents=True, exist_ok=True)
+SEC_PREFIX = "security"
+
+
+def _sec_key(filename: str) -> str:
+    return f"{SEC_PREFIX}/{filename}"
 
 
 @api.get("/security-docs")
@@ -1773,9 +1775,8 @@ async def upload_security_doc(
     doc_id = str(uuid.uuid4())
     safe_name = "".join(c for c in file.filename if c.isalnum() or c in ("-", "_", "."))
     stored_filename = f"{doc_id}_{safe_name}"
-    file_path = SEC_DIR / stored_filename
     content = await file.read()
-    file_path.write_bytes(content)
+    storage.save_object(_sec_key(stored_filename), content, "application/pdf")
 
     record = {
         "id": doc_id,
@@ -1802,13 +1803,10 @@ async def download_security_doc(
     record = await db.security_docs.find_one({"id": doc_id})
     if not record:
         raise HTTPException(404, "Documento no encontrado")
-    file_path = SEC_DIR / record["filename_stored"]
-    if not file_path.exists():
-        raise HTTPException(404, "Archivo no encontrado en disco")
-    return FileResponse(
-        path=str(file_path),
-        media_type="application/pdf",
-        filename=record["filename_original"],
+    return storage.download_response(
+        _sec_key(record["filename_stored"]),
+        record["filename_original"],
+        "application/pdf",
     )
 
 
@@ -1820,17 +1818,17 @@ async def delete_security_doc(
     record = await db.security_docs.find_one({"id": doc_id})
     if not record:
         raise HTTPException(404, "Documento no encontrado")
-    file_path = SEC_DIR / record["filename_stored"]
-    if file_path.exists():
-        try: file_path.unlink()
-        except Exception: pass
+    storage.delete_object(_sec_key(record["filename_stored"]))
     await db.security_docs.delete_one({"id": doc_id})
     return {"ok": True}
 
 
 # ---------- QR Code Bulk Upload / Download ----------
-QR_DIR = ROOT_DIR / "uploads" / "qr"
-QR_DIR.mkdir(parents=True, exist_ok=True)
+QR_PREFIX = "qr"
+
+
+def _qr_key(empresa: str, filename: str) -> str:
+    return f"{QR_PREFIX}/{_safe_placa(empresa)}/{filename}"
 
 
 def _safe_placa(name: str) -> str:
@@ -1850,9 +1848,6 @@ async def admin_qr_upload_bulk(
     if not empresa:
         raise HTTPException(status_code=400, detail="empresa es requerida")
 
-    empresa_dir = QR_DIR / _safe_placa(empresa)
-    empresa_dir.mkdir(parents=True, exist_ok=True)
-
     saved: List[dict] = []
     skipped: List[dict] = []
 
@@ -1870,22 +1865,25 @@ async def admin_qr_upload_bulk(
             if len(content) > 5 * 1024 * 1024:
                 skipped.append({"file": f.filename, "reason": "supera 5MB"})
                 continue
-            target = empresa_dir / f"{placa}.{ext}"
-            with open(target, "wb") as out:
-                out.write(content)
+            target_filename = f"{placa}.{ext}"
+            content_type = {
+                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "webp": "image/webp", "svg": "image/svg+xml",
+            }.get(ext, "application/octet-stream")
+            storage.save_object(_qr_key(empresa, target_filename), content, content_type)
             # Upsert in mongo
             await db.qr_codes.update_one(
                 {"empresa": empresa, "placa": placa},
                 {"$set": {
                     "empresa": empresa,
                     "placa": placa,
-                    "filename": target.name,
+                    "filename": target_filename,
                     "uploaded_at": datetime.now(timezone.utc).isoformat(),
                     "uploaded_by": user["email"],
                 }},
                 upsert=True,
             )
-            saved.append({"placa": placa, "file": target.name})
+            saved.append({"placa": placa, "file": target_filename})
         except Exception as e:
             skipped.append({"file": f.filename, "reason": str(e)})
 
@@ -1907,7 +1905,6 @@ async def qr_list(user: dict = Depends(get_current_user), empresa: Optional[str]
 @api.get("/qr/download/{placa}")
 async def qr_download(placa: str, user: dict = Depends(get_current_user), empresa: Optional[str] = None):
     """Download QR for a specific placa. Validates empresa for non-admin users."""
-    from fastapi.responses import FileResponse
     placa = _safe_placa(placa)
     target_empresa = empresa if user["role"] == "admin_enered" else user.get("empresa")
     if not target_empresa:
@@ -1915,10 +1912,17 @@ async def qr_download(placa: str, user: dict = Depends(get_current_user), empres
     record = await db.qr_codes.find_one({"empresa": target_empresa, "placa": placa}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="QR no encontrado")
-    file_path = QR_DIR / _safe_placa(target_empresa) / record["filename"]
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="archivo no encontrado")
-    return FileResponse(path=str(file_path), filename=f"QR_{placa}.{file_path.suffix.lstrip('.')}", media_type="application/octet-stream")
+    fname = record["filename"]
+    ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "png"
+    media = {
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "webp": "image/webp", "svg": "image/svg+xml",
+    }.get(ext, "application/octet-stream")
+    return storage.download_response(
+        _qr_key(target_empresa, fname),
+        f"QR_{placa}.{ext}",
+        media,
+    )
 
 
 @api.delete("/admin/qr/{placa}")
@@ -1927,12 +1931,7 @@ async def admin_qr_delete(placa: str, empresa: str, user: dict = Depends(require
     record = await db.qr_codes.find_one({"empresa": empresa, "placa": placa}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="QR no encontrado")
-    file_path = QR_DIR / _safe_placa(empresa) / record["filename"]
-    if file_path.exists():
-        try:
-            file_path.unlink()
-        except Exception:
-            pass
+    storage.delete_object(_qr_key(empresa, record["filename"]))
     await db.qr_codes.delete_one({"empresa": empresa, "placa": placa})
     return {"ok": True}
 
@@ -1943,17 +1942,48 @@ async def root():
     return {"service": "ENERED API", "status": "ok"}
 
 
+@api.get("/health")
+async def health():
+    """Diagnostic endpoint for production monitoring."""
+    try:
+        await db.command("ping")
+        mongo_ok = True
+    except Exception as e:
+        mongo_ok = False
+    return {
+        "status": "ok" if mongo_ok else "degraded",
+        "mongo": "ok" if mongo_ok else "fail",
+        "storage_backend": storage.current_backend(),
+        "version": "1.0.0",
+    }
+
+
 app.include_router(api)
 
-# CORS
+# CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
+_origins_env = os.environ.get("CORS_ORIGINS", "")
 _frontend = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+_allow_origins: list[str] = []
+if _origins_env:
+    _allow_origins.extend([o.strip() for o in _origins_env.split(",") if o.strip()])
+if _frontend and _frontend not in _allow_origins:
+    _allow_origins.append(_frontend)
+if "http://localhost:3000" not in _allow_origins:
+    _allow_origins.append("http://localhost:3000")
+
+# Optionally allow regex match for Netlify preview deploys, e.g.
+# CORS_ORIGIN_REGEX="https://.*--enered\.netlify\.app"
+_cors_regex = os.environ.get("CORS_ORIGIN_REGEX")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[_frontend, "http://localhost:3000"],
+    allow_origins=_allow_origins,
+    allow_origin_regex=_cors_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+logger.info(f"CORS allow_origins={_allow_origins} regex={_cors_regex!r}")
 
 
 # ---------- Seed ----------

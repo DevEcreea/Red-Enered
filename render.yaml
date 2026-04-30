@@ -1,0 +1,47 @@
+# Render.com Blueprint — deploys the FastAPI backend.
+# Push this repo to GitHub, then in Render: New + > Blueprint > pick your repo.
+services:
+  - type: web
+    name: enered-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MONGO_URL
+        sync: false           # set in Render dashboard (Atlas connection string)
+      - key: DB_NAME
+        value: enered_prod
+      - key: JWT_SECRET
+        generateValue: true   # Render auto-generates a strong random value
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false           # set to https://YOUR-SITE.netlify.app
+      - key: CORS_ORIGIN_REGEX
+        sync: false           # optional: ^https://.*--YOUR-SITE\.netlify\.app$
+      - key: FRONTEND_URL
+        sync: false
+      # ---- Cloudflare R2 (file storage) ----
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_BUCKET
+        value: enered-uploads
+      # ---- Google Sheets ----
+      - key: GOOGLE_SHEETS_CREDENTIALS_JSON
+        sync: false           # paste full JSON string
+      - key: GOOGLE_SHEETS_ID
+        value: 1u-archWYTrlLgtom5RbNxhPLAdhMlepV-7BmNe7p48k
+      - key: GOOGLE_SHEETS_TAB
+        value: Hoja 1

@@ -1,0 +1,26 @@
+# Netlify config for the React frontend.
+# Push this repo to GitHub, then in Netlify: Add new site > Import from Git.
+[build]
+  base    = "frontend"
+  command = "yarn install --frozen-lockfile && yarn build"
+  publish = "build"
+
+[build.environment]
+  NODE_VERSION = "20"
+  YARN_VERSION = "1.22.22"
+  CI = "false"   # CRA treats warnings as errors otherwise
+
+# SPA fallback — all unknown routes go to index.html
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"

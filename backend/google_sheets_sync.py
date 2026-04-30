@@ -67,11 +67,31 @@ def _parse_number(v) -> Optional[float]:
 
 
 def _get_client():
+    """Authorize gspread using either:
+      - GOOGLE_SHEETS_CREDENTIALS_JSON: service-account JSON content as string
+        (preferred in production / cloud env vars).
+      - GOOGLE_SHEETS_CREDENTIALS_PATH: filesystem path to the JSON file
+        (used in local dev).
+    """
+    import json as _json
+    raw = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_JSON")
+    if raw and raw.strip().startswith("{"):
+        try:
+            info = _json.loads(raw)
+        except Exception as e:
+            raise RuntimeError(f"GOOGLE_SHEETS_CREDENTIALS_JSON no es JSON válido: {e}")
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        return gspread.authorize(creds)
+
     path = os.environ.get("GOOGLE_SHEETS_CREDENTIALS_PATH")
-    if not path or not os.path.exists(path):
-        raise RuntimeError("GOOGLE_SHEETS_CREDENTIALS_PATH no configurado o archivo no existe")
-    creds = Credentials.from_service_account_file(path, scopes=SCOPES)
-    return gspread.authorize(creds)
+    if path and os.path.exists(path):
+        creds = Credentials.from_service_account_file(path, scopes=SCOPES)
+        return gspread.authorize(creds)
+
+    raise RuntimeError(
+        "Google Sheets no configurado. Define GOOGLE_SHEETS_CREDENTIALS_JSON "
+        "(contenido del JSON) o GOOGLE_SHEETS_CREDENTIALS_PATH (ruta al archivo)."
+    )
 
 
 def _fetch_rows_sync(sheet_id: str, tab_name: str):
