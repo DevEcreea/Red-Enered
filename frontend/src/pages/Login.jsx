@@ -113,41 +113,25 @@ export default function Login() {
               </Link>
             </div>
           </form>
-
-          {/* Contact block */}
-          <div className="mt-10 pt-8 border-t border-neutral-100 text-sm text-neutral-700 leading-relaxed">
-            <p className="font-bold text-neutral-900 mb-2">Para nuestros clientes:</p>
-            <p className="text-neutral-600 mb-4">
-              Si aún no tienes tu usuario y/o clave, por favor comunícate con nuestros ejecutivos corporativos, a los siguientes números y/o correos electrónicos:
-            </p>
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
-                <Globe className="w-4 h-4 text-white" strokeWidth={2} />
-              </div>
-              <div className="flex-1 text-xs md:text-sm text-neutral-700 pt-1.5">
-                (044) 659-3519 | +51 972 228 870 | <a href="mailto:hola@enered.pe" className="hover:text-brand">hola@enered.pe</a>
-              </div>
-            </div>
-          </div>
         </div>
 
-        {/* Footer ENERED */}
-        <div className="w-full max-w-md mx-auto pt-8 space-y-3 text-center">
-          <div className="text-xs text-neutral-600">
-            <a href="#" className="hover:text-brand">Asistencia técnica</a>
-            <span className="mx-2">•</span>
-            <a href="#" className="hover:text-brand">Términos y condiciones</a>
-            <span className="mx-2">•</span>
-            <a href="#" className="hover:text-brand">Avisos de copyright</a>
-          </div>
+        {/* Footer ENERED (minimal) */}
+        <div className="w-full max-w-md mx-auto pt-8 text-center space-y-2">
           <div className="text-xs text-neutral-500">
-            <a href="https://www.energix.pe" target="_blank" rel="noreferrer" className="hover:text-brand">www.energix.pe</a>
+            <a
+              href="https://www.energix.pe"
+              target="_blank"
+              rel="noreferrer"
+              className="hover:text-brand"
+            >
+              www.energix.pe
+            </a>
+            <span className="mx-2 text-neutral-300">·</span>
+            <span className="text-neutral-400">
+              © {new Date().getFullYear()} Enered · Todos los derechos reservados
+            </span>
           </div>
-          <div className="text-[11px] text-neutral-400 pt-2 border-t border-neutral-100">
-            ENERED | Soluciones en Energías | Copyright © {new Date().getFullYear()} | Energix Perú | Todos los derechos reservados.
-          </div>
-
-          {/* EMAY TECH branding card — AFTER Enered copyright */}
+          {/* EMAY TECH minimal line */}
           <EmayFooter variant="card" />
         </div>
       </div>
