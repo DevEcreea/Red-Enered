@@ -7,6 +7,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { ROLE_LABEL } from "../lib/utils";
+import EmayFooter from "./EmayFooter";
 
 const LOGO_IMG = "/assets/enered-logo.png";
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
@@ -290,7 +291,10 @@ export default function Layout({ children }) {
         </div>
       </div>
 
-      <main className="md:ml-28 p-4 md:p-8 space-y-8 page-enter">{children}</main>
+      <main className="md:ml-28 p-4 md:p-8 space-y-8 page-enter">
+        {children}
+        <EmayFooter variant="compact" />
+      </main>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { User, Lock, Loader2, Globe, Phone } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { formatApiError } from "../lib/utils";
+import EmayFooter from "../components/EmayFooter";
 
 const HERO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/0fc04sfs_image.png";
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
@@ -129,16 +130,8 @@ export default function Login() {
             </div>
           </div>
 
-          {/* Demo accounts (colapsado) */}
-          <details className="mt-6 text-xs">
-            <summary className="cursor-pointer text-neutral-400 hover:text-brand font-medium">Cuentas demo</summary>
-            <div className="mt-2 p-3 bg-neutral-50 border border-neutral-200 rounded-lg font-mono text-neutral-600 space-y-1">
-              <div>admin@enered.com / admin123</div>
-              <div>administrador@lima.com / demo123</div>
-              <div>logistica@lima.com / demo123</div>
-              <div>contabilidad@lima.com / demo123</div>
-            </div>
-          </details>
+          {/* EMAY TECH branding card */}
+          <EmayFooter variant="card" />
         </div>
 
         {/* Footer */}
