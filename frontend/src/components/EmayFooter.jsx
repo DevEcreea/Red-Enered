@@ -1,132 +1,161 @@
 import React from "react";
-import { Globe, MessageCircle, ArrowUpRight } from "lucide-react";
+import { Globe, MessageCircle } from "lucide-react";
 
 /**
  * Branding footer for EMAY TECH.
  *
  * Variants:
- *  - "card"    : big card for the Login screen (below the form).
- *  - "compact" : thin one-line footer for the main layout.
+ *  - "card"    : large card for Login — dark navy/purple gradient, pill CTAs.
+ *  - "compact" : same visual language, shorter — used inside main Layout.
  */
-const EMAY_LOGO = "/emay-logo.png";
 const EMAY_WEB = "https://www.emay.space";
 const EMAY_WA = "https://wa.me/51920485878";
 const EMAY_PHONE_DISPLAY = "+51 920 485 878";
 const EMAY_YEAR = new Date().getFullYear();
 
+// Diagonal dark navy → deep purple (matches EMAY brand gradient)
+const EMAY_GRADIENT =
+  "linear-gradient(135deg, #030447 0%, #14094d 45%, #340b5b 100%)";
+
+function CTAWhite({ href, icon: Icon, children, testid }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid={testid}
+      className="group inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-white text-[#030447] text-sm font-bold shadow-md hover:shadow-xl hover:scale-[1.04] active:scale-[0.98] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-300 focus:ring-offset-2 focus:ring-offset-[#030447] whitespace-nowrap"
+    >
+      <Icon className="w-4 h-4 text-[#030447] group-hover:text-brand transition-colors" strokeWidth={2.5} />
+      <span>{children}</span>
+    </a>
+  );
+}
+
+function CTAGreen({ href, icon: Icon, children, testid }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-testid={testid}
+      className="group inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#25D366] text-white text-sm font-bold shadow-md hover:shadow-xl hover:bg-[#20BA5A] hover:scale-[1.04] active:scale-[0.98] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2 focus:ring-offset-[#030447] whitespace-nowrap"
+    >
+      <Icon className="w-4 h-4" strokeWidth={2.5} />
+      <span>{children}</span>
+    </a>
+  );
+}
+
 export default function EmayFooter({ variant = "compact" }) {
+  // --------------------------------------------------------------------
+  // CARD variant (Login)
+  // --------------------------------------------------------------------
   if (variant === "card") {
     return (
       <div
-        className="mt-6 rounded-2xl overflow-hidden border border-indigo-200/50 shadow-md"
-        style={{
-          background:
-            "linear-gradient(135deg, #1a0a4a 0%, #2D0A4E 45%, #3b1575 100%)",
-        }}
+        className="mt-6 rounded-2xl overflow-hidden shadow-lg"
+        style={{ background: EMAY_GRADIENT }}
         data-testid="emay-branding-card"
       >
-        <div className="px-5 py-5 md:px-6 md:py-6 flex flex-col md:flex-row items-center gap-4">
-          {/* Logo */}
-          <div className="flex-shrink-0">
-            <img
-              src={EMAY_LOGO}
-              alt="EMAY TECH"
-              className="h-14 md:h-16 w-auto object-contain drop-shadow"
-              loading="lazy"
-            />
+        <div className="px-6 py-7 md:px-8 md:py-8 text-center">
+          <div className="text-[10.5px] uppercase tracking-[0.28em] text-cyan-300 font-bold">
+            Tecnología desarrollada por
           </div>
 
-          {/* Copy */}
-          <div className="flex-1 text-center md:text-left">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300/80 font-bold">
-              Tecnología desarrollada por
-            </div>
-            <div className="text-white text-lg md:text-xl font-bold leading-tight mt-0.5">
-              EMAY TECH
-            </div>
-            <p className="text-white/75 text-[12.5px] leading-snug mt-1.5 max-w-md">
-              Software a medida, automatización de procesos y transformación
-              digital para empresas. Control operativo y analítica en tiempo
-              real.
-            </p>
+          <div
+            className="mt-1 text-white font-black leading-none"
+            style={{
+              fontSize: "2.25rem",
+              letterSpacing: "0.18em",
+              textShadow: "0 2px 12px rgba(0,0,0,0.35)",
+              fontFamily:
+                '"Cabinet Grotesk", "Inter", system-ui, -apple-system, sans-serif',
+            }}
+          >
+            EMAY TECH
+          </div>
 
-            <div className="mt-3 flex flex-wrap gap-2 justify-center md:justify-start">
-              <a
-                href={EMAY_WEB}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#2D0A4E] text-xs font-bold hover:bg-cyan-300 transition-colors shadow-sm"
-                data-testid="emay-web-cta"
-              >
-                <Globe className="w-3.5 h-3.5" strokeWidth={2.5} />
-                www.emay.space
-                <ArrowUpRight className="w-3 h-3" strokeWidth={2.5} />
-              </a>
-              <a
-                href={EMAY_WA}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-400 text-emerald-950 text-xs font-bold hover:bg-emerald-300 transition-colors shadow-sm"
-                data-testid="emay-wa-cta"
-              >
-                <MessageCircle className="w-3.5 h-3.5" strokeWidth={2.5} />
-                {EMAY_PHONE_DISPLAY}
-              </a>
-            </div>
+          <p className="mt-3 text-white/85 text-[13px] leading-relaxed max-w-md mx-auto">
+            <span className="font-semibold">
+              Integraciones &amp; Automatizaciones
+            </span>
+            <span className="mx-2 text-cyan-300/70">·</span>
+            Solicita tu solución a medida
+          </p>
+
+          <div className="mt-5 flex flex-wrap gap-3 justify-center">
+            <CTAWhite href={EMAY_WEB} icon={Globe} testid="emay-web-cta">
+              www.emay.space
+            </CTAWhite>
+            <CTAGreen href={EMAY_WA} icon={MessageCircle} testid="emay-wa-cta">
+              {EMAY_PHONE_DISPLAY}
+            </CTAGreen>
           </div>
         </div>
-        <div className="px-5 py-2 bg-black/20 border-t border-white/10 text-center text-[10.5px] text-white/60 tracking-wide">
-          © {EMAY_YEAR} EMAY TECH · Integraciones & Automatizaciones · Todos los
-          derechos reservados
+
+        <div className="px-6 py-2.5 bg-black/30 border-t border-white/10 text-center text-[10.5px] text-white/65 tracking-wide">
+          © {EMAY_YEAR} EMAY TECH · Integraciones &amp; Automatizaciones · Todos
+          los derechos reservados
         </div>
       </div>
     );
   }
 
-  // Compact variant — footer inline used inside the main app Layout.
+  // --------------------------------------------------------------------
+  // COMPACT variant (inside app Layout, after each page)
+  // --------------------------------------------------------------------
   return (
     <footer
-      className="mt-10 pt-4 border-t border-neutral-200"
+      className="mt-10 rounded-2xl overflow-hidden shadow-md"
+      style={{ background: EMAY_GRADIENT }}
       data-testid="emay-footer-compact"
     >
-      <div className="flex flex-col md:flex-row items-center justify-between gap-2 text-[11.5px] text-neutral-500">
-        <div className="flex items-center gap-2 flex-wrap justify-center md:justify-start">
-          <img
-            src={EMAY_LOGO}
-            alt="EMAY"
-            className="h-5 w-auto object-contain opacity-90"
-            loading="lazy"
-          />
-          <span className="text-neutral-400">·</span>
-          <span className="font-semibold text-neutral-700">
-            Desarrollado por EMAY TECH
-          </span>
-          <span className="hidden md:inline text-neutral-300">—</span>
-          <span className="hidden md:inline">
-            Integraciones &amp; Automatizaciones
-          </span>
+      <div className="px-5 py-4 md:px-6 md:py-5 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="text-center md:text-left">
+          <div className="text-[10px] uppercase tracking-[0.25em] text-cyan-300 font-bold">
+            Tecnología desarrollada por
+          </div>
+          <div
+            className="mt-0.5 text-white font-black"
+            style={{
+              fontSize: "1.25rem",
+              letterSpacing: "0.16em",
+              fontFamily:
+                '"Cabinet Grotesk", "Inter", system-ui, -apple-system, sans-serif',
+            }}
+          >
+            EMAY TECH
+          </div>
+          <div className="text-white/80 text-xs mt-1">
+            <span className="font-semibold">
+              Integraciones &amp; Automatizaciones
+            </span>
+            <span className="mx-1.5 text-cyan-300/70">·</span>
+            Solicita tu solución a medida
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <a
+
+        <div className="flex flex-wrap gap-2.5 justify-center">
+          <CTAWhite
             href={EMAY_WEB}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-brand transition-colors"
+            icon={Globe}
+            testid="emay-web-cta-compact"
           >
-            <Globe className="w-3 h-3" />
-            emay.space
-          </a>
-          <a
+            www.emay.space
+          </CTAWhite>
+          <CTAGreen
             href={EMAY_WA}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-emerald-600 transition-colors"
+            icon={MessageCircle}
+            testid="emay-wa-cta-compact"
           >
-            <MessageCircle className="w-3 h-3" />
             {EMAY_PHONE_DISPLAY}
-          </a>
-          <span className="text-neutral-400">© {EMAY_YEAR}</span>
+          </CTAGreen>
         </div>
+      </div>
+      <div className="px-5 py-2 bg-black/30 border-t border-white/10 text-center text-[10px] text-white/65 tracking-wide">
+        © {EMAY_YEAR} EMAY TECH · Integraciones &amp; Automatizaciones · Todos
+        los derechos reservados
       </div>
     </footer>
   );

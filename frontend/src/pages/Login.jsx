@@ -129,12 +129,9 @@ export default function Login() {
               </div>
             </div>
           </div>
-
-          {/* EMAY TECH branding card */}
-          <EmayFooter variant="card" />
         </div>
 
-        {/* Footer */}
+        {/* Footer ENERED */}
         <div className="w-full max-w-md mx-auto pt-8 space-y-3 text-center">
           <div className="text-xs text-neutral-600">
             <a href="#" className="hover:text-brand">Asistencia técnica</a>
@@ -149,6 +146,9 @@ export default function Login() {
           <div className="text-[11px] text-neutral-400 pt-2 border-t border-neutral-100">
             ENERED | Soluciones en Energías | Copyright © {new Date().getFullYear()} | Energix Perú | Todos los derechos reservados.
           </div>
+
+          {/* EMAY TECH branding card — AFTER Enered copyright */}
+          <EmayFooter variant="card" />
         </div>
       </div>
     </div>
