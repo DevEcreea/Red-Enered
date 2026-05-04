@@ -2009,13 +2009,7 @@ async def seed_demo_data():
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    demo_users = [
-        ("administrador@lima.com", "demo123", "Juan Pérez", "administrador", "TRANSPORTES LIMA SAC"),
-        ("logistica@lima.com", "demo123", "María López", "logistica", "TRANSPORTES LIMA SAC"),
-        ("contabilidad@lima.com", "demo123", "Carlos Ruiz", "contabilidad", "TRANSPORTES LIMA SAC"),
-        ("administrador@andina.com", "demo123", "Ana Gómez", "administrador", "LOGISTICA ANDINA SA"),
-        ("administrador@cargo.com", "demo123", "Pedro Silva", "administrador", "CARGO PERU EIRL"),
-    ]
+    demo_users = []
     for email, pwd, name, role, empresa in demo_users:
         if not await db.users.find_one({"email": email}):
             await db.users.insert_one({
@@ -2115,12 +2109,7 @@ async def seed_demo_data():
         })
 
     # Empresa configs (plan, RUC, línea de crédito, unidades)
-    empresa_defaults = [
-        ("ROSANDINA SAC", "20605479686", "tracking", 50000, 77),
-        ("TRANSPORTES LIMA SAC", "20512345678", "advanced", 80000, 25),
-        ("LOGISTICA ANDINA SA", "20556781234", "tracking", 40000, 18),
-        ("CARGO PERU EIRL", "20578912345", "integral", 30000, 12),
-    ]
+    empresa_defaults = []
     for empresa, ruc, plan, linea, unidades in empresa_defaults:
         if not await db.empresas_config.find_one({"empresa": empresa}):
             await db.empresas_config.insert_one({
