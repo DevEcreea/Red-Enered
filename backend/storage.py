@@ -154,26 +154,29 @@ def presigned_url(key: str, ttl: int = 3600, filename: Optional[str] = None,
 def download_response(key: str, filename: str, content_type: str = "application/octet-stream"):
     """Returns a FastAPI response that lets the client download the object.
 
-    On R2: a 307 redirect to a 1h presigned URL (browser downloads directly
-    from CDN — backend doesn't proxy bytes).
+    On R2: streams the bytes through the backend (avoids cross-origin redirect
+    + R2 CORS issues with XHR/blob downloads).
     On local: FileResponse from disk.
     """
     from fastapi import HTTPException
     backend = _backend()
     if backend == "r2":
-        if not object_exists(key):
+        try:
+            data = get_object_bytes(key)
+        except FileNotFoundError:
             raise HTTPException(status_code=404, detail="archivo no encontrado en R2")
-        url = presigned_url(key, ttl=3600, filename=filename, content_type=content_type)
-        # 307 preserves method (GET); browsers follow it transparently.
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url, status_code=307)
+        from fastapi.responses import Response
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     else:
         from fastapi.responses import FileResponse
         path = LOCAL_BASE / key
         if not path.exists():
             raise HTTPException(status_code=404, detail="archivo no encontrado en disco")
         return FileResponse(path=str(path), filename=filename, media_type=content_type)
-
 
 def stream_object(key: str) -> io.BytesIO:
     """Get the object as a BytesIO stream (for in-memory processing)."""
