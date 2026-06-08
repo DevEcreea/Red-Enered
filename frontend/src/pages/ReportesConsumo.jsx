@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Filter, X, FileBarChart, Download } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Filter, X, FileBarChart, Download, Upload } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
@@ -13,6 +13,33 @@ export default function ReportesConsumo() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
+  const fileInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.post("/admin/consumptions/upload", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      alert(`✅ Importación exitosa: ${res.data.inserted} registros agregados.`);
+      // Refresh data
+      const params = Object.fromEntries(Object.entries(filters).filter(([_, v]) => v));
+      const r = await api.get("/consumptions", { params });
+      setRows(r.data || []);
+      setPage(1);
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || "Error al importar";
+      alert(`❌ Error: ${msg}`);
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   useEffect(() => {
     if (user?.role === "admin_enered") api.get("/empresas").then((r) => setEmpresas(r.data)).catch(() => {});
@@ -67,14 +94,36 @@ export default function ReportesConsumo() {
           <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Reportes de consumo</h1>
           <p className="text-neutral-500 mt-1 text-sm">Cada carga registrada por placa, estación y fecha. Exportable a CSV.</p>
         </div>
-        <button
-          onClick={exportCSV}
-          disabled={rows.length === 0}
-          className="h-11 px-4 rounded-md bg-brand text-white text-sm font-bold flex items-center gap-2 hover:bg-brand-hover disabled:opacity-40"
-          data-testid="export-csv"
-        >
-          <Download className="w-4 h-4" /> Exportar CSV
-        </button>
+        <div className="flex items-center gap-2">
+          {user?.role === "admin_enered" && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={handleImport}
+                data-testid="import-file-input"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+                className="h-11 px-4 rounded-md bg-white border-2 border-brand text-brand text-sm font-bold flex items-center gap-2 hover:bg-brand-50 disabled:opacity-40"
+                data-testid="import-consumo"
+              >
+                <Upload className="w-4 h-4" /> {importing ? "Importando..." : "Importar Consumo"}
+              </button>
+            </>
+          )}
+          <button
+            onClick={exportCSV}
+            disabled={rows.length === 0}
+            className="h-11 px-4 rounded-md bg-brand text-white text-sm font-bold flex items-center gap-2 hover:bg-brand-hover disabled:opacity-40"
+            data-testid="export-csv"
+          >
+            <Download className="w-4 h-4" /> Exportar CSV
+          </button>
+        </div>
       </div>
 
       {/* Filtros */}
