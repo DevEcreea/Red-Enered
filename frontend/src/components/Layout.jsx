@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Truck, Satellite, PieChart, Receipt, ShieldCheck, GraduationCap,
-  LifeBuoy, Users, Upload, QrCode, LogOut, Menu, Search, Bell, Mail,
+  LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, GraduationCap,
+  LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
@@ -16,10 +16,10 @@ const ICON_BASE = "/assets/icons";
 
 const MENU = [
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
-  { to: "/flotas", label: "Flotas", iconImg: `${ICON_BASE}/flotas.png`, icon: Truck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
-  { to: "/centro-monitoreo", label: "Centro Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
-  { to: "/analitica", label: "Analítica", iconImg: `${ICON_BASE}/analitica.png`, icon: PieChart, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
-  { to: "/facturacion", label: "Estado Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
+  { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
+  { to: "/centro-monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
+  { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
+  { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
   { to: "/seguridad", label: "Seguridad", iconImg: `${ICON_BASE}/seguridad.png`, icon: ShieldCheck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-seguridad" },
   { to: "/capacitacion", label: "Capacitación", iconImg: `${ICON_BASE}/capacitacion.png`, icon: GraduationCap, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-capacitacion" },
   { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
@@ -27,43 +27,43 @@ const MENU = [
 
 const ADMIN_ITEMS = [
   { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
-  { to: "/admin/upload", label: "Fuente Datos", icon: Upload, testid: "nav-upload" },
-  { to: "/admin/qr", label: "Carga QR", icon: QrCode, testid: "nav-qr-admin" },
+  { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload" },
+  { to: "/admin/qr", label: "QR", icon: QrCode, testid: "nav-qr-admin" },
 ];
 
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
-  "/flotas": "Flotas",
-  "/centro-monitoreo": "Centro Monitoreo",
-  "/analitica": "Analítica",
-  "/facturacion": "Estado de Cuenta",
+  "/flotas": "Combustible",
+  "/centro-monitoreo": "Monitoreo",
+  "/analitica": "Analytics BI",
+  "/facturacion": "Cuenta",
   "/seguridad": "Seguridad",
   "/capacitacion": "Capacitación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
-  "/admin/upload": "Fuente de Datos",
-  "/admin/qr": "Carga Masiva de QR",
+  "/admin/upload": "Datos",
+  "/admin/qr": "QR",
 };
 
 function SidebarLink({ item, onClick }) {
   const Ic = item.icon;
   const content = (active) => (
     <>
-      <div className="relative">
-        {item.iconImg ? (
-          <img
-            src={item.iconImg}
-            alt=""
-            className={`w-6 h-6 mb-0.5 object-contain ${active ? "opacity-100" : "opacity-90"}`}
-            style={active ? { filter: "brightness(0) saturate(100%) invert(78%) sepia(60%) saturate(427%) hue-rotate(135deg) brightness(102%) contrast(98%)" } : undefined}
-          />
-        ) : (
-          <Ic className={`w-5 h-5 mb-0.5 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
-        )}
-      </div>
-      <span className={`text-[9.5px] font-semibold leading-tight text-center ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
+      {/* Active indicator bar (left) */}
+      {active && <span className="absolute left-0 top-2 bottom-2 w-1 bg-cyan-300 rounded-r-full" />}
+      {item.iconImg ? (
+        <img
+          src={item.iconImg}
+          alt=""
+          className="w-5 h-5 object-contain flex-shrink-0"
+          style={active ? { filter: "brightness(0) saturate(100%) invert(78%) sepia(60%) saturate(427%) hue-rotate(135deg) brightness(102%) contrast(98%)" } : { filter: "brightness(0) invert(1)", opacity: 0.9 }}
+        />
+      ) : (
+        <Ic className={`w-5 h-5 flex-shrink-0 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+      )}
+      <span className={`text-sm font-semibold flex-1 ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
-        <span className={`mt-0.5 px-1 py-0.5 rounded-full text-[7px] font-black tracking-wider ${
+        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 ${
           item.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
         }`}>
           {item.badge}
@@ -72,12 +72,11 @@ function SidebarLink({ item, onClick }) {
     </>
   );
 
+  const baseCls = "relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all";
+
   if (item.disabled) {
     return (
-      <div
-        className="flex flex-col items-center justify-center py-2.5 px-1.5 rounded-lg opacity-60 cursor-not-allowed"
-        data-testid={item.testid}
-      >
+      <div className={`${baseCls} opacity-60 cursor-not-allowed`} data-testid={item.testid}>
         {content(false)}
       </div>
     );
@@ -89,9 +88,7 @@ function SidebarLink({ item, onClick }) {
       onClick={onClick}
       data-testid={item.testid}
       className={({ isActive }) =>
-        `flex flex-col items-center justify-center py-2.5 px-1.5 rounded-lg transition-all ${
-          isActive ? "bg-white/15 shadow-inner" : "hover:bg-white/10"
-        }`
+        `${baseCls} ${isActive ? "bg-white/15" : "hover:bg-white/10"}`
       }
     >
       {({ isActive }) => content(isActive)}
@@ -165,26 +162,26 @@ export default function Layout({ children }) {
 
   const SidebarContent = () => (
     <>
-      {/* Logo - con más espacio respiratorio arriba/abajo */}
-      <div className="px-2 pt-7 pb-7 flex-shrink-0">
+      {/* Logo */}
+      <div className="px-5 pt-6 pb-5 flex-shrink-0">
         <img
           src={LOGO_IMG}
           alt="ENERED"
-          className="w-full max-w-[110px] mx-auto h-auto object-contain"
+          className="w-full max-w-[150px] mx-auto h-auto object-contain"
         />
       </div>
 
       {/* Divider */}
-      <div className="mx-5 h-px bg-white/15 mb-1 flex-shrink-0" />
+      <div className="mx-5 h-px bg-white/15 mb-2 flex-shrink-0" />
 
-      <nav className="flex-1 px-2 py-2 flex flex-col justify-center space-y-2 overflow-y-auto" data-testid="sidebar-nav">
+      <nav className="flex-1 px-3 py-2 flex flex-col space-y-1 overflow-y-auto" data-testid="sidebar-nav">
         {items.map((item) => (
           <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
         ))}
 
         {isAdmin && (
           <>
-            <div className="mx-1 mt-3 mb-1 pt-3 border-t border-white/15 text-[8px] font-bold uppercase tracking-widest text-white/60 text-center">
+            <div className="mx-3 mt-3 mb-1 pt-3 border-t border-white/15 text-[9px] font-bold uppercase tracking-widest text-white/60">
               Admin
             </div>
             {ADMIN_ITEMS.map((item) => (
@@ -195,14 +192,14 @@ export default function Layout({ children }) {
       </nav>
 
       {/* Logout */}
-      <div className="px-2 py-2 border-t border-white/15 flex-shrink-0">
+      <div className="px-3 py-3 border-t border-white/15 flex-shrink-0">
         <button
           onClick={handleLogout}
-          className="w-full flex flex-col items-center justify-center py-2 rounded-lg hover:bg-white/10 transition-colors"
+          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors"
           data-testid="logout-btn"
         >
-          <LogOut className="w-4 h-4 text-white/80 mb-0.5" strokeWidth={1.75} />
-          <span className="text-[10px] font-semibold text-white/90">Salir</span>
+          <LogOut className="w-5 h-5 text-white/80" strokeWidth={1.75} />
+          <span className="text-sm font-semibold text-white/90">Salir</span>
         </button>
       </div>
     </>
@@ -212,7 +209,7 @@ export default function Layout({ children }) {
     <div className="min-h-screen bg-[#F6F7FB]">
       {/* Desktop sidebar */}
       <aside
-        className="hidden md:flex fixed inset-y-0 left-0 w-28 flex-col z-40"
+        className="hidden md:flex fixed inset-y-0 left-0 w-56 flex-col z-40"
         style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
       >
         <SidebarContent />
@@ -223,7 +220,7 @@ export default function Layout({ children }) {
         <>
           <div className="fixed inset-0 bg-black/40 z-50 md:hidden" onClick={() => setMobileOpen(false)} />
           <aside
-            className="fixed inset-y-0 left-0 w-28 z-50 flex flex-col md:hidden animate-fade-in"
+            className="fixed inset-y-0 left-0 w-56 z-50 flex flex-col md:hidden animate-fade-in"
             style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
           >
             <SidebarContent />
@@ -232,7 +229,7 @@ export default function Layout({ children }) {
       )}
 
       {/* Header */}
-      <header className="md:ml-28 h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100">
+      <header className="md:ml-56 h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100">
         <div className="flex items-center gap-3 min-w-0">
           <button
             className="md:hidden p-2 rounded-md hover:bg-neutral-100"
@@ -284,7 +281,7 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      <main className="md:ml-28 p-4 md:p-8 space-y-8 page-enter">
+      <main className="md:ml-56 p-4 md:p-8 space-y-8 page-enter">
         {children}
         <EmayFooter variant="compact" />
       </main>
