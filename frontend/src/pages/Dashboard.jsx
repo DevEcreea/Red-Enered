@@ -611,10 +611,10 @@ export default function Dashboard() {
               <YAxis tick={{ fontSize: 9 }} stroke="#a3a3a3" tickFormatter={(v) => fmtAxis(v, unitTiempo)} />
               <Tooltip
                 contentStyle={{ borderRadius: 8, fontSize: 11 }}
-                formatter={(v) => unitTiempo === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`}
+                formatter={(v, name) => [unitTiempo === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`, name]}
               />
-              <Area type="monotone" dataKey={unitTiempo} stroke="#8039F4" strokeWidth={2.5} fill="url(#gradMain)" />
-              <Area type="monotone" dataKey={`ahorro_${unitTiempo}`} stroke="#10B981" strokeWidth={2} fill="url(#gradAhorro)" />
+              <Area type="monotone" dataKey={unitTiempo} stroke="#8039F4" strokeWidth={2.5} fill="url(#gradMain)" name="Consumo" />
+              <Area type="monotone" dataKey={`ahorro_${unitTiempo}`} stroke="#10B981" strokeWidth={2} fill="url(#gradAhorro)" name="Ahorro" />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -626,8 +626,8 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 9 }} stroke="#a3a3a3" tickFormatter={(v) => fmtAxis(v, unitPlacas)} />
               <YAxis type="category" dataKey="placa" tick={{ fontSize: 10, fontWeight: 700 }} width={70} stroke="#525252" />
-              <Tooltip formatter={(v) => unitPlacas === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
-              <Bar dataKey={unitPlacas} fill="#8039F4" radius={[0, 6, 6, 0]} />
+              <Tooltip formatter={(v, name) => [unitPlacas === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`, name]} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
+              <Bar dataKey={unitPlacas} fill="#8039F4" radius={[0, 6, 6, 0]} name="Consumo" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -639,8 +639,8 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" vertical={false} />
               <XAxis dataKey="ciudad" tick={{ fontSize: 9, fontWeight: 700 }} stroke="#525252" angle={-25} textAnchor="end" height={40} />
               <YAxis tick={{ fontSize: 9 }} stroke="#a3a3a3" tickFormatter={(v) => fmtAxis(v, unitCiudad)} />
-              <Tooltip formatter={(v) => unitCiudad === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
-              <Bar dataKey={unitCiudad} fill="#06B6D4" radius={[6, 6, 0, 0]} />
+              <Tooltip formatter={(v, name) => [unitCiudad === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`, name]} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
+              <Bar dataKey={unitCiudad} fill="#06B6D4" radius={[6, 6, 0, 0]} name="Consumo" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -652,8 +652,8 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 9 }} stroke="#a3a3a3" tickFormatter={(v) => fmtAxis(v, unitEstacion)} />
               <YAxis type="category" dataKey="estacion" tick={{ fontSize: 9, fontWeight: 700 }} width={90} stroke="#525252" />
-              <Tooltip formatter={(v) => unitEstacion === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
-              <Bar dataKey={unitEstacion} fill="#10B981" radius={[0, 6, 6, 0]} />
+              <Tooltip formatter={(v, name) => [unitEstacion === "soles" ? formatSoles(v) : `${formatNumber(v, 0)} gal`, name]} contentStyle={{ borderRadius: 8, fontSize: 11 }} />
+              <Bar dataKey={unitEstacion} fill="#10B981" radius={[0, 6, 6, 0]} name="Consumo" />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
