@@ -265,31 +265,24 @@ export default function Layout({ children }) {
 
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
-              <div className="text-[11px] text-neutral-500 font-medium leading-tight">Hola,</div>
-              <div className="text-sm font-bold text-neutral-900 leading-tight truncate max-w-[160px]">{user.name || "Usuario"}</div>
-              <div className="text-[10px] text-neutral-500 font-semibold leading-tight">{ROLE_LABEL[user.role]}</div>
+              <div className="text-sm font-bold text-neutral-900 leading-tight truncate max-w-[260px]" data-testid="header-empresa" title={clienteLabel}>
+                {clienteLabel}
+              </div>
+              <div className="text-xs font-bold text-brand leading-tight" data-testid="header-plan">
+                Plan {currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)}
+              </div>
             </div>
-            <div
-              className="w-11 h-11 rounded-full bg-gradient-to-br from-brand to-[#6B23B1] text-white font-black flex items-center justify-center text-sm border-2 border-white shadow-md"
+            <button
+              onClick={openWA}
+              title="Contactar a ENERED por WhatsApp"
+              className="w-11 h-11 rounded-full bg-gradient-to-br from-brand to-[#6B23B1] text-white font-black flex items-center justify-center text-sm border-2 border-white shadow-md hover:scale-105 transition-transform"
               data-testid="header-avatar"
             >
               {initials}
-            </div>
+            </button>
           </div>
         </div>
       </header>
-
-      {/* Planes row */}
-      <div className="md:ml-28 px-4 md:px-8 py-4 bg-white border-b border-neutral-100">
-        <div className="flex gap-3 overflow-x-auto pb-1" data-testid="plan-cards">
-          <PlanCard label="Cliente" title={clienteLabel} color="gray" testid="plan-cliente" wide />
-          <PlanCard label="Tipo de Producto" title="Flotas" color="gray" testid="plan-producto" wide />
-          <PlanCard label="Ahorro Combustible" title="Plan Tracking" color="violet" testid="plan-tracking" onClick={openWA} active={currentPlan === "tracking"} />
-          <PlanCard label="Ahorro Integral" title="Plan Advanced" color="violetDark" testid="plan-advanced" onClick={openWA} active={currentPlan === "advanced"} />
-          <PlanCard label="Control Total 360" title="Plan Integral" color="violet" testid="plan-integral" onClick={openWA} active={currentPlan === "integral"} />
-          <PlanCard label="Prueba Gratis" title="¡Optimiza tu Flota!" color="cyan" testid="plan-prueba" onClick={openWA} />
-        </div>
-      </div>
 
       <main className="md:ml-28 p-4 md:p-8 space-y-8 page-enter">
         {children}
