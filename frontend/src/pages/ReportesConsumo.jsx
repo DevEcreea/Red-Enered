@@ -77,14 +77,6 @@ export default function ReportesConsumo() {
         </button>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SmallKpi label="Cargas" value={formatNumber(totals.n, 0)} />
-        <SmallKpi label="Galones" value={formatNumber(totals.gal, 2)} />
-        <SmallKpi label="Gasto" value={formatSoles(totals.gasto)} />
-        <SmallKpi label="Ahorro" value={formatSoles(totals.ahorro)} accent="green" />
-      </div>
-
       {/* Filtros */}
       <div className="bg-white border border-border rounded-2xl p-3 md:p-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 text-xs font-bold text-neutral-600 uppercase tracking-wider">
