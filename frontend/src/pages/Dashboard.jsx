@@ -6,7 +6,7 @@ import {
 import {
   Siren, Truck, Fuel, CreditCard, Droplet, Banknote, MapPin,
   Activity, TrendingUp, Gauge, Calendar, Wrench, FileText, Users,
-  Filter, X, Clock, Info, ChevronRight, Lock,
+  Filter, X, Clock, Info, ChevronRight, Lock, Sparkles,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
@@ -22,30 +22,32 @@ function LockedKpiCard({ icon: Icon, label, tooltip, testid }) {
   const openUpgrade = () => window.open(UPGRADE_WA, "_blank", "noopener,noreferrer");
   return (
     <div className="group relative" data-testid={testid}>
-      <div className="bg-white border-2 border-neutral-200 rounded-2xl px-3.5 py-3 flex flex-col justify-between min-h-[120px] w-full transition-all hover:border-brand hover:shadow-lg cursor-pointer">
+      <div className="bg-white border border-neutral-200 border-l-4 border-l-brand rounded-2xl px-3.5 py-3 flex flex-col justify-between min-h-[120px] w-full transition-all hover:shadow-lg hover:border-l-brand hover:-translate-y-0.5 cursor-pointer">
         <div className="flex items-start justify-between gap-2">
           <div className="text-[10.5px] font-bold uppercase tracking-wider text-neutral-500 leading-tight line-clamp-2">
             {label}
           </div>
           {Icon && <Icon className="w-4 h-4 flex-shrink-0 text-brand-300" strokeWidth={2} />}
         </div>
-        <div className="flex items-center gap-2 mt-3">
-          <div className="w-9 h-9 rounded-full bg-white border-2 border-brand-100 flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110 group-hover:border-brand">
-            <Lock className="w-4 h-4 text-brand" strokeWidth={2.2} />
-          </div>
-          <button
-            onClick={openUpgrade}
-            className="flex-1 h-9 px-3 rounded-full bg-brand text-white text-[11px] font-black hover:bg-brand-hover transition-colors shadow-sm"
-          >
-            Mejorar Plan
-          </button>
-        </div>
+        <button
+          onClick={openUpgrade}
+          className="mt-3 w-full h-9 px-3 rounded-full bg-brand text-white text-[11px] font-black hover:bg-brand-hover transition-all shadow-sm flex items-center justify-center gap-1.5"
+        >
+          <Lock className="w-3.5 h-3.5" strokeWidth={2.5} />
+          Mejorar Plan
+        </button>
       </div>
-      {/* Tooltip on hover */}
-      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[230px] z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none">
-        <div className="relative bg-neutral-900 text-white text-[11px] font-medium leading-snug rounded-lg px-3 py-2 shadow-xl">
-          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-neutral-900 rotate-45" />
-          {tooltip}
+      {/* Tooltip on hover — Premium Plus style */}
+      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[260px] z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none">
+        <div className="relative bg-white border-2 border-brand-100 rounded-xl px-4 py-3 shadow-xl">
+          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-l-2 border-t-2 border-brand-100 rotate-45" />
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-brand" strokeWidth={2.5} />
+            <span className="text-xs font-black text-brand uppercase tracking-wide">Premium Plus</span>
+          </div>
+          <div className="text-[11px] font-medium leading-relaxed text-neutral-700">
+            {tooltip}
+          </div>
         </div>
       </div>
     </div>
