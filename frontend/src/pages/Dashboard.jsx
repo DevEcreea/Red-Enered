@@ -141,6 +141,10 @@ function CardHeader({ icon: Icon, title, badge, badgeColor = "brand" }) {
   );
 }
 
+📋 Cómo aplicarlo en tu repo de GitHub
+Solo es 1 reemplazo en el mismo archivo frontend/src/pages/Dashboard.jsx. Ve a la línea ~144 y busca function LineaCreditoCard.
+
+❌ Bloque a reemplazar (líneas ~144 a ~198):
 function LineaCreditoCard({ linea_credito }) {
   const total = linea_credito?.total || 0;
   const utilizada = linea_credito?.utilizada || 0;
@@ -191,6 +195,64 @@ function LineaCreditoCard({ linea_credito }) {
           <span className="w-2 h-2 rounded-full bg-brand-100" />
           <div className="text-[10px] font-semibold text-neutral-500">Total</div>
           <div className="ml-auto text-xs font-bold text-neutral-800">{formatSoles(total)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+✅ Nuevo bloque:
+function LineaCreditoCard({ linea_credito }) {
+  const total = linea_credito?.total || 0;
+  const utilizada = linea_credito?.utilizada || 0;
+  const disponible = linea_credito?.disponible || 0;
+  const data = total > 0
+    ? [{ name: "Utilizada", value: utilizada }, { name: "Disponible", value: disponible }]
+    : [{ name: "Sin línea", value: 1 }];
+
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl p-5 flex flex-col min-h-[280px]" data-testid="card-linea-credito">
+      <CardHeader icon={CreditCard} title="Línea de crédito" />
+      <div className="flex-1 flex items-center justify-center">
+        <div className="relative w-[180px] h-[180px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%" cy="50%"
+                innerRadius={62} outerRadius={86}
+                startAngle={90} endAngle={-270}
+                dataKey="value"
+                stroke="#fff"
+                strokeWidth={2}
+                paddingAngle={total > 0 ? 2 : 0}
+              >
+                {total > 0 ? (
+                  <>
+                    <Cell fill="#8039F4" />
+                    <Cell fill="#22D3EE" />
+                  </>
+                ) : (
+                  <Cell fill="#F3F4F6" />
+                )}
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 leading-none">Línea disponible</div>
+            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none mt-1.5">{formatSoles(disponible)}</div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-1.5 mt-3 pt-3 border-t border-neutral-100">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-brand flex-shrink-0" />
+          <div className="text-[11px] font-semibold text-neutral-600">Utilizada</div>
+          <div className="ml-auto text-xs font-bold text-neutral-800">{formatSoles(utilizada)}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: "#22D3EE" }} />
+          <div className="text-[11px] font-semibold text-neutral-600">Disponible</div>
+          <div className="ml-auto text-xs font-bold text-neutral-800">{formatSoles(disponible)}</div>
         </div>
       </div>
     </div>
