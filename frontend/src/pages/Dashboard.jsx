@@ -33,7 +33,7 @@ function LockedKpiCard({ icon: Icon, label, value, subtitle, tooltip, testid }) 
 
         {/* Blurred data behind */}
         <div className="relative flex-1 flex flex-col justify-end">
-          <div className="select-none pointer-events-none" style={{ filter: "blur(6px)", opacity: 0.85 }}>
+          <div className="select-none pointer-events-none" style={{ filter: "blur(3.5px)", opacity: 0.9 }}>
             <div className="font-cabinet font-black text-2xl leading-none text-neutral-900">{value}</div>
             <div className="text-[10.5px] font-semibold text-neutral-500 mt-1">{subtitle}</div>
           </div>
@@ -521,16 +521,12 @@ export default function Dashboard() {
           tooltip="Desbloquea análisis avanzados de uso y comportamiento del conductor para optimizar tu flota"
           testid="kpi-unidades-activas"
         />
-        <MiniKpiCard
+        <LockedKpiCard
           icon={Fuel}
           label="Cargas inválidas"
           value="3"
           subtitle="Posible fraude"
-          borderColor="border-amber-400"
-          valueColor="text-amber-600"
-          subtitleColor="text-amber-600"
-          iconColor="text-amber-500"
-          disabled
+          tooltip="Detecta cargas sospechosas y posibles fraudes en tiempo real para proteger tu flota"
           testid="kpi-cargas-invalidas"
         />
         <MiniKpiCard
