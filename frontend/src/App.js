@@ -20,6 +20,10 @@ import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
 import Flotas from "./pages/Flotas";
+import Documentacion from "./pages/Documentacion";
+import Mantenimiento from "./pages/Mantenimiento";
+import Neumaticos from "./pages/Neumaticos";
+import Infracciones from "./pages/Infracciones";
 
 function Shell({ children, roles }) {
   return (
@@ -49,6 +53,10 @@ function App() {
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
           <Route path="/seguridad" element={<Shell><Seguridad /></Shell>} />
           <Route path="/capacitacion" element={<Shell><Capacitacion /></Shell>} />
+          <Route path="/documentacion" element={<Shell><Documentacion /></Shell>} />
+          <Route path="/mantenimiento" element={<Shell><Mantenimiento /></Shell>} />
+          <Route path="/neumaticos" element={<Shell><Neumaticos /></Shell>} />
+          <Route path="/infracciones" element={<Shell><Infracciones /></Shell>} />
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
