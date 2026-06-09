@@ -205,47 +205,53 @@ function ConsumoAhorroCard({ consumo, ahorro }) {
   const ahSoles = ahorro?.soles || 0;
   const ahGal = ahorro?.galones || 0;
   const ahPct = consSoles > 0 ? Math.round((ahSoles / consSoles) * 100) : 0;
+  const consNeto = Math.max(consSoles - ahSoles, 0);
+  const hasData = consSoles > 0;
 
-  const data = consSoles > 0
-    ? [{ name: "Ahorro", value: ahSoles }, { name: "Consumo", value: Math.max(consSoles - ahSoles, 0) }]
-    : [{ name: "Sin data", value: 1 }];
+  const data = hasData
+    ? [
+        { name: "Consumo", value: consNeto, color: "#8039F4" },
+        { name: "Ahorro", value: ahSoles, color: "#10B981" },
+      ]
+    : [{ name: "Sin data", value: 1, color: "#F3F4F6" }];
 
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl p-5 flex flex-col min-h-[280px]" data-testid="card-consumo-ahorro">
       <CardHeader icon={Activity} title="Consumo y ahorro" />
       <div className="flex-1 flex items-center justify-center">
-        <div className="relative w-[170px] h-[170px]">
+        <div className="relative w-[180px] h-[180px]">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
                 data={data}
                 cx="50%" cy="50%"
-                innerRadius={58} outerRadius={80}
+                innerRadius={62} outerRadius={86}
                 startAngle={90} endAngle={-270}
                 dataKey="value"
-                stroke="none"
+                stroke="#fff"
+                strokeWidth={2}
+                paddingAngle={hasData ? 2 : 0}
+                isAnimationActive={false}
               >
-                {consSoles > 0 ? (
-                  <>
-                    <Cell fill="#10B981" />
-                    <Cell fill="#D1FAE5" />
-                  </>
-                ) : (
-                  <Cell fill="#F3F4F6" />
-                )}
+                {data.map((entry, idx) => (
+                  <Cell key={`cell-${idx}`} fill={entry.color} />
+                ))}
               </Pie>
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none">{formatSoles(consSoles)}</div>
-            <div className="text-[10px] text-neutral-500 font-semibold mt-1">consumo</div>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 leading-none">Consumo total</div>
+            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none mt-1.5">{formatSoles(consSoles)}</div>
           </div>
         </div>
       </div>
       <div className="mt-3 pt-3 border-t border-neutral-100 flex items-center justify-between">
         <div>
-          <div className="text-[10px] font-semibold text-neutral-500">Ahorro</div>
-          <div className="font-cabinet font-black text-base text-emerald-600">{formatSoles(ahSoles)}</div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+            <div className="text-[10px] font-semibold text-neutral-500">Ahorro</div>
+          </div>
+          <div className="font-cabinet font-black text-base text-emerald-600 mt-0.5">{formatSoles(ahSoles)}</div>
           <div className="text-[10px] text-emerald-600 font-bold">{formatNumber(ahGal, 0)} gal</div>
         </div>
         <div className="text-right">
