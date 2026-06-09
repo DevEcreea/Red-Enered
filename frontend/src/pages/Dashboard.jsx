@@ -333,49 +333,73 @@ const fmtAxis = (v, unit) => unit === "soles" ? `S/${formatNumber(v, 0)}` : form
 /* ============================================================
    ROW 4 — Disabled donut cards (próximamente)
    ============================================================ */
-function DisabledDonutCard({ icon: Icon, title, centerText, centerSub, items, testid }) {
-  // Static demo data for donut
+function DisabledDonutCard({ icon: Icon, title, centerText, centerSub, items, tooltip, testid }) {
+  const openUpgrade = () => window.open(UPGRADE_WA, "_blank", "noopener,noreferrer");
   const data = [
     { name: "Al día", value: 70 },
     { name: "Por vencer", value: 20 },
     { name: "Vencido", value: 10 },
   ];
   return (
-    <div className="relative" data-testid={testid}>
-      <div className="bg-white border border-neutral-200 rounded-2xl p-4 flex flex-col min-h-[280px] opacity-40 pointer-events-none select-none">
-        <CardHeader icon={Icon} title={title} />
-        <div className="flex-1 flex items-center gap-3">
-          <div className="relative w-[120px] h-[120px] flex-shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={data} cx="50%" cy="50%" innerRadius={38} outerRadius={56} dataKey="value" stroke="none">
-                  <Cell fill="#10B981" />
-                  <Cell fill="#F59E0B" />
-                  <Cell fill="#EF4444" />
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <div className="font-cabinet font-black text-base text-neutral-800 leading-none">{centerText}</div>
-              <div className="text-[9px] text-neutral-500 font-semibold mt-0.5">{centerSub}</div>
+    <div className="group relative" data-testid={testid}>
+      <div className="bg-white border border-neutral-200 border-l-4 border-l-brand rounded-2xl p-4 flex flex-col min-h-[280px] w-full transition-all hover:shadow-lg hover:-translate-y-0.5 overflow-hidden">
+        <div className="relative z-10">
+          <CardHeader icon={Icon} title={title} />
+        </div>
+        <div className="relative flex-1 flex items-center">
+          <div className="flex-1 flex items-center gap-3 select-none pointer-events-none" style={{ filter: "blur(3.5px)", opacity: 0.9 }}>
+            <div className="relative w-[120px] h-[120px] flex-shrink-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={data} cx="50%" cy="50%" innerRadius={38} outerRadius={56} dataKey="value" stroke="none" isAnimationActive={false}>
+                    <Cell fill="#10B981" />
+                    <Cell fill="#F59E0B" />
+                    <Cell fill="#EF4444" />
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <div className="font-cabinet font-black text-base text-neutral-800 leading-none">{centerText}</div>
+                <div className="text-[9px] text-neutral-500 font-semibold mt-0.5">{centerSub}</div>
+              </div>
+            </div>
+            <div className="flex-1 space-y-1.5 text-[10px]">
+              {items.map((it, i) => (
+                <div key={i} className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${it.color}`} />
+                    <span className="text-neutral-600">{it.label}</span>
+                  </div>
+                  <span className={`font-bold ${it.valueColor || "text-neutral-800"}`}>{it.value}</span>
+                </div>
+              ))}
             </div>
           </div>
-          <div className="flex-1 space-y-1.5 text-[10px]">
-            {items.map((it, i) => (
-              <div key={i} className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full ${it.color}`} />
-                  <span className="text-neutral-600">{it.label}</span>
-                </div>
-                <span className={`font-bold ${it.valueColor || "text-neutral-800"}`}>{it.value}</span>
-              </div>
-            ))}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <button
+              onClick={openUpgrade}
+              className="h-7 px-2.5 rounded-full bg-brand text-white text-[10px] font-black hover:bg-brand-hover transition-colors shadow-md flex items-center gap-1"
+            >
+              <Lock className="w-3 h-3" strokeWidth={2.5} />
+              Mejorar Plan
+            </button>
           </div>
         </div>
       </div>
-      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-neutral-800 text-white text-[8px] font-black uppercase tracking-wider shadow-md">
-        Próximamente
-      </div>
+      {tooltip && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-[260px] z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none">
+          <div className="relative bg-white border-2 border-brand-100 rounded-xl px-4 py-3 shadow-xl">
+            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-r-2 border-b-2 border-brand-100 rotate-45" />
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-brand" strokeWidth={2.5} />
+              <span className="text-xs font-black text-brand uppercase tracking-wide">Premium Plus</span>
+            </div>
+            <div className="text-[11px] font-medium leading-relaxed text-neutral-700">
+              {tooltip}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -718,6 +742,7 @@ export default function Dashboard() {
             { label: "C3K-915", value: "5 días", color: "bg-amber-400", valueColor: "text-amber-600" },
             { label: "+10 más", value: "", color: "bg-neutral-300" },
           ]}
+          tooltip="Automatiza la programación de mantenimiento y recibe alertas proactivas para prevenir averías críticas"
           testid="card-mant-prev"
         />
         <DisabledDonutCard
@@ -731,6 +756,7 @@ export default function Dashboard() {
             { label: "F1H-228", value: "6 días", color: "bg-amber-400", valueColor: "text-amber-600" },
             { label: "+4 más", value: "", color: "bg-neutral-300" },
           ]}
+          tooltip="Mide el impacto de los costos de reparación y optimiza la eficiencia operativa de tu flota"
           testid="card-mant-corr"
         />
         <DisabledDonutCard
@@ -743,6 +769,7 @@ export default function Dashboard() {
             { label: "Por vencer", value: "12", color: "bg-amber-400", valueColor: "text-amber-600" },
             { label: "Vencidos", value: "4", color: "bg-rose-500", valueColor: "text-rose-600" },
           ]}
+          tooltip="Simplifica el cumplimiento y la gestión centralizada de toda la documentación de tu flota"
           testid="card-doc-veh"
         />
         <DisabledDonutCard
@@ -755,6 +782,7 @@ export default function Dashboard() {
             { label: "Por vencer", value: "15", color: "bg-amber-400", valueColor: "text-amber-600" },
             { label: "Vencidos", value: "6", color: "bg-rose-500", valueColor: "text-rose-600" },
           ]}
+          tooltip="Asegura que todos los conductores tengan licencia y certificaciones válidas para evitar multas"
           testid="card-doc-per"
         />
       </div>
