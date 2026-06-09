@@ -16,27 +16,41 @@ const MAPS_LINK = "https://maps.app.goo.gl/LZpyBqYs54LazZtV7";
 const UPGRADE_WA = "https://wa.me/51900000000?text=Hola%2C%20quiero%20mejorar%20mi%20plan%20ENERED";
 
 /* ============================================================
-   Locked KPI Card — for premium features (lock + Mejorar Plan + tooltip on hover)
+   Locked KPI Card — blurred data + small "Mejorar Plan" overlay + Premium tooltip on hover
    ============================================================ */
-function LockedKpiCard({ icon: Icon, label, tooltip, testid }) {
+function LockedKpiCard({ icon: Icon, label, value, subtitle, tooltip, testid }) {
   const openUpgrade = () => window.open(UPGRADE_WA, "_blank", "noopener,noreferrer");
   return (
     <div className="group relative" data-testid={testid}>
-      <div className="bg-white border border-neutral-200 border-l-4 border-l-brand rounded-2xl px-3.5 py-3 flex flex-col justify-between min-h-[120px] w-full transition-all hover:shadow-lg hover:border-l-brand hover:-translate-y-0.5 cursor-pointer">
-        <div className="flex items-start justify-between gap-2">
+      <div className="bg-white border border-neutral-200 border-l-4 border-l-brand rounded-2xl px-3.5 py-3 flex flex-col justify-between min-h-[120px] w-full transition-all hover:shadow-lg hover:-translate-y-0.5 overflow-hidden">
+        {/* Header (label + icon) — always crisp */}
+        <div className="flex items-start justify-between gap-2 relative z-10">
           <div className="text-[10.5px] font-bold uppercase tracking-wider text-neutral-500 leading-tight line-clamp-2">
             {label}
           </div>
           {Icon && <Icon className="w-4 h-4 flex-shrink-0 text-brand-300" strokeWidth={2} />}
         </div>
-        <button
-          onClick={openUpgrade}
-          className="mt-3 w-full h-9 px-3 rounded-full bg-brand text-white text-[11px] font-black hover:bg-brand-hover transition-all shadow-sm flex items-center justify-center gap-1.5"
-        >
-          <Lock className="w-3.5 h-3.5" strokeWidth={2.5} />
-          Mejorar Plan
-        </button>
+
+        {/* Blurred data behind */}
+        <div className="relative flex-1 flex flex-col justify-end">
+          <div className="select-none pointer-events-none" style={{ filter: "blur(6px)", opacity: 0.85 }}>
+            <div className="font-cabinet font-black text-2xl leading-none text-neutral-900">{value}</div>
+            <div className="text-[10.5px] font-semibold text-neutral-500 mt-1">{subtitle}</div>
+          </div>
+
+          {/* Small overlay button - centered */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <button
+              onClick={openUpgrade}
+              className="h-7 px-2.5 rounded-full bg-brand text-white text-[10px] font-black hover:bg-brand-hover transition-colors shadow-md flex items-center gap-1"
+            >
+              <Lock className="w-3 h-3" strokeWidth={2.5} />
+              Mejorar Plan
+            </button>
+          </div>
+        </div>
       </div>
+
       {/* Tooltip on hover — Premium Plus style */}
       <div className="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-[260px] z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none">
         <div className="relative bg-white border-2 border-brand-100 rounded-xl px-4 py-3 shadow-xl">
@@ -502,6 +516,8 @@ export default function Dashboard() {
         <LockedKpiCard
           icon={Truck}
           label="Unidades activas"
+          value="62/77"
+          subtitle="15 sin reporte GPS"
           tooltip="Desbloquea análisis avanzados de uso y comportamiento del conductor para optimizar tu flota"
           testid="kpi-unidades-activas"
         />
