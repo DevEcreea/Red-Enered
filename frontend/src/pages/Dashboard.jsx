@@ -141,66 +141,6 @@ function CardHeader({ icon: Icon, title, badge, badgeColor = "brand" }) {
   );
 }
 
-📋 Cómo aplicarlo en tu repo de GitHub
-Solo es 1 reemplazo en el mismo archivo frontend/src/pages/Dashboard.jsx. Ve a la línea ~144 y busca function LineaCreditoCard.
-
-❌ Bloque a reemplazar (líneas ~144 a ~198):
-function LineaCreditoCard({ linea_credito }) {
-  const total = linea_credito?.total || 0;
-  const utilizada = linea_credito?.utilizada || 0;
-  const disponible = linea_credito?.disponible || 0;
-  const data = total > 0
-    ? [{ name: "Utilizada", value: utilizada }, { name: "Disponible", value: disponible }]
-    : [{ name: "Sin línea", value: 1 }];
-
-  return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-5 flex flex-col min-h-[280px]" data-testid="card-linea-credito">
-      <CardHeader icon={CreditCard} title="Línea de crédito" />
-      <div className="flex-1 flex items-center justify-center">
-        <div className="relative w-[170px] h-[170px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={data}
-                cx="50%" cy="50%"
-                innerRadius={58} outerRadius={80}
-                startAngle={90} endAngle={-270}
-                dataKey="value"
-                stroke="none"
-              >
-                {total > 0 ? (
-                  <>
-                    <Cell fill="#8039F4" />
-                    <Cell fill="#EDE9FE" />
-                  </>
-                ) : (
-                  <Cell fill="#F3F4F6" />
-                )}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none">{formatSoles(disponible)}</div>
-            <div className="text-[10px] text-neutral-500 font-semibold mt-1">disponible</div>
-          </div>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-neutral-100">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-brand" />
-          <div className="text-[10px] font-semibold text-neutral-500">Utilizada</div>
-          <div className="ml-auto text-xs font-bold text-neutral-800">{formatSoles(utilizada)}</div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full bg-brand-100" />
-          <div className="text-[10px] font-semibold text-neutral-500">Total</div>
-          <div className="ml-auto text-xs font-bold text-neutral-800">{formatSoles(total)}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-✅ Nuevo bloque:
 function LineaCreditoCard({ linea_credito }) {
   const total = linea_credito?.total || 0;
   const utilizada = linea_credito?.utilizada || 0;
