@@ -145,9 +145,13 @@ function LineaCreditoCard({ linea_credito }) {
   const total = linea_credito?.total || 0;
   const utilizada = linea_credito?.utilizada || 0;
   const disponible = linea_credito?.disponible || 0;
-  const data = total > 0
-    ? [{ name: "Utilizada", value: utilizada }, { name: "Disponible", value: disponible }]
-    : [{ name: "Sin línea", value: 1 }];
+  const hasData = total > 0;
+  const data = hasData
+    ? [
+        { name: "Utilizada", value: utilizada, color: "#8039F4" },
+        { name: "Disponible", value: disponible, color: "#22D3EE" },
+      ]
+    : [{ name: "Sin línea", value: 1, color: "#F3F4F6" }];
 
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl p-5 flex flex-col min-h-[280px]" data-testid="card-linea-credito">
@@ -164,22 +168,18 @@ function LineaCreditoCard({ linea_credito }) {
                 dataKey="value"
                 stroke="#fff"
                 strokeWidth={2}
-                paddingAngle={total > 0 ? 2 : 0}
+                paddingAngle={hasData ? 2 : 0}
+                isAnimationActive={false}
               >
-                {total > 0 ? (
-                  <>
-                    <Cell fill="#8039F4" />
-                    <Cell fill="#22D3EE" />
-                  </>
-                ) : (
-                  <Cell fill="#F3F4F6" />
-                )}
+                {data.map((entry, idx) => (
+                  <Cell key={`cell-${idx}`} fill={entry.color} />
+                ))}
               </Pie>
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 leading-none">Línea disponible</div>
-            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none mt-1.5">{formatSoles(disponible)}</div>
+            <div className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 leading-none">Línea total</div>
+            <div className="font-cabinet font-black text-xl text-neutral-900 leading-none mt-1.5">{formatSoles(total)}</div>
           </div>
         </div>
       </div>
