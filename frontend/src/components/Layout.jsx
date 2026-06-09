@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, GraduationCap,
   LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
+  FileText, Wrench, Disc, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
