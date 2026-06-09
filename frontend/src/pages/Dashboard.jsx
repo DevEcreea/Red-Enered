@@ -249,11 +249,12 @@ function ConsumoAhorroCard({ consumo, ahorro }) {
           <div className="text-[10px] text-emerald-600 font-bold">{formatNumber(ahGal, 0)} gal</div>
         </div>
         <div className="text-right">
-          <div className="text-[10px] font-semibold text-neutral-500">vs meta</div>
-          <div className="flex items-center gap-1 text-emerald-600">
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span className="font-cabinet font-black text-base">+{ahPct}%</span>
+          <div className="flex items-center gap-1.5 justify-end">
+            <span className="w-2 h-2 rounded-full bg-brand flex-shrink-0" />
+            <div className="text-[10px] font-semibold text-neutral-500">Consumo</div>
           </div>
+          <div className="font-cabinet font-black text-base text-neutral-900 mt-0.5">{formatSoles(consSoles)}</div>
+          <div className="text-[10px] text-neutral-500 font-bold">{formatNumber(consGal, 0)} gal</div>
         </div>
       </div>
     </div>
