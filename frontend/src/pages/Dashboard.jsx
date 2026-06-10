@@ -267,6 +267,77 @@ function ConsumoAhorroCard({ consumo, ahorro }) {
   );
 }
 
+/* ============================================================
+   Locked Metric Card (blurred + Premium tooltip)
+   ============================================================ */
+function LockedMetricCard({ icon: Icon, title, value, unit, deltaText, deltaPositive = true, badge, accentColor = "neutral", buttonText = "Optimizar flota", tooltip }) {
+  const openUpgrade = () => window.open(UPGRADE_WA, "_blank", "noopener,noreferrer");
+  const isAccent = accentColor === "brand";
+  
+  return (
+    <div className="group relative" data-testid={`card-${title.toLowerCase().replace(/\s+/g, "-")}-locked`}>
+      <div
+        className={`${isAccent ? "bg-brand-50/60" : "bg-white"} border border-neutral-200 rounded-2xl p-5 flex flex-col min-h-[280px] transition-all hover:shadow-lg hover:-translate-y-0.5 overflow-hidden`}
+      >
+        {/* Header - always visible */}
+        <div className="relative z-10">
+          <CardHeader icon={Icon} title={title} badge={badge} />
+        </div>
+        
+        {/* Blurred content */}
+        <div className="relative flex-1 flex items-center justify-center">
+          <div className="text-center select-none pointer-events-none" style={{ filter: "blur(3.5px)", opacity: 0.9 }}>
+            <div className="flex items-baseline justify-center gap-1.5">
+              <span className={`font-cabinet font-black text-5xl leading-none ${isAccent ? "text-brand" : "text-neutral-900"}`}>{value}</span>
+              <span className="text-sm font-semibold text-neutral-500">{unit}</span>
+            </div>
+          </div>
+          
+          {/* Centered lock button */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <button
+              onClick={openUpgrade}
+              className="h-7 px-2.5 rounded-full bg-brand text-white text-[10px] font-black hover:bg-brand-hover transition-colors shadow-md flex items-center gap-1"
+            >
+              <Lock className="w-3 h-3" strokeWidth={2.5} />
+              {buttonText}
+            </button>
+          </div>
+        </div>
+        
+        {/* Blurred footer */}
+        <div className="mt-3 pt-3 border-t border-neutral-100 select-none pointer-events-none" style={{ filter: "blur(3.5px)", opacity: 0.9 }}>
+          <div className="flex items-center justify-between">
+            <div className={`flex items-center gap-1.5 text-xs font-bold ${deltaPositive ? "text-emerald-600" : "text-rose-600"}`}>
+              <TrendingUp className={`w-3.5 h-3.5 ${!deltaPositive && "rotate-180"}`} />
+              {deltaText}
+            </div>
+            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[9px] font-black uppercase tracking-wider">
+              Demo
+            </span>
+          </div>
+        </div>
+      </div>
+      
+      {/* Tooltip on hover - Premium Plus style */}
+      {tooltip && (
+        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-[260px] z-50 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none">
+          <div className="relative bg-white border-2 border-brand-100 rounded-xl px-4 py-3 shadow-xl">
+            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white border-r-2 border-b-2 border-brand-100 rotate-45" />
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-brand" strokeWidth={2.5} />
+              <span className="text-xs font-black text-brand uppercase tracking-wide">Métrica Maestra</span>
+            </div>
+            <div className="text-[11px] font-medium leading-relaxed text-neutral-700">
+              {tooltip}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MetricDemoCard({ icon: Icon, title, value, unit, deltaText, deltaPositive = true, badge, accentColor = "neutral" }) {
   const isAccent = accentColor === "brand";
   return (
@@ -621,7 +692,7 @@ export default function Dashboard() {
           deltaText="+1.2 vs meta (7.2)"
           deltaPositive={true}
         />
-        <MetricDemoCard
+        <LockedMetricCard
           icon={Activity}
           title="Costo por km · TCO"
           value="S/ 1.68"
@@ -630,6 +701,8 @@ export default function Dashboard() {
           deltaPositive={true}
           badge="Métrica Maestra"
           accentColor="brand"
+          buttonText="Optimizar flota"
+          tooltip="Calcula el costo total de operación por kilómetro, incluyendo combustible, mantenimiento, depreciación y seguros para tomar decisiones informadas de inversión"
         />
       </div>
 
