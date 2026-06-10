@@ -132,6 +132,10 @@ def require_roles(*roles):
 async def require_auth(request: Request) -> dict:
     return await get_current_user(request)
 
+# Alias usado por endpoints de Infracciones (estilo: u = await require_auth(req))
+async def require_auth(request: Request) -> dict:
+    return await get_current_user(request)
+
 
 # ---------- Models ----------
 ROLES = ["admin_enered", "administrador", "logistica", "contabilidad"]
