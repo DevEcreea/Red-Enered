@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ClipboardList, FileBarChart, QrCode } from "lucide-react";
+import { ClipboardList, FileBarChart, QrCode, Fuel, Droplet, Banknote, TrendingDown } from "lucide-react";
 import ControlIntegral from "./ControlIntegral";
 import ReportesConsumo from "./ReportesConsumo";
 import QRDescarga from "./QRDescarga";
@@ -12,11 +12,20 @@ const TABS = [
   { id: "qr", label: "Descarga tus QR", icon: QrCode, Component: QRDescarga, testid: "tab-qr" },
 ];
 
-function SmallKpi({ label, value, accent }) {
+function SmallKpi({ label, value, accent, icon: Icon }) {
   const txt = accent === "green" ? "text-green-600" : "text-neutral-900";
+  const iconColor = accent === "green" ? "text-green-500" : "text-brand";
+  
   return (
     <div className="bg-white border border-border rounded-xl p-4">
-      <div className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-1">{label}</div>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-widest font-bold text-neutral-500">{label}</div>
+        {Icon && (
+          <div className="w-8 h-8 rounded-lg bg-brand-50 flex items-center justify-center">
+            <Icon className={`w-4 h-4 ${iconColor}`} strokeWidth={2} />
+          </div>
+        )}
+      </div>
       <div className={`font-cabinet font-black text-2xl ${txt}`}>{value}</div>
     </div>
   );
@@ -45,10 +54,10 @@ export default function Flotas() {
     <div className="space-y-6" data-testid="flotas-page">
       {/* KPIs (siempre arriba) */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3" data-testid="flotas-kpis">
-        <SmallKpi label="Cargas" value={formatNumber(totals.n, 0)} />
-        <SmallKpi label="Galones" value={formatNumber(totals.gal, 2)} />
-        <SmallKpi label="Gasto" value={formatSoles(totals.gasto)} />
-        <SmallKpi label="Ahorro" value={formatSoles(totals.ahorro)} accent="green" />
+        <SmallKpi label="Cargas" value={formatNumber(totals.n, 0)} icon={Fuel} />
+        <SmallKpi label="Galones" value={formatNumber(totals.gal, 2)} icon={Droplet} />
+        <SmallKpi label="Gasto" value={formatSoles(totals.gasto)} icon={Banknote} />
+        <SmallKpi label="Ahorro" value={formatSoles(totals.ahorro)} accent="green" icon={TrendingDown} />
       </div>
 
       {/* Tabs */}
