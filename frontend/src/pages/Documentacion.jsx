@@ -1,21 +1,3 @@
-📸 Lo que ves:
-✅ 5 tabs: Vehículos · Personal · Combustibles · Infracciones · Otro (cambian dinámicamente al hacer clic)
-✅ 4 KPI cards con conteos automáticos: 6 Documentos · 2 Vigentes · 1 Próximo · 3 Vencidos
-✅ 6 filtros: Fecha de creación · Grupos · Vehículos · Tipo · Creado por · Estado (UI solamente, sin lógica aún)
-✅ 2 botones: "+ Agregar documento" (con dropdown) y "Nueva plantilla" (morado)
-✅ Tabla con header oscuro: N° doc · Tipo · Documento · Emisión · Vencimiento · Atraso · Estado · Descargar
-✅ Estados automáticos: Vigente (verde, +20 días) · Próximo (ámbar, ≤19 días) · Vencido (rojo, fecha pasada)
-✅ Atraso calculado en días o meses para los vencidos
-⚠️ Importante: este módulo usa MOCK DATA (datos de prueba en el frontend). Los filtros y botones de "Agregar documento" / "Descargar PDF" son visuales — todavía no guardan/descargan nada. Lo conectamos al backend cuando me digas que el diseño está OK.
-
-📋 Para tu repo GitHub
-Es 1 solo archivo a reemplazar completamente:
-
-📁 frontend/src/pages/Documentacion.jsx → reemplaza TODO el contenido con el código nuevo.
-
-Como son ~250 líneas, te lo paso en un bloque limpio. Cópialo entero:
-
-<details> <summary><b>📄 Click para expandir el código completo</b></summary>
 import React, { useMemo, useState } from "react";
 import {
   FileText, CheckCircle2, Clock, AlertTriangle, Plus, Download, ChevronDown,
