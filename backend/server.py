@@ -1957,6 +1957,357 @@ async def health():
         "version": "1.0.0",
     }
 
+# ============================================================
+# INFRACCIONES - Vehículos, Conductores y Infracciones
+# ============================================================
+
+# --- MODELS ---
+class VehiculoCreate(BaseModel):
+    placa: str = Field(min_length=6, max_length=7)
+    marca: Optional[str] = None
+    modelo: Optional[str] = None
+    año: Optional[int] = None
+    conductor_principal_id: Optional[str] = None
+    empresa: Optional[str] = None
+
+class VehiculoUpdate(BaseModel):
+    marca: Optional[str] = None
+    modelo: Optional[str] = None
+    año: Optional[int] = None
+    conductor_principal_id: Optional[str] = None
+
+class ConductorCreate(BaseModel):
+    dni: str = Field(min_length=8, max_length=8)
+    nombre: str
+    apellidos: str
+    licencia: Optional[str] = None
+    vencimiento_licencia: Optional[str] = None
+    telefono: Optional[str] = None
+    email: Optional[EmailStr] = None
+    empresa: Optional[str] = None
+
+class ConductorUpdate(BaseModel):
+    nombre: Optional[str] = None
+    apellidos: Optional[str] = None
+    licencia: Optional[str] = None
+    vencimiento_licencia: Optional[str] = None
+    telefono: Optional[str] = None
+    email: Optional[EmailStr] = None
+
+class InfraccionCreate(BaseModel):
+    vehiculo_id: str
+    conductor_id: Optional[str] = None
+    fecha: str
+    codigo: str
+    descripcion: str
+    monto: float
+    estado: Literal["pendiente", "pagada", "impugnada", "anulada"] = "pendiente"
+    lugar: Optional[str] = None
+    papeleta: Optional[str] = None
+    observaciones: Optional[str] = None
+    empresa: Optional[str] = None
+
+class InfraccionUpdate(BaseModel):
+    estado: Optional[Literal["pendiente", "pagada", "impugnada", "anulada"]] = None
+    monto: Optional[float] = None
+    observaciones: Optional[str] = None
+
+# --- VEHICULOS ENDPOINTS ---
+@api.get("/vehiculos")
+async def list_vehiculos(req: Request):
+    u = await require_auth(req)
+    filt = {}
+    if u["role"] != "admin_enered" and u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    
+    cursor = db.vehiculos.find(filt)
+    vehiculos = []
+    async for v in cursor:
+        v["_id"] = str(v["_id"])
+        vehiculos.append(v)
+    return vehiculos
+
+@api.post("/vehiculos")
+async def create_vehiculo(req: Request, body: VehiculoCreate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden crear vehículos")
+    
+    # Validar placa única
+    existing = await db.vehiculos.find_one({"placa": body.placa.upper()})
+    if existing:
+        raise HTTPException(400, f"La placa {body.placa} ya existe")
+    
+    doc = {
+        "id": str(uuid.uuid4()),
+        "placa": body.placa.upper(),
+        "marca": body.marca,
+        "modelo": body.modelo,
+        "año": body.año,
+        "conductor_principal_id": body.conductor_principal_id,
+        "empresa": body.empresa or u.get("empresa"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": u["id"],
+    }
+    await db.vehiculos.insert_one(doc)
+    doc.pop("_id")
+    return doc
+
+@api.put("/vehiculos/{vehiculo_id}")
+async def update_vehiculo(req: Request, vehiculo_id: str, body: VehiculoUpdate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden editar vehículos")
+    
+    v = await db.vehiculos.find_one({"id": vehiculo_id})
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado")
+    
+    if u["role"] != "admin_enered" and v.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a este vehículo")
+    
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.vehiculos.update_one({"id": vehiculo_id}, {"$set": updates})
+    
+    updated = await db.vehiculos.find_one({"id": vehiculo_id})
+    updated.pop("_id")
+    return updated
+
+@api.delete("/vehiculos/{vehiculo_id}")
+async def delete_vehiculo(req: Request, vehiculo_id: str):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden eliminar vehículos")
+    
+    v = await db.vehiculos.find_one({"id": vehiculo_id})
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado")
+    
+    if u["role"] != "admin_enered" and v.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a este vehículo")
+    
+    await db.vehiculos.delete_one({"id": vehiculo_id})
+    return {"ok": True}
+
+# --- CONDUCTORES ENDPOINTS ---
+@api.get("/conductores")
+async def list_conductores(req: Request):
+    u = await require_auth(req)
+    filt = {}
+    if u["role"] != "admin_enered" and u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    
+    cursor = db.conductores.find(filt)
+    conductores = []
+    async for c in cursor:
+        c["_id"] = str(c["_id"])
+        conductores.append(c)
+    return conductores
+
+@api.post("/conductores")
+async def create_conductor(req: Request, body: ConductorCreate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden crear conductores")
+    
+    # Validar DNI único
+    existing = await db.conductores.find_one({"dni": body.dni})
+    if existing:
+        raise HTTPException(400, f"El DNI {body.dni} ya existe")
+    
+    doc = {
+        "id": str(uuid.uuid4()),
+        "dni": body.dni,
+        "nombre": body.nombre,
+        "apellidos": body.apellidos,
+        "licencia": body.licencia,
+        "vencimiento_licencia": body.vencimiento_licencia,
+        "telefono": body.telefono,
+        "email": body.email,
+        "empresa": body.empresa or u.get("empresa"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": u["id"],
+    }
+    await db.conductores.insert_one(doc)
+    doc.pop("_id")
+    return doc
+
+@api.put("/conductores/{conductor_id}")
+async def update_conductor(req: Request, conductor_id: str, body: ConductorUpdate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden editar conductores")
+    
+    c = await db.conductores.find_one({"id": conductor_id})
+    if not c:
+        raise HTTPException(404, "Conductor no encontrado")
+    
+    if u["role"] != "admin_enered" and c.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a este conductor")
+    
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.conductores.update_one({"id": conductor_id}, {"$set": updates})
+    
+    updated = await db.conductores.find_one({"id": conductor_id})
+    updated.pop("_id")
+    return updated
+
+@api.delete("/conductores/{conductor_id}")
+async def delete_conductor(req: Request, conductor_id: str):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden eliminar conductores")
+    
+    c = await db.conductores.find_one({"id": conductor_id})
+    if not c:
+        raise HTTPException(404, "Conductor no encontrado")
+    
+    if u["role"] != "admin_enered" and c.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a este conductor")
+    
+    await db.conductores.delete_one({"id": conductor_id})
+    return {"ok": True}
+
+# --- INFRACCIONES ENDPOINTS ---
+@api.get("/infracciones")
+async def list_infracciones(req: Request):
+    u = await require_auth(req)
+    filt = {}
+    if u["role"] != "admin_enered" and u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    
+    cursor = db.infracciones.find(filt).sort("fecha", -1)
+    infracciones = []
+    async for i in cursor:
+        i["_id"] = str(i["_id"])
+        # Obtener datos del vehículo
+        if i.get("vehiculo_id"):
+            vehiculo = await db.vehiculos.find_one({"id": i["vehiculo_id"]})
+            if vehiculo:
+                i["vehiculo_placa"] = vehiculo.get("placa")
+        # Obtener datos del conductor
+        if i.get("conductor_id"):
+            conductor = await db.conductores.find_one({"id": i["conductor_id"]})
+            if conductor:
+                i["conductor_nombre"] = f"{conductor.get('nombre')} {conductor.get('apellidos')}"
+        infracciones.append(i)
+    return infracciones
+
+@api.post("/infracciones")
+async def create_infraccion(req: Request, body: InfraccionCreate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden registrar infracciones")
+    
+    # Validar que el vehículo existe
+    vehiculo = await db.vehiculos.find_one({"id": body.vehiculo_id})
+    if not vehiculo:
+        raise HTTPException(404, "Vehículo no encontrado")
+    
+    # Validar que el conductor existe (si se proporciona)
+    if body.conductor_id:
+        conductor = await db.conductores.find_one({"id": body.conductor_id})
+        if not conductor:
+            raise HTTPException(404, "Conductor no encontrado")
+    
+    doc = {
+        "id": str(uuid.uuid4()),
+        "vehiculo_id": body.vehiculo_id,
+        "conductor_id": body.conductor_id,
+        "fecha": body.fecha,
+        "codigo": body.codigo,
+        "descripcion": body.descripcion,
+        "monto": body.monto,
+        "estado": body.estado,
+        "lugar": body.lugar,
+        "papeleta": body.papeleta,
+        "observaciones": body.observaciones,
+        "empresa": body.empresa or u.get("empresa") or vehiculo.get("empresa"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": u["id"],
+    }
+    await db.infracciones.insert_one(doc)
+    doc.pop("_id")
+    return doc
+
+@api.put("/infracciones/{infraccion_id}")
+async def update_infraccion(req: Request, infraccion_id: str, body: InfraccionUpdate):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden editar infracciones")
+    
+    i = await db.infracciones.find_one({"id": infraccion_id})
+    if not i:
+        raise HTTPException(404, "Infracción no encontrada")
+    
+    if u["role"] != "admin_enered" and i.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a esta infracción")
+    
+    updates = {k: v for k, v in body.dict().items() if v is not None}
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await db.infracciones.update_one({"id": infraccion_id}, {"$set": updates})
+    
+    updated = await db.infracciones.find_one({"id": infraccion_id})
+    updated.pop("_id")
+    return updated
+
+@api.delete("/infracciones/{infraccion_id}")
+async def delete_infraccion(req: Request, infraccion_id: str):
+    u = await require_auth(req)
+    if u["role"] not in ["admin_enered", "administrador"]:
+        raise HTTPException(403, "Solo administradores pueden eliminar infracciones")
+    
+    i = await db.infracciones.find_one({"id": infraccion_id})
+    if not i:
+        raise HTTPException(404, "Infracción no encontrada")
+    
+    if u["role"] != "admin_enered" and i.get("empresa") != u.get("empresa"):
+        raise HTTPException(403, "No tienes acceso a esta infracción")
+    
+    await db.infracciones.delete_one({"id": infraccion_id})
+    return {"ok": True}
+
+# --- DASHBOARD INFRACCIONES ---
+@api.get("/infracciones/dashboard/stats")
+async def infracciones_dashboard(req: Request):
+    u = await require_auth(req)
+    filt = {}
+    if u["role"] != "admin_enered" and u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    
+    # Total infracciones
+    total = await db.infracciones.count_documents(filt)
+    
+    # Por estado
+    pendientes = await db.infracciones.count_documents({**filt, "estado": "pendiente"})
+    pagadas = await db.infracciones.count_documents({**filt, "estado": "pagada"})
+    impugnadas = await db.infracciones.count_documents({**filt, "estado": "impugnada"})
+    
+    # Monto total pendiente
+    cursor_pendiente = db.infracciones.find({**filt, "estado": "pendiente"})
+    monto_pendiente = 0
+    async for inf in cursor_pendiente:
+        monto_pendiente += inf.get("monto", 0)
+    
+    # Monto total pagado
+    cursor_pagada = db.infracciones.find({**filt, "estado": "pagada"})
+    monto_pagado = 0
+    async for inf in cursor_pagada:
+        monto_pagado += inf.get("monto", 0)
+    
+    return {
+        "total": total,
+        "pendientes": pendientes,
+        "pagadas": pagadas,
+        "impugnadas": impugnadas,
+        "monto_pendiente": monto_pendiente,
+        "monto_pagado": monto_pagado,
+    }
 
 app.include_router(api)
 
