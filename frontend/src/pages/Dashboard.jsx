@@ -342,7 +342,7 @@ const fmtAxis = (v, unit) => unit === "soles" ? `S/${formatNumber(v, 0)}` : form
 /* ============================================================
    ROW 4 — Disabled donut cards (próximamente)
    ============================================================ */
-function DisabledDonutCard({ icon: Icon, title, centerText, centerSub, items, tooltip, testid }) {
+function DisabledDonutCard({ icon: Icon, title, centerText, centerSub, items, tooltip, buttonText = "Mejorar Plan", testid }) {
   const openUpgrade = () => window.open(UPGRADE_WA, "_blank", "noopener,noreferrer");
   const data = [
     { name: "Al día", value: 70 },
@@ -390,7 +390,7 @@ function DisabledDonutCard({ icon: Icon, title, centerText, centerSub, items, to
               className="h-7 px-2.5 rounded-full bg-brand text-white text-[10px] font-black hover:bg-brand-hover transition-colors shadow-md flex items-center gap-1"
             >
               <Lock className="w-3 h-3" strokeWidth={2.5} />
-              Mejorar Plan
+              {buttonText}
             </button>
           </div>
         </div>
@@ -766,6 +766,7 @@ export default function Dashboard() {
             { label: "+4 más", value: "", color: "bg-neutral-300" },
           ]}
           tooltip="Mide el impacto de los costos de reparación y optimiza la eficiencia operativa de tu flota"
+          buttonText="Mejorar eficiencia"
           testid="card-mant-corr"
         />
         <DisabledDonutCard
@@ -779,6 +780,7 @@ export default function Dashboard() {
             { label: "Vencidos", value: "4", color: "bg-rose-500", valueColor: "text-rose-600" },
           ]}
           tooltip="Simplifica el cumplimiento y la gestión centralizada de toda la documentación de tu flota"
+          buttonText="Optimizar gestión"
           testid="card-doc-veh"
         />
         <DisabledDonutCard
@@ -792,6 +794,7 @@ export default function Dashboard() {
             { label: "Vencidos", value: "6", color: "bg-rose-500", valueColor: "text-rose-600" },
           ]}
           tooltip="Asegura que todos los conductores tengan licencia y certificaciones válidas para evitar multas"
+          buttonText="Optimizar gestión"
           testid="card-doc-per"
         />
       </div>
