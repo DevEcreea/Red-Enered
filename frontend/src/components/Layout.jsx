@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, GraduationCap,
   LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
   FileText, Wrench, Disc, AlertTriangle,
+  Wallet, Calendar, Ticket, ClipboardCheck, Car, Route,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
@@ -17,14 +18,20 @@ const ICON_BASE = "/assets/icons";
 
 const MENU = [
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
-  { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
-  { to: "/centro-monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
   { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber" },
+  { to: "/centro-monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
+  { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
   { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
-  { to: "/documentacion", label: "Documentación", iconImg: `${ICON_BASE}/documentacion.png`, icon: FileText, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-documentacion" },
+  { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-gestion-gastos", badge: "NUEVO", badgeColor: "amber", disabled: true },
+  { to: "/calendario", label: "Calendario", icon: Calendar, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-calendario", badge: "NUEVO", badgeColor: "amber", disabled: true },
+  { to: "/tickets", label: "Tickets", icon: Ticket, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-tickets", badge: "NUEVO", badgeColor: "amber", disabled: true },
   { to: "/mantenimiento", label: "Mantenimiento", iconImg: `${ICON_BASE}/mantenimiento.png`, icon: Wrench, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-mantenimiento" },
-  { to: "/neumaticos", label: "Neumáticos", iconImg: `${ICON_BASE}/neumaticos.png`, icon: Disc, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-neumaticos" },
+  { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-checklist", badge: "NUEVO", badgeColor: "amber", disabled: true },
   { to: "/infracciones", label: "Infracciones", iconImg: `${ICON_BASE}/infracciones.png`, icon: AlertTriangle, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-infracciones" },
+  { to: "/vehiculos", label: "Vehículos", icon: Car, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-vehiculos", badge: "NUEVO", badgeColor: "amber", disabled: true },
+  { to: "/neumaticos", label: "Neumáticos", iconImg: `${ICON_BASE}/neumaticos.png`, icon: Disc, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-neumaticos" },
+  { to: "/viajes", label: "Viajes", icon: Route, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-viajes", badge: "NUEVO", badgeColor: "amber", disabled: true },
+  { to: "/documentacion", label: "Documentación", iconImg: `${ICON_BASE}/documentacion.png`, icon: FileText, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-documentacion" },
   { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-soporte" },
 ];
 
@@ -36,14 +43,20 @@ const ADMIN_ITEMS = [
 
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
-  "/flotas": "Combustible",
-  "/centro-monitoreo": "Monitoreo",
   "/analitica": "Analytics BI",
+  "/centro-monitoreo": "Monitoreo",
+  "/flotas": "Combustible",
   "/facturacion": "Cuenta",
-  "/documentacion": "Documentación",
+  "/gestion-gastos": "Gestión Gastos",
+  "/calendario": "Calendario",
+  "/tickets": "Tickets",
   "/mantenimiento": "Mantenimiento",
-  "/neumaticos": "Neumáticos",
+  "/checklist": "Checklist",
   "/infracciones": "Infracciones",
+  "/vehiculos": "Vehículos",
+  "/neumaticos": "Neumáticos",
+  "/viajes": "Viajes",
+  "/documentacion": "Documentación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
   "/admin/upload": "Datos",
