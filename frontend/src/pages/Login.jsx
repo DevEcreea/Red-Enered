@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { formatApiError } from "../lib/utils";
 import EmayFooter from "../components/EmayFooter";
 
-const HERO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/0fc04sfs_image.png";
+const HERO_IMG = "https://customer-assets.emergentagent.com/job_ui-update-11/artifacts/mbmk49w0_WhatsApp%20Image%202026-06-10%20at%206.26.35%20PM.jpeg";
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
 
 export default function Login() {
