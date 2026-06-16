@@ -16,19 +16,9 @@ const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
 const ICON_BASE = "/assets/icons";
 
-const ANALYTICS_SUBMENU = [
-  { to: "/analitica/combustible", label: "Combustible", testid: "nav-analitica-combustible" },
-  { to: "/analitica/ecodriving", label: "Ecodriving", testid: "nav-analitica-ecodriving" },
-  { to: "/analitica/emisiones", label: "Emisiones CO2", testid: "nav-analitica-emisiones" },
-  { to: "/analitica/mantenimiento", label: "Mantenimiento", testid: "nav-analitica-mantenimiento" },
-  { to: "/analitica/neumaticos", label: "Neumáticos", testid: "nav-analitica-neumaticos" },
-  { to: "/analitica/seguridad", label: "Seguridad Vial", testid: "nav-analitica-seguridad" },
-  { to: "/analitica/checklist", label: "Checklist", testid: "nav-analitica-checklist" },
-];
-
 const MENU = [
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
-  { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber", submenu: ANALYTICS_SUBMENU },
+  { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber"},
   { to: "/centro-monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
   { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
   { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
