@@ -16,6 +16,7 @@ import ControlIntegral from "./pages/ControlIntegral";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
 // Analytics BI submódulos
+import AnalyticsIndex from "./pages/analytics/index";
 import AnalyticsCombustible from "./pages/analytics/Combustible";
 import AnalyticsEcodriving from "./pages/analytics/Ecodriving";
 import AnalyticsEmisionesCO2 from "./pages/analytics/EmisionesCO2";
@@ -56,14 +57,15 @@ function App() {
           <Route path="/reportes-consumo" element={<Navigate to="/flotas" replace />} />
           <Route path="/qr" element={<Navigate to="/flotas" replace />} />
           {/* Analytics BI - submódulos */}
-          <Route path="/analitica" element={<Navigate to="/analitica/combustible" replace />} />
+          {/* Analytics BI - submódulos */}
+          <Route path="/analitica" element={<Shell><AnalyticsIndex /></Shell>} />
           <Route path="/analitica/combustible" element={<Shell><AnalyticsCombustible /></Shell>} />
           <Route path="/analitica/ecodriving" element={<Shell><AnalyticsEcodriving /></Shell>} />
           <Route path="/analitica/emisiones" element={<Shell><AnalyticsEmisionesCO2 /></Shell>} />
           <Route path="/analitica/mantenimiento" element={<Shell><AnalyticsMantenimiento /></Shell>} />
           <Route path="/analitica/neumaticos" element={<Shell><AnalyticsNeumaticos /></Shell>} />
           <Route path="/analitica/seguridad" element={<Shell><AnalyticsSeguridadVial /></Shell>} />
-          <Route path="/analitica/checklist" element={<Shell><AnalyticsChecklist /></Shell>} />
+          <Route path="/analitica/checklist" element={<Shell><AnalyticsChecklist /></Shell>} />  
           <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
           <Route path="/facturacion/historial" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><EstadoCuentaHistorial /></Shell>} />
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
