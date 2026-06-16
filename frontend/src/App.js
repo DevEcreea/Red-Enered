@@ -13,6 +13,10 @@ import Facturacion from "./pages/Facturacion";
 import EstadoCuentaHistorial from "./pages/EstadoCuentaHistorial";
 import Seguridad from "./pages/Seguridad";
 import ControlIntegral from "./pages/ControlIntegral";
+import Calendario from "./pages/Calendario";
+import Tickets from "./pages/Tickets";
+import Checklist from "./pages/Checklist";
+import Viajes from "./pages/Viajes";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
 // Analytics BI submódulos
@@ -75,6 +79,10 @@ function App() {
           <Route path="/documentacion" element={<Shell><Documentacion /></Shell>} />
           <Route path="/mantenimiento" element={<Shell><Mantenimiento /></Shell>} />
           <Route path="/neumaticos" element={<Shell><Neumaticos /></Shell>} />
+          <Route path="/calendario" element={<Shell><Calendario /></Shell>} />
+          <Route path="/tickets" element={<Shell><Tickets /></Shell>} />
+          <Route path="/checklist" element={<Shell><Checklist /></Shell>} />
+          <Route path="/viajes" element={<Shell><Viajes /></Shell>} />
           <Route path="/infracciones" element={<Shell><Infracciones /></Shell>} />
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
