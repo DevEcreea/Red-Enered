@@ -19,7 +19,7 @@ const ICON_BASE = "/assets/icons";
 const MENU = [
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard" },
   { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber"},
-  { to: "/centro-monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan", disabled: true },
+  { to: "/monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan" },
   { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-flotas" },
   { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad"], testid: "nav-estado" },
   { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ["admin_enered", "administrador", "logistica", "contabilidad"], testid: "nav-gestion-gastos", badge: "NUEVO", badgeColor: "amber", disabled: true },
