@@ -168,30 +168,6 @@ function SidebarLink({ item, onClick }) {
   );
 }
 
-  const baseCls = "relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all";
-
-  if (item.disabled) {
-    return (
-      <div className={`${baseCls} opacity-60 cursor-not-allowed`} data-testid={item.testid}>
-        {content(false)}
-      </div>
-    );
-  }
-
-  return (
-    <NavLink
-      to={item.to}
-      onClick={onClick}
-      data-testid={item.testid}
-      className={({ isActive }) =>
-        `${baseCls} ${isActive ? "bg-white/15" : "hover:bg-white/10"}`
-      }
-    >
-      {({ isActive }) => content(isActive)}
-    </NavLink>
-  );
-}
-
 function PlanCard({ label, title, color = "violet", testid, onClick, active = false, wide = false }) {
   // wide cards (Cliente, Tipo de Producto): 294 px ancho — 2 juntos + gap = 600 px (igual que Estado General)
   // tarjetas de plan (4): 200 x 60 px, border-radius 20 px
