@@ -75,9 +75,17 @@ const ROUTE_TITLES = {
 
 function SidebarLink({ item, onClick }) {
   const Ic = item.icon;
+  const location = useLocation();
+  const [expanded, setExpanded] = React.useState(false);
+  const hasSubmenu = item.submenu && item.submenu.length > 0;
+  const isSubmenuActive = hasSubmenu && item.submenu.some(sub => location.pathname === sub.to);
+  
+  React.useEffect(() => {
+    if (isSubmenuActive && !expanded) setExpanded(true);
+  }, [isSubmenuActive, expanded]);
+
   const content = (active) => (
     <>
-      {/* Active indicator bar (left) */}
       {active && <span className="absolute left-0 top-2 bottom-2 w-1 bg-cyan-300 rounded-r-full" />}
       {item.iconImg ? (
         <img
@@ -97,8 +105,68 @@ function SidebarLink({ item, onClick }) {
           {item.badge}
         </span>
       )}
+      {hasSubmenu && (
+        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${expanded ? "rotate-180" : ""} ${active || isSubmenuActive ? "text-cyan-300" : "text-white/70"}`} />
+      )}
     </>
   );
+
+  const baseCls = "relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all";
+
+  if (item.disabled) {
+    return (
+      <div className={`${baseCls} opacity-60 cursor-not-allowed`} data-testid={item.testid}>
+        {content(false)}
+      </div>
+    );
+  }
+
+  if (hasSubmenu) {
+    return (
+      <div>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          data-testid={item.testid}
+          className={`${baseCls} w-full ${isSubmenuActive ? "bg-white/15" : "hover:bg-white/10"}`}
+        >
+          {content(isSubmenuActive)}
+        </button>
+        {expanded && (
+          <div className="ml-6 mt-1 space-y-0.5 border-l border-white/20 pl-3">
+            {item.submenu.map((sub) => (
+              <NavLink
+                key={sub.to}
+                to={sub.to}
+                onClick={onClick}
+                data-testid={sub.testid}
+                className={({ isActive }) =>
+                  `block px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                    isActive ? "bg-white/15 text-cyan-300" : "text-white/80 hover:bg-white/10 hover:text-white"
+                  }`
+                }
+              >
+                {sub.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <NavLink
+      to={item.to}
+      onClick={onClick}
+      data-testid={item.testid}
+      className={({ isActive }) =>
+        `${baseCls} ${isActive ? "bg-white/15" : "hover:bg-white/10"}`
+      }
+    >
+      {({ isActive }) => content(isActive)}
+    </NavLink>
+  );
+}
 
   const baseCls = "relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all";
 
