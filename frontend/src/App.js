@@ -24,7 +24,7 @@ import AnalyticsMantenimiento from "./pages/analytics/Mantenimiento";
 import AnalyticsNeumaticos from "./pages/analytics/Neumaticos";
 import AnalyticsSeguridadVial from "./pages/analytics/SeguridadVial";
 import AnalyticsChecklist from "./pages/analytics/Checklist";
-
+import Monitoreo from "./pages/Monitoreo";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -70,6 +70,7 @@ function App() {
           <Route path="/facturacion/historial" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><EstadoCuentaHistorial /></Shell>} />
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
           <Route path="/seguridad" element={<Shell><Seguridad /></Shell>} />
+          <Route path="/monitoreo" element={<Shell><Monitoreo /></Shell>} />
           <Route path="/capacitacion" element={<Shell><Capacitacion /></Shell>} />
           <Route path="/documentacion" element={<Shell><Documentacion /></Shell>} />
           <Route path="/mantenimiento" element={<Shell><Mantenimiento /></Shell>} />
