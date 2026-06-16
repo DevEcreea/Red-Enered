@@ -15,7 +15,15 @@ import Seguridad from "./pages/Seguridad";
 import ControlIntegral from "./pages/ControlIntegral";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
-import Analitica from "./pages/Analitica";
+// Analytics BI submódulos
+import AnalyticsCombustible from "./pages/analytics/Combustible";
+import AnalyticsEcodriving from "./pages/analytics/Ecodriving";
+import AnalyticsEmisionesCO2 from "./pages/analytics/EmisionesCO2";
+import AnalyticsMantenimiento from "./pages/analytics/Mantenimiento";
+import AnalyticsNeumaticos from "./pages/analytics/Neumaticos";
+import AnalyticsSeguridadVial from "./pages/analytics/SeguridadVial";
+import AnalyticsChecklist from "./pages/analytics/Checklist";
+
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -47,7 +55,15 @@ function App() {
           <Route path="/reportes" element={<Navigate to="/flotas" replace />} />
           <Route path="/reportes-consumo" element={<Navigate to="/flotas" replace />} />
           <Route path="/qr" element={<Navigate to="/flotas" replace />} />
-          <Route path="/analitica" element={<Shell><Analitica /></Shell>} />
+          {/* Analytics BI - submódulos */}
+          <Route path="/analitica" element={<Navigate to="/analitica/combustible" replace />} />
+          <Route path="/analitica/combustible" element={<Shell><AnalyticsCombustible /></Shell>} />
+          <Route path="/analitica/ecodriving" element={<Shell><AnalyticsEcodriving /></Shell>} />
+          <Route path="/analitica/emisiones" element={<Shell><AnalyticsEmisionesCO2 /></Shell>} />
+          <Route path="/analitica/mantenimiento" element={<Shell><AnalyticsMantenimiento /></Shell>} />
+          <Route path="/analitica/neumaticos" element={<Shell><AnalyticsNeumaticos /></Shell>} />
+          <Route path="/analitica/seguridad" element={<Shell><AnalyticsSeguridadVial /></Shell>} />
+          <Route path="/analitica/checklist" element={<Shell><AnalyticsChecklist /></Shell>} />
           <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
           <Route path="/facturacion/historial" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><EstadoCuentaHistorial /></Shell>} />
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
@@ -67,5 +83,5 @@ function App() {
     </AuthProvider>
   );
 }
-
+ 
 export default App;
