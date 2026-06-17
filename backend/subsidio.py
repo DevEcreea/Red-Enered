@@ -275,6 +275,19 @@ FLOTA_CATEGORIES = ["tarjeta_habilitacion", "tarjeta_propiedad"]
 COMBUSTIBLE_CATEGORIES = ["comprobante_jun_2026", "comprobante_jul_2026"]
 ALL_CATEGORIES = EMPRESA_CATEGORIES + FLOTA_CATEGORIES + COMBUSTIBLE_CATEGORIES
 
+# MIME allowed per category (Art. user-defined: empresa solo PDF, flota PDF+imágenes)
+EMPRESA_MIME = {"application/pdf"}
+FLOTA_MIME = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
+COMBUSTIBLE_MIME = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
+
+
+def _allowed_mimes_for(categoria: str) -> set:
+    if categoria in EMPRESA_CATEGORIES:
+        return EMPRESA_MIME
+    if categoria in FLOTA_CATEGORIES:
+        return FLOTA_MIME
+    return COMBUSTIBLE_MIME
+
 
 @subsidio_router.get("/subsidio/status")
 async def subsidio_status(user: dict = Depends(_require_subsidio)):
@@ -363,7 +376,98 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
         "progress": {"total_required": total_required, "total_done": total_done, "pct": pct},
         "can_finalize": can_finalize,
         "documentos_completos": bool(user.get("documentos_completos")),
+        "declaracion": await db.subsidio_declaraciones.find_one(
+            {"user_id": user["id"]}, {"_id": 0}
+        ),
     }
+
+
+# ============================================================================
+# DECLARACIÓN JURADA
+# ============================================================================
+class DeclaracionPayload(BaseModel):
+    accepted: bool
+    representante: Optional[str] = None
+
+
+@subsidio_router.post("/subsidio/declaracion")
+async def aceptar_declaracion(
+    payload: DeclaracionPayload,
+    request: Request,
+    user: dict = Depends(_require_subsidio),
+):
+    if not payload.accepted:
+        raise HTTPException(status_code=400, detail="Debes marcar la casilla de aceptación")
+
+    # Idempotente: si ya aceptó, devolver el registro existente
+    existing = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    if existing:
+        return {"ok": True, "declaracion": existing, "already": True}
+
+    # Validar que hayan terminado etapas 1, 2 y 3
+    drafts_pendientes = await db.consumos_subsidio.count_documents(
+        {"user_id": user["id"], "status": "draft"}
+    )
+    confirmadas = await db.consumos_subsidio.count_documents(
+        {"user_id": user["id"], "status": "confirmed"}
+    )
+    if drafts_pendientes > 0:
+        raise HTTPException(status_code=400, detail="Aún tienes facturas en borrador. Confírmalas antes de firmar la declaración.")
+    if confirmadas == 0:
+        raise HTTPException(status_code=400, detail="Debes subir y confirmar al menos una factura de combustible.")
+
+    # Verificar docs empresa + flota subidos
+    docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    docs_set = {(d["categoria"], d.get("placa")) for d in docs}
+    missing = []
+    for cat in EMPRESA_CATEGORIES:
+        if (cat, None) not in docs_set:
+            missing.append(DOCUMENT_LABELS[cat])
+    if len(vehicles) == 0:
+        missing.append("Al menos una placa registrada")
+    for v in vehicles:
+        for cat in FLOTA_CATEGORIES:
+            if (cat, v["placa"]) not in docs_set:
+                missing.append(f"{DOCUMENT_LABELS[cat]} — {v['placa']}")
+    if missing:
+        raise HTTPException(status_code=400, detail={
+            "message": "Faltan documentos antes de firmar la declaración",
+            "missing": missing[:10],
+        })
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "empresa": user.get("empresa"),
+        "ruc": user.get("ruc"),
+        "representante": payload.representante or user.get("contacto") or user.get("name"),
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+        "ip": (request.client.host if request.client else None),
+        "user_agent": request.headers.get("user-agent", ""),
+        "texto": (
+            "Declaro bajo juramento que la información, documentos y comprobantes presentados "
+            "para acceder al subsidio económico del Decreto de Urgencia N.° 004-2026 son verdaderos, "
+            "exactos y corresponden a unidades con habilitación vigente. Reconozco que la presentación "
+            "de información falsa, adulterada o inexacta genera la pérdida automática del subsidio, "
+            "sin perjuicio de las responsabilidades administrativas, civiles y penales que correspondan."
+        ),
+    }
+    await db.subsidio_declaraciones.insert_one(record)
+    # Marcar expediente como enviado a la ATU
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"expediente_status": "submitted", "documentos_completos": True,
+                  "expediente_submitted_at": record["accepted_at"]}},
+    )
+    rec_out = {k: v for k, v in record.items() if k != "_id"}
+    return {"ok": True, "declaracion": rec_out, "expediente_status": "submitted"}
+
+
+@subsidio_router.get("/subsidio/declaracion")
+async def get_declaracion(user: dict = Depends(_require_subsidio)):
+    rec = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    return {"declaracion": rec}
 
 
 @subsidio_router.post("/subsidio/documents")
@@ -384,12 +488,21 @@ async def upload_document(
         if not own:
             raise HTTPException(status_code=400, detail="La placa no está registrada en tu flota")
 
+    # Validate MIME per category
+    content_type = (file.content_type or "application/octet-stream").lower()
+    allowed = _allowed_mimes_for(categoria)
+    if content_type not in allowed:
+        nice = {
+            frozenset(EMPRESA_MIME): "PDF",
+            frozenset(FLOTA_MIME): "PDF, JPG o PNG",
+        }.get(frozenset(allowed), "PDF, JPG o PNG")
+        raise HTTPException(status_code=400, detail=f"Formato no permitido. Esta etapa solo acepta: {nice}")
+
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Archivo demasiado grande (max 20MB)")
 
     key = _subsidio_key(user["id"], categoria, placa_norm, file.filename or "doc")
-    content_type = file.content_type or "application/octet-stream"
     storage.save_object(key, content, content_type)
 
     doc = {

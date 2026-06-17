@@ -12,7 +12,7 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   if (!user) return null;
 
   const esSubsidio = user.role === "cliente_subsidio";
-  const expedienteOk = user.expediente_status === "confirmed" || user.documentos_completos === true;
+  const expedienteOk = user.expediente_status === "confirmed" || user.expediente_status === "submitted" || user.documentos_completos === true;
 
   if (esSubsidio && !expedienteOk) {
     return (

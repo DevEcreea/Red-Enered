@@ -1,313 +1,237 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle,
   Trash2, Plus, Building2, Truck, Fuel,
-  Banknote, FileText, Save, ScanLine, ArrowRight,
+  Banknote, FileText, Save, ScanLine, ShieldCheck,
+  Send, Lock, FileCheck2, PartyPopper,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
-const CAPAS = [
-  { id: "empresa",     n: 1, label: "Datos de la empresa",       icon: Building2, sub: "Identidad, autorización y depósito" },
-  { id: "flota",       n: 2, label: "Flota",                     icon: Truck,     sub: "Placas, habilitación y propiedad" },
-  { id: "combustible", n: 3, label: "Combustible",               icon: Fuel,      sub: "Facturas con OCR Gemini Vision" },
+const ETAPAS = [
+  { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
+  { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
+  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF, PNG o JPG · OCR" },
+  { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
+  { id: "envio",        n: 5, label: "Envío a la ATU",           icon: Send,       short: "Envío",        hint: "Confirmación" },
 ];
+
+const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50", "GASOHOL 90", "GASOHOL 95", "GASOHOL 97", "GLP", "GNV", "OTRO"];
 
 export default function SubsidioDocumentos() {
   const navigate = useNavigate();
+  const { setUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeCapa, setActiveCapa] = useState("empresa");
-  const [finalizing, setFinalizing] = useState(false);
-  const [finalizeError, setFinalizeError] = useState(null);
+  const [activeEtapa, setActiveEtapa] = useState("empresa");
 
   const load = async () => {
     try {
       const { data } = await api.get("/subsidio/dashboard");
       setData(data);
+      // Auto-jump to first incomplete stage on first load
+      if (loading) {
+        const next = pickNextEtapa(data);
+        if (next) setActiveEtapa(next);
+      }
     } finally {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
-  const handleFinalize = async () => {
-    setFinalizing(true);
-    setFinalizeError(null);
-    try {
-      await api.post("/subsidio/finalize");
-      await api.get("/auth/me").catch(() => {});
-      navigate("/subsidio/verificar", { replace: true });
-    } catch (e) {
-      setFinalizeError(e?.response?.data?.detail || "Faltan documentos");
-    } finally {
-      setFinalizing(false);
-    }
-  };
+  // ---------- Progress totals (memoized; before early-return) ----------
+  const totals = useMemo(() => calcTotals(data), [data]);
 
-  // Stats por capa (memoizadas, antes del early-return para no romper hooks)
-  const capaStats = useMemo(() => {
-    if (!data) return { empresa: { done: 0, total: 1, pct: 0 }, flota: { done: 0, total: 1, pct: 0 }, combustible: { done: 0, total: 1, pct: 0 } };
-    const c = data.checklist || { empresa: [], flota: [], combustible: [] };
-    const eDone = c.empresa.filter((x) => x.uploaded).length + (data.bank_account ? 1 : 0);
-    const eTot = c.empresa.length + 1;
-    const fDone = c.flota.filter((x) => x.uploaded).length;
-    const fTot = Math.max(c.flota.length, 1);
-    const kDone = c.combustible.filter((x) => x.uploaded).length;
-    const kTot = c.combustible.length;
-    return {
-      empresa:     { done: eDone, total: eTot, pct: Math.round((eDone / Math.max(eTot, 1)) * 100) },
-      flota:       { done: fDone, total: fTot, pct: Math.round((fDone / Math.max(fTot, 1)) * 100) },
-      combustible: { done: kDone, total: kTot, pct: Math.round((kDone / Math.max(kTot, 1)) * 100) },
-    };
-  }, [data]);
-
-  if (loading) return <div className="min-h-[400px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand" /></div>;
+  if (loading) {
+    return <div className="min-h-[400px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand" /></div>;
+  }
   if (!data) return null;
 
-  const { calculation, ahorro_estimado, ahorro_reconocido, checklist, progress, vehicles, bank_account, can_finalize } = data;
-  const currentStep = (progress?.total_done || 0) + 1;
-  const totalSteps = progress?.total_required || 0;
+  const { ahorro_estimado, ahorro_reconocido, checklist, vehicles, bank_account, declaracion } = data;
+
+  const isComplete = (id) => totals.byEtapa[id]?.done >= totals.byEtapa[id]?.total && totals.byEtapa[id]?.total > 0;
+  const enviado = !!declaracion;
 
   return (
     <div className="space-y-6" data-testid="subsidio-documentos">
-      {/* HEADER + stepper de capas */}
+      {/* HEADER */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-start justify-between flex-wrap gap-4">
+        <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
           <div>
             <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Asistente de subsidio · DU 004-2026</span>
             <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Mi Flota</h2>
-            <p className="text-neutral-500 mt-1 max-w-2xl text-sm">
-              Tu ruta para cobrar el subsidio. Completa las 3 capas: datos de la empresa, flota y comprobantes de combustible.
-            </p>
+            <p className="text-neutral-500 mt-1 max-w-2xl text-sm">Completa las 5 etapas para enviar tu expediente a la ATU.</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-emerald-700">Ahorro estimado</div>
-              <div className="font-cabinet font-black text-xl text-emerald-700">
-                S/ {Number(ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}
-              </div>
+              <div className="font-cabinet font-black text-xl text-emerald-700">S/ {Number(ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
             </div>
             <div className="px-4 py-2.5 bg-brand/10 border border-brand/30 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Ahorro reconocido</div>
-              <div className="font-cabinet font-black text-xl text-brand">
-                S/ {Number(ahorro_reconocido).toLocaleString("es-PE", { maximumFractionDigits: 0 })}
-              </div>
+              <div className="font-cabinet font-black text-xl text-brand">S/ {Number(ahorro_reconocido).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
             </div>
           </div>
         </div>
 
-        {/* Paso X de N */}
-        <div className="flex items-center justify-between mt-6 mb-3">
-          <div className="text-sm">
-            <span className="font-cabinet font-black text-brand text-2xl">Paso {String(Math.min(currentStep, totalSteps)).padStart(2, "0")}</span>
-            <span className="text-neutral-500 ml-2">de {totalSteps} · {progress.pct}% completado</span>
-          </div>
-          <div className="text-xs text-neutral-400 uppercase tracking-widest font-bold">Tu ruta para cobrar</div>
-        </div>
-
-        {/* 3 capas (progress bars horizontales) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {CAPAS.map((capa) => {
-            const Ic = capa.icon;
-            const st = capaStats[capa.id];
-            const isActive = activeCapa === capa.id;
-            const isDone = st.pct === 100;
+        {/* Línea de etapas */}
+        <div className="grid grid-cols-5 gap-2 mb-3">
+          {ETAPAS.map((e) => {
+            const Ic = e.icon;
+            const active = activeEtapa === e.id;
+            const done = isComplete(e.id) || (e.id === "envio" && enviado) || (e.id === "declaracion" && enviado);
+            const canVisit = e.id === "envio" ? enviado : true;
             return (
               <button
-                key={capa.id}
-                onClick={() => setActiveCapa(capa.id)}
-                data-testid={`capa-tab-${capa.id}`}
-                className={`text-left p-4 rounded-xl border-2 transition-all ${
-                  isActive
-                    ? "border-brand bg-brand/5 shadow-md"
-                    : isDone
-                    ? "border-emerald-300 bg-emerald-50/40 hover:border-emerald-400"
-                    : "border-neutral-200 bg-white hover:border-neutral-300"
-                }`}
+                key={e.id}
+                onClick={() => canVisit && setActiveEtapa(e.id)}
+                disabled={!canVisit}
+                data-testid={`etapa-tab-${e.id}`}
+                className={`text-left p-3 rounded-xl border-2 transition-all min-h-[78px] ${
+                  active ? "border-brand bg-brand/5 shadow-md" :
+                  done ? "border-emerald-300 bg-emerald-50/40 hover:border-emerald-400" :
+                  "border-neutral-200 bg-white hover:border-neutral-300"
+                } ${!canVisit ? "opacity-40 cursor-not-allowed" : ""}`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <div className={`text-[10px] uppercase tracking-widest font-bold ${isActive ? "text-brand" : "text-neutral-400"}`}>
-                    Capa {capa.n}
-                  </div>
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                    isDone ? "bg-emerald-100 text-emerald-700" : isActive ? "bg-brand text-white" : "bg-neutral-100 text-neutral-500"
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className={`text-[10px] uppercase tracking-widest font-bold ${active ? "text-brand" : "text-neutral-400"}`}>Etapa {e.n}</span>
+                  <span className={`w-6 h-6 rounded-md flex items-center justify-center ${
+                    done ? "bg-emerald-100 text-emerald-700" : active ? "bg-brand text-white" : "bg-neutral-100 text-neutral-500"
                   }`}>
-                    {isDone ? <CheckCircle2 className="w-4 h-4" /> : <Ic className="w-4 h-4" />}
-                  </div>
-                </div>
-                <div className="font-cabinet font-bold text-base text-neutral-900">{capa.label}</div>
-                <div className="text-xs text-neutral-500 mt-0.5">{capa.sub}</div>
-                <div className="mt-3 flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-neutral-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-700 ${isDone ? "bg-emerald-500" : "bg-brand"}`}
-                      style={{ width: `${st.pct}%` }}
-                    />
-                  </div>
-                  <span className={`text-[11px] font-bold ${isDone ? "text-emerald-600" : "text-neutral-600"}`}>
-                    {st.done}/{st.total}
+                    {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Ic className="w-3.5 h-3.5" />}
                   </span>
                 </div>
+                <div className="font-bold text-[13px] text-neutral-900 leading-tight">{e.short}</div>
+                <div className="text-[10px] text-neutral-500 mt-0.5">{e.hint}</div>
               </button>
             );
           })}
         </div>
+
+        {/* Barra única continua */}
+        <div className="mt-5">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-sm">
+              <span className="font-cabinet font-black text-brand text-xl">{totals.pct}%</span>
+              <span className="text-neutral-500 ml-2 text-xs">{totals.done} de {totals.total} ítems completados</span>
+            </div>
+            <div className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Tu ruta para cobrar</div>
+          </div>
+          <div className="relative h-3 bg-neutral-100 rounded-full overflow-hidden">
+            <div
+              className="absolute inset-y-0 left-0 bg-gradient-to-r from-brand to-violet-500 rounded-full transition-all duration-700"
+              style={{ width: `${totals.pct}%` }}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* CONTENIDO de la capa activa */}
-      <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`capa-content-${activeCapa}`}>
-        {activeCapa === "empresa" && (
-          <EmpresaCapa items={checklist.empresa} bank={bank_account} onChange={load} />
+      {/* CONTENIDO de la etapa activa */}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
+        {activeEtapa === "empresa" && (
+          <EmpresaEtapa items={checklist.empresa} bank={bank_account} onChange={load} />
         )}
-        {activeCapa === "flota" && (
-          <FlotaCapa items={checklist.flota} vehicles={vehicles} onChange={load} />
+        {activeEtapa === "flota" && (
+          <FlotaEtapa items={checklist.flota} vehicles={vehicles} onChange={load} />
         )}
-        {activeCapa === "combustible" && (
-          <CombustibleCapa items={checklist.combustible} navigate={navigate} />
+        {activeEtapa === "combustible" && (
+          <CombustibleEtapa onAnyChange={load} />
+        )}
+        {activeEtapa === "declaracion" && (
+          <DeclaracionEtapa
+            data={data}
+            totals={totals}
+            onAccepted={async () => {
+              await load();
+              setActiveEtapa("envio");
+              const me = await api.get("/auth/me").catch(() => null);
+              if (me?.data?.user) setUser?.(me.data.user);
+            }}
+          />
+        )}
+        {activeEtapa === "envio" && (
+          <EnvioEtapa declaracion={declaracion} data={data} navigate={navigate} />
         )}
 
-        {/* Navegación entre capas */}
+        {/* Navegación */}
         <div className="flex items-center justify-between mt-6 pt-5 border-t border-neutral-100">
           <button
             onClick={() => {
-              const idx = CAPAS.findIndex((c) => c.id === activeCapa);
-              if (idx > 0) setActiveCapa(CAPAS[idx - 1].id);
+              const idx = ETAPAS.findIndex((c) => c.id === activeEtapa);
+              if (idx > 0) setActiveEtapa(ETAPAS[idx - 1].id);
             }}
-            disabled={activeCapa === CAPAS[0].id}
+            disabled={activeEtapa === ETAPAS[0].id}
             className="px-4 py-2 text-sm font-bold text-neutral-600 hover:bg-neutral-100 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
+            data-testid="etapa-prev"
           >
-            ← Capa anterior
+            ← Etapa anterior
           </button>
-          <button
-            onClick={() => {
-              const idx = CAPAS.findIndex((c) => c.id === activeCapa);
-              if (idx < CAPAS.length - 1) setActiveCapa(CAPAS[idx + 1].id);
-            }}
-            disabled={activeCapa === CAPAS[CAPAS.length - 1].id}
-            className="px-4 py-2 text-sm font-bold text-brand hover:bg-brand/5 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            Siguiente capa <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* FINALIZAR */}
-      <div className="bg-white border-2 border-brand rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h3 className="font-cabinet text-xl font-bold">Finalizar expediente</h3>
-            <p className="text-sm text-neutral-600 mt-1">
-              Cuando termines las 3 capas, pasa al OCR para escanear tus facturas y desbloquear el dashboard del subsidio.
-            </p>
-          </div>
-          <button
-            onClick={handleFinalize}
-            disabled={!can_finalize || finalizing}
-            className="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-xl flex items-center gap-2 disabled:opacity-50"
-            data-testid="subsidio-finalize"
-          >
-            {finalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Finalizar y verificar →
-          </button>
-        </div>
-        {finalizeError && (
-          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm">
-            {typeof finalizeError === "string" ? finalizeError : (
-              <>
-                <strong>{finalizeError.message}:</strong>
-                <ul className="list-disc pl-5 mt-1">
-                  {(finalizeError.missing || []).map((m, i) => <li key={i}>{m}</li>)}
-                </ul>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   DocItem reutilizable (subida estándar a /subsidio/documents)
-   ============================================================ */
-function DocItem({ item, onChange, hint }) {
-  const [busy, setBusy] = useState(false);
-  const handleUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("categoria", item.categoria);
-      if (item.placa) fd.append("placa", item.placa);
-      await api.post("/subsidio/documents", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      onChange?.();
-    } catch (err) {
-      alert(err?.response?.data?.detail || "Error al subir");
-    } finally { setBusy(false); }
-  };
-
-  const handleDelete = async (docId) => {
-    if (!window.confirm("¿Eliminar este documento?")) return;
-    setBusy(true);
-    try {
-      await api.delete(`/subsidio/documents/${docId}`);
-      onChange?.();
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
-      <div className="flex items-start gap-3">
-        <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${item.uploaded ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
-          {item.uploaded ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div className="font-bold text-neutral-900 text-sm">{item.label}</div>
-          {hint && <div className="text-xs text-neutral-500 mt-0.5">{hint}</div>}
-          {item.files?.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {item.files.map((f) => (
-                <li key={f.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 text-xs">
-                  <span className="truncate flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-neutral-400" />{f.filename}</span>
-                  <button onClick={() => handleDelete(f.id)} disabled={busy} className="text-neutral-400 hover:text-red-500" aria-label="Eliminar">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {activeEtapa !== "envio" && (
+            <button
+              onClick={() => {
+                const idx = ETAPAS.findIndex((c) => c.id === activeEtapa);
+                if (idx < ETAPAS.length - 1) {
+                  const next = ETAPAS[idx + 1].id;
+                  if (next === "envio" && !enviado) return;
+                  setActiveEtapa(next);
+                }
+              }}
+              className="px-4 py-2 text-sm font-bold text-brand hover:bg-brand/5 rounded-lg"
+              data-testid="etapa-next"
+            >
+              Siguiente etapa →
+            </button>
           )}
         </div>
-        <label className="px-3 py-1.5 border border-neutral-300 bg-white rounded-lg text-xs font-bold cursor-pointer hover:bg-neutral-50 flex items-center gap-1.5">
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          {item.uploaded ? "Reemplazar" : "Subir"}
-          <input type="file" hidden onChange={handleUpload} accept=".pdf,.jpg,.jpeg,.png,.xml" />
-        </label>
       </div>
     </div>
   );
 }
 
-function Field({ label, children, full }) {
-  return (
-    <div className={full ? "sm:col-span-2" : ""}>
-      <label className="block text-xs font-bold text-neutral-700 mb-1">{label}</label>
-      {children}
-    </div>
-  );
+/* ============================================================ */
+/* Helpers                                                       */
+/* ============================================================ */
+function calcTotals(data) {
+  if (!data) return { pct: 0, done: 0, total: 1, byEtapa: {} };
+  const c = data.checklist || { empresa: [], flota: [], combustible: [] };
+  const empresaDone = c.empresa.filter((x) => x.uploaded).length + (data.bank_account ? 1 : 0);
+  const empresaTot = c.empresa.length + 1;
+  const flotaDone = c.flota.filter((x) => x.uploaded).length;
+  const flotaTot = Math.max(c.flota.length, 1);
+  // For combustible: we count confirmed invoices (from server). Until invoices exist we treat 1 minimum target.
+  // Will be refreshed from the OCR preview load
+  const combDone = data._combustible_done ?? 0;
+  const combTot = data._combustible_total ?? 1;
+  const declDone = data.declaracion ? 1 : 0;
+  const envDone = data.declaracion ? 1 : 0;
+
+  const byEtapa = {
+    empresa: { done: empresaDone, total: empresaTot, pct: pct(empresaDone, empresaTot) },
+    flota: { done: flotaDone, total: flotaTot, pct: pct(flotaDone, flotaTot) },
+    combustible: { done: combDone, total: combTot, pct: pct(combDone, combTot) },
+    declaracion: { done: declDone, total: 1, pct: declDone * 100 },
+    envio: { done: envDone, total: 1, pct: envDone * 100 },
+  };
+  const done = empresaDone + flotaDone + combDone + declDone + envDone;
+  const total = empresaTot + flotaTot + combTot + 1 + 1;
+  return { pct: pct(done, total), done, total, byEtapa };
+}
+function pct(d, t) { return Math.round((d / Math.max(t, 1)) * 100); }
+
+function pickNextEtapa(data) {
+  const t = calcTotals(data);
+  if (data.declaracion) return "envio";
+  if (t.byEtapa.empresa.done < t.byEtapa.empresa.total) return "empresa";
+  if (t.byEtapa.flota.done < t.byEtapa.flota.total) return "flota";
+  return "combustible";
 }
 
-const FIELD_CSS = `
-  .field-input { width:100%; height:42px; padding:0 12px; border:1px solid #d4d4d4; border-radius:10px; background:#fff; font-size:14px; }
-  .field-input:focus { outline:none; border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,0.1); }
-`;
-
-/* ============================================================
-   CAPA 1 — Empresa: docs en 2 columnas + cuenta bancaria a la derecha
-   ============================================================ */
-function EmpresaCapa({ items, bank, onChange }) {
+/* ============================================================ */
+/* Etapa 1 — Empresa (PDF only) + cuenta bancaria + nota seguridad */
+/* ============================================================ */
+function EmpresaEtapa({ items, bank, onChange }) {
   const hints = {
     ficha_ruc: "PDF descargado de SUNAT",
     resolucion_autorizacion: "MTC / Gobierno Regional / Municipalidad · Art. 3.4.1",
@@ -315,16 +239,12 @@ function EmpresaCapa({ items, bank, onChange }) {
   };
   return (
     <div>
-      <div className="flex items-center gap-3 mb-5">
-        <span className="w-10 h-10 rounded-lg bg-brand/10 text-brand flex items-center justify-center"><Building2 className="w-5 h-5" /></span>
-        <div>
-          <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Capa 01</span>
-          <h3 className="font-cabinet text-xl font-bold">Datos de la empresa</h3>
-        </div>
-      </div>
+      <EtapaHeader n={1} icon={Building2} title="Documentos de la empresa" subtitle="Identidad, autorización y cuenta bancaria · solo PDF" />
       <div className="grid lg:grid-cols-2 gap-5">
         <div className="space-y-3">
-          {items.map((it) => <DocItem key={it.categoria} item={it} hint={hints[it.categoria]} onChange={onChange} />)}
+          {items.map((it) => (
+            <DocItem key={it.categoria} item={it} hint={hints[it.categoria]} onChange={onChange} accept=".pdf" acceptLabel="PDF" />
+          ))}
         </div>
         <BankAccountCard bank={bank} onSaved={onChange} />
       </div>
@@ -333,24 +253,15 @@ function EmpresaCapa({ items, bank, onChange }) {
 }
 
 function BankAccountCard({ bank, onSaved }) {
-  const [ba, setBa] = useState(() => bank || {
-    es_banco_nacion: true, banco: "Banco de la Nación",
-    tipo_cuenta: "ahorros", numero_cuenta: "", moneda: "PEN", cci: ""
-  });
+  const [ba, setBa] = useState(() => bank || { es_banco_nacion: true, banco: "Banco de la Nación", tipo_cuenta: "ahorros", numero_cuenta: "", moneda: "PEN", cci: "" });
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const save = async () => {
     setBusy(true); setSaved(false);
-    try {
-      await api.put("/subsidio/bank-account", ba);
-      setSaved(true); onSaved?.();
-    } catch (e) {
-      alert(e?.response?.data?.detail || "Error al guardar");
-    } finally {
-      setBusy(false);
-      setTimeout(() => setSaved(false), 2000);
-    }
+    try { await api.put("/subsidio/bank-account", ba); setSaved(true); onSaved?.(); }
+    catch (e) { alert(e?.response?.data?.detail || "Error al guardar"); }
+    finally { setBusy(false); setTimeout(() => setSaved(false), 2000); }
   };
 
   return (
@@ -365,10 +276,7 @@ function BankAccountCard({ bank, onSaved }) {
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="Banco">
           <select className="field-input" value={ba.es_banco_nacion ? "BN" : "OTRO"}
-            onChange={(e) => {
-              const isBN = e.target.value === "BN";
-              setBa({ ...ba, es_banco_nacion: isBN, banco: isBN ? "Banco de la Nación" : "" });
-            }} data-testid="bank-select">
+            onChange={(e) => { const isBN = e.target.value === "BN"; setBa({ ...ba, es_banco_nacion: isBN, banco: isBN ? "Banco de la Nación" : "" }); }} data-testid="bank-select">
             <option value="BN">Banco de la Nación</option>
             <option value="OTRO">Otro banco</option>
           </select>
@@ -380,17 +288,15 @@ function BankAccountCard({ bank, onSaved }) {
         )}
         <Field label="Tipo de cuenta">
           <select className="field-input" value={ba.tipo_cuenta} onChange={(e) => setBa({ ...ba, tipo_cuenta: e.target.value })}>
-            <option value="ahorros">Ahorros</option>
-            <option value="corriente">Corriente</option>
+            <option value="ahorros">Ahorros</option><option value="corriente">Corriente</option>
           </select>
         </Field>
         <Field label="N° de cuenta">
-          <input className="field-input" value={ba.numero_cuenta} onChange={(e) => setBa({ ...ba, numero_cuenta: e.target.value })} />
+          <input className="field-input" value={ba.numero_cuenta} onChange={(e) => setBa({ ...ba, numero_cuenta: e.target.value })} data-testid="bank-numero" />
         </Field>
         <Field label="Moneda">
           <select className="field-input" value={ba.moneda} onChange={(e) => setBa({ ...ba, moneda: e.target.value })}>
-            <option value="PEN">PEN (Soles)</option>
-            <option value="USD">USD (Dólares)</option>
+            <option value="PEN">PEN (Soles)</option><option value="USD">USD (Dólares)</option>
           </select>
         </Field>
         {!ba.es_banco_nacion && (
@@ -399,9 +305,20 @@ function BankAccountCard({ bank, onSaved }) {
           </Field>
         )}
       </div>
+
+      {/* Nota de seguridad bancaria */}
+      <div className="mt-4 bg-violet-50 border border-violet-200 rounded-lg p-3 flex gap-2 text-xs text-violet-900">
+        <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" />
+        <p>
+          <strong>Seguridad Bancaria:</strong> Tus datos bancarios solo se usan para que la ATU te deposite el subsidio
+          (vía Banco de la Nación u otro banco de tu preferencia). Ni Enered ni la ATU te pedirán nunca claves,
+          contraseñas, PIN, datos de tarjeta, tokens ni acceso a tu banca por internet.
+        </p>
+      </div>
+
       <div className="mt-4 flex items-center justify-end gap-3">
         {saved && <span className="text-emerald-600 text-sm font-bold">Guardado ✓</span>}
-        <button onClick={save} disabled={busy} className="px-4 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg flex items-center gap-2 text-sm">
+        <button onClick={save} disabled={busy} className="px-4 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg flex items-center gap-2 text-sm" data-testid="bank-save">
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Guardar cuenta
         </button>
       </div>
@@ -410,10 +327,10 @@ function BankAccountCard({ bank, onSaved }) {
   );
 }
 
-/* ============================================================
-   CAPA 2 — Flota: lista de placas con sus 2 documentos por unidad
-   ============================================================ */
-function FlotaCapa({ items, vehicles, onChange }) {
+/* ============================================================ */
+/* Etapa 2 — Flota (PDF/PNG/JPG)                                 */
+/* ============================================================ */
+function FlotaEtapa({ items, vehicles, onChange }) {
   const [adding, setAdding] = useState(false);
   const [placa, setPlaca] = useState("");
   const [categoria, setCategoria] = useState("N2");
@@ -422,28 +339,18 @@ function FlotaCapa({ items, vehicles, onChange }) {
   const addVehicle = async () => {
     setError(null);
     if (!placa.trim()) return;
-    try {
-      await api.post("/subsidio/vehicles", { placa: placa.toUpperCase(), categoria });
-      setPlaca(""); setAdding(false); onChange();
-    } catch (e) { setError(e?.response?.data?.detail || "Error"); }
+    try { await api.post("/subsidio/vehicles", { placa: placa.toUpperCase(), categoria }); setPlaca(""); setAdding(false); onChange(); }
+    catch (e) { setError(e?.response?.data?.detail || "Error"); }
   };
-
   const removeVehicle = async (p) => {
     if (!window.confirm(`¿Quitar placa ${p}? Se borrarán también sus documentos.`)) return;
-    await api.delete(`/subsidio/vehicles/${p}`);
-    onChange();
+    await api.delete(`/subsidio/vehicles/${p}`); onChange();
   };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-lg bg-brand/10 text-brand flex items-center justify-center"><Truck className="w-5 h-5" /></span>
-          <div>
-            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Capa 02</span>
-            <h3 className="font-cabinet text-xl font-bold">Flota · {vehicles.length} unidad{vehicles.length === 1 ? "" : "es"}</h3>
-          </div>
-        </div>
+        <EtapaHeader n={2} icon={Truck} title={`Documentos de flota · ${vehicles.length} unidad${vehicles.length === 1 ? "" : "es"}`} subtitle="Tarjetas de habilitación y propiedad · PDF, PNG o JPG" inline />
         <button onClick={() => setAdding(!adding)} className="px-3 py-2 border border-neutral-300 rounded-lg text-sm font-bold flex items-center gap-1.5 hover:bg-neutral-50" data-testid="flota-toggle-add">
           <Plus className="w-4 h-4" /> {adding ? "Cancelar" : "Agregar unidad"}
         </button>
@@ -458,7 +365,7 @@ function FlotaCapa({ items, vehicles, onChange }) {
           <div className="flex-1 min-w-[140px]">
             <label className="block text-xs font-bold text-neutral-700 mb-1">Categoría</label>
             <select className="field-input" value={categoria} onChange={(e) => setCategoria(e.target.value)} data-testid="flota-add-cat">
-              {["M2","M3","N1","N2","N3"].map(c => <option key={c}>{c}</option>)}
+              {["M2", "M3", "N1", "N2", "N3"].map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
           <button onClick={addVehicle} className="h-[42px] px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg" data-testid="flota-add-confirm">Agregar</button>
@@ -485,91 +392,479 @@ function FlotaCapa({ items, vehicles, onChange }) {
             </div>
             <div className="space-y-2">
               {items.filter((it) => it.placa === v.placa).map((it) => (
-                <DocItem
-                  key={it.categoria + "-" + it.placa} item={it} onChange={onChange}
-                  hint={it.categoria === "tarjeta_habilitacion" ? "Art. 3.4.2 — habilita la unidad para servicio público" : "Define la categoría (M/N)"}
-                />
+                <DocItem key={it.categoria + "-" + it.placa} item={it} onChange={onChange} accept=".pdf,.jpg,.jpeg,.png" acceptLabel="PDF / JPG / PNG"
+                  hint={it.categoria === "tarjeta_habilitacion" ? "Art. 3.4.2 — habilita la unidad para servicio público" : "Define la categoría (M/N)"} />
               ))}
             </div>
           </div>
         ))}
       </div>
-
-      <p className="text-xs text-neutral-500 mt-4">↳ Estos documentos encienden tu módulo de <strong>Gestión de flota</strong> y las alertas de vencimiento.</p>
       <style>{FIELD_CSS}</style>
     </div>
   );
 }
 
-/* ============================================================
-   CAPA 3 — Combustible: link al OCR (no usa /subsidio/documents)
-   ============================================================ */
-function CombustibleCapa({ items, navigate }) {
+/* ============================================================ */
+/* Etapa 3 — Combustible: OCR inline (upload + draft preview + confirm) */
+/* ============================================================ */
+function CombustibleEtapa({ onAnyChange }) {
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
+  const [savingId, setSavingId] = useState(null);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const fileRef = useRef(null);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+
+  const load = async () => {
+    try {
+      const [{ data: prev }, { data: conf }] = await Promise.all([
+        api.get("/subsidio/invoices/preview"),
+        api.get("/subsidio/invoices/confirmed").catch(() => ({ data: { items: [] } })),
+      ]);
+      setItems(prev.items || []);
+      setVehicles(prev.vehicles || []);
+      setConfirmedCount((conf.items || []).length);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const handleUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const capped = files.slice(0, 40);
+    setUploading(true); setUploadProgress({ done: 0, total: capped.length }); setError(null); setSuccess(null);
+    try {
+      const batch = 5;
+      for (let i = 0; i < capped.length; i += batch) {
+        const fd = new FormData();
+        capped.slice(i, i + batch).forEach((f) => fd.append("files", f));
+        await api.post("/subsidio/invoices/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setUploadProgress({ done: Math.min(i + batch, capped.length), total: capped.length });
+      }
+      await load();
+      onAnyChange?.();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Error al procesar las facturas");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const setField = (id, field, value) =>
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, [field]: value, _dirty: true } : it)));
+
+  const saveRow = async (item) => {
+    setSavingId(item.id);
+    try {
+      await api.put(`/subsidio/invoices/${item.id}`, {
+        fecha: item.fecha, hora: item.hora, estacion: item.estacion, ciudad: item.ciudad,
+        ruc_emisor: item.ruc_emisor, placa: item.placa, producto: item.producto,
+        galones: nz(item.galones), precio_unitario: nz(item.precio_unitario), importe_total: nz(item.importe_total),
+        numero_documento: item.numero_documento,
+      });
+      setItems((prev) => prev.map((it) => (it.id === item.id ? { ...it, _dirty: false } : it)));
+    } catch (e) { alert(e?.response?.data?.detail || "Error al guardar"); }
+    finally { setSavingId(null); }
+  };
+  const deleteRow = async (id) => {
+    if (!window.confirm("¿Eliminar esta factura?")) return;
+    await api.delete(`/subsidio/invoices/${id}`); await load(); onAnyChange?.();
+  };
+
+  const enviarReporte = async () => {
+    setError(null); setSuccess(null);
+    const incompletos = items.filter((it) => !it.placa || !it.galones || !it.importe_total || !it.fecha);
+    if (incompletos.length > 0) {
+      setError(`Te faltan datos en ${incompletos.length} factura(s). Completa fecha, placa, galones e importe.`);
+      return;
+    }
+    const dirty = items.filter((it) => it._dirty);
+    if (dirty.length > 0 && !window.confirm("Hay cambios sin guardar. ¿Confirmar de todos modos?")) return;
+    setConfirming(true);
+    try {
+      await api.post("/subsidio/invoices/confirm");
+      await load(); onAnyChange?.();
+      setSuccess(`✅ Confirmaste ${items.length} factura(s). Pueden cargar más o continúa a la declaración jurada.`);
+    } catch (e) {
+      setError(e?.response?.data?.detail || "Error al confirmar");
+    } finally { setConfirming(false); }
+  };
+
+  if (loading) return <div className="py-10 text-center"><Loader2 className="w-6 h-6 animate-spin text-brand mx-auto" /></div>;
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-lg bg-brand/10 text-brand flex items-center justify-center"><Fuel className="w-5 h-5" /></span>
-          <div>
-            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Capa 03</span>
-            <h3 className="font-cabinet text-xl font-bold">Combustible · facturas electrónicas</h3>
-          </div>
+      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · OCR Gemini Vision · PDF, PNG o JPG" />
+
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex gap-2">
+        <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+        <div>
+          <strong>Requisitos:</strong> comprobante electrónico, con placa, Diésel B5/B20 (azufre ≤50 ppm), fecha 29 may–28 jul 2026, grifo con Osinergmin vigente.
+          {confirmedCount > 0 && <div className="mt-1 text-emerald-700 font-bold">✓ Llevas {confirmedCount} factura(s) confirmada(s) · {vehicles.length} placa(s) en flota: {vehicles.map(v => v.placa).join(", ")}</div>}
         </div>
       </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 text-sm text-amber-900">
-        <div className="flex gap-2 items-start">
-          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <div>
-            <strong>Requisitos exactos (Art. 3.3 y 4.2)</strong>
-            <ul className="mt-2 list-disc pl-5 space-y-1">
-              <li>Comprobante de pago <strong>electrónico</strong> (no físico)</li>
-              <li>Debe consignar la <strong>placa</strong> del vehículo</li>
-              <li>Diésel <strong>B5 o B20, azufre ≤50 ppm</strong></li>
-              <li>Fecha entre <strong>29 mayo y 28 julio 2026</strong></li>
-              <li>Grifo con <strong>Registro Osinergmin vigente</strong></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-gradient-to-br from-brand/10 to-emerald-50 border-2 border-brand/30 rounded-2xl p-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl bg-brand text-white flex items-center justify-center flex-shrink-0">
-            <ScanLine className="w-6 h-6" />
-          </div>
-          <div className="flex-1">
-            <h4 className="font-cabinet font-bold text-lg">OCR Gemini Vision · subida masiva</h4>
-            <p className="text-sm text-neutral-600 mt-1 max-w-xl">
-              Sube tus facturas (JPG, PNG, WEBP o PDF). El OCR extrae fecha, placa, galones, importe y RUC automáticamente. Luego verificas y confirmas.
-            </p>
-            <button
-              onClick={() => navigate("/subsidio/verificar")}
-              className="mt-4 px-5 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-xl flex items-center gap-2"
-              data-testid="combustible-go-ocr"
-            >
-              <Upload className="w-4 h-4" />
-              Subir y verificar facturas →
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {items?.length > 0 && (
-        <div className="mt-4 grid sm:grid-cols-2 gap-3">
-          {items.map((it) => (
-            <div key={it.categoria} className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 flex items-center gap-3">
-              <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${it.uploaded ? "bg-emerald-100 text-emerald-700" : "bg-neutral-200 text-neutral-500"}`}>
-                {it.uploaded ? <CheckCircle2 className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="font-bold text-neutral-900 text-sm">{it.label}</div>
-                <div className="text-xs text-neutral-500">{it.uploaded ? `${it.files.length} archivo(s)` : "Pendiente"}</div>
-              </div>
+      {/* Uploader */}
+      <div className="bg-white border-2 border-dashed border-brand/40 rounded-2xl p-5 mb-4">
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-11 h-11 bg-brand/10 rounded-xl flex items-center justify-center flex-shrink-0">
+              <ScanLine className="w-5 h-5 text-brand" />
             </div>
-          ))}
+            <div>
+              <h4 className="font-cabinet font-bold">Carga tus facturas de combustible</h4>
+              <p className="text-xs text-neutral-500">Sin meses · sin orden · sube todas juntas</p>
+            </div>
+          </div>
+          <label className={`px-4 py-2.5 ${uploading ? "bg-neutral-300" : "bg-brand hover:bg-brand-hover"} text-white font-bold rounded-lg flex items-center gap-2 cursor-pointer text-sm`} data-testid="combustible-upload">
+            {uploading ? (<><Loader2 className="w-4 h-4 animate-spin" /> Procesando {uploadProgress.done}/{uploadProgress.total}…</>) : (<><Upload className="w-4 h-4" /> {items.length === 0 ? "Subir facturas" : "Adjuntar más"}</>)}
+            <input ref={fileRef} type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
+          </label>
         </div>
+        {uploading && uploadProgress.total > 0 && (
+          <div className="mt-3 h-2 bg-neutral-100 rounded-full overflow-hidden"><div className="h-full bg-brand transition-all" style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} /></div>
+        )}
+      </div>
+
+      {items.length === 0 ? (
+        <div className="bg-neutral-50 border-2 border-dashed border-neutral-300 rounded-xl p-8 text-center">
+          <FileText className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+          <p className="text-sm text-neutral-500">No tienes facturas en borrador. Sube tus comprobantes arriba ⬆️</p>
+        </div>
+      ) : (
+        <>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-900 flex gap-2 mb-3">
+            <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div>
+              <strong>{items.length} factura(s) en borrador.</strong> Si el OCR no leyó algún campo, completa <strong>fecha, placa, galones e importe</strong> manualmente. Las facturas no se confirman hasta que tú lo apruebes.
+            </div>
+          </div>
+          <div className="space-y-3">
+            {items.map((it) => (
+              <InvoiceRow key={it.id} item={it} vehicles={vehicles}
+                onChange={(field, value) => setField(it.id, field, value)}
+                onSave={() => saveRow(it)} onDelete={() => deleteRow(it.id)} saving={savingId === it.id} />
+            ))}
+          </div>
+        </>
       )}
+
+      {error && <div className="mt-4 bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm" data-testid="combustible-error">{typeof error === "string" ? error : JSON.stringify(error)}</div>}
+      {success && <div className="mt-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-3 text-sm">{success}</div>}
+
+      {/* Actions footer */}
+      <div className="mt-4 flex items-center justify-end gap-3 flex-wrap">
+        <label className="px-4 py-2 border border-neutral-300 bg-white rounded-lg text-sm font-bold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-50" data-testid="combustible-add-more">
+          <Plus className="w-4 h-4" /> Adjuntar más
+          <input type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleUpload} disabled={uploading} />
+        </label>
+        <button onClick={enviarReporte} disabled={confirming || items.length === 0}
+          className="px-5 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"
+          data-testid="combustible-enviar-reporte">
+          {confirming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          Enviar reporte ({items.length})
+        </button>
+      </div>
     </div>
   );
 }
+
+function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
+  const placaMatch = item.placa_match;
+  const placaInFleet = item.placa && vehicles.some(v => v.placa === item.placa);
+  const lowConf = (item.confianza ?? 0) < 0.5;
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm" data-testid={`invoice-row-${item.id}`}>
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+          <span className="truncate font-bold text-sm" title={item.factura_filename}>{item.factura_filename}</span>
+          {!item.ocr_ok && <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded-full">OCR FALLÓ · COMPLETAR MANUAL</span>}
+          {item.ocr_ok && lowConf && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">REVISAR</span>}
+          {placaMatch && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-full">PLACA OK</span>}
+        </div>
+        <button onClick={onDelete} className="text-neutral-400 hover:text-red-500" data-testid={`invoice-delete-${item.id}`}><Trash2 className="w-4 h-4" /></button>
+      </div>
+      {item.ocr_error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-2 text-xs mb-3 flex gap-1.5">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {item.ocr_error}
+        </div>
+      )}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Field label="Fecha"><input type="date" className="ocr-input" value={item.fecha || ""} onChange={(e) => onChange("fecha", e.target.value)} data-testid={`field-fecha-${item.id}`} /></Field>
+        <Field label="Hora"><input type="time" className="ocr-input" value={item.hora || ""} onChange={(e) => onChange("hora", e.target.value)} /></Field>
+        <Field label="Placa">
+          {vehicles.length > 0 ? (
+            <select className="ocr-input" value={item.placa || ""} onChange={(e) => onChange("placa", e.target.value)} data-testid={`field-placa-${item.id}`}>
+              <option value="">— Seleccionar —</option>
+              {vehicles.map(v => <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>)}
+              {item.placa && !placaInFleet && <option value={item.placa}>{item.placa} (fuera de flota)</option>}
+            </select>
+          ) : (
+            <input className="ocr-input" value={item.placa || ""} onChange={(e) => onChange("placa", e.target.value.toUpperCase())} />
+          )}
+        </Field>
+        <Field label="N° Documento"><input className="ocr-input" value={item.numero_documento || ""} onChange={(e) => onChange("numero_documento", e.target.value)} /></Field>
+        <Field label="Estación"><input className="ocr-input" value={item.estacion || ""} onChange={(e) => onChange("estacion", e.target.value)} /></Field>
+        <Field label="Ciudad"><input className="ocr-input" value={item.ciudad || ""} onChange={(e) => onChange("ciudad", e.target.value)} /></Field>
+        <Field label="RUC emisor"><input className="ocr-input" value={item.ruc_emisor || ""} onChange={(e) => onChange("ruc_emisor", e.target.value)} /></Field>
+        <Field label="Producto">
+          <select className="ocr-input" value={item.producto || ""} onChange={(e) => onChange("producto", e.target.value)}>
+            <option value="">—</option>
+            {PRODUCTOS.map(p => <option key={p} value={p}>{p}</option>)}
+            {item.producto && !PRODUCTOS.includes(item.producto) && <option value={item.producto}>{item.producto}</option>}
+          </select>
+        </Field>
+        <Field label="Galones"><input type="number" step="0.01" className="ocr-input" value={item.galones ?? ""} onChange={(e) => onChange("galones", e.target.value)} data-testid={`field-galones-${item.id}`} /></Field>
+        <Field label="Precio S/ por gl"><input type="number" step="0.01" className="ocr-input" value={item.precio_unitario ?? ""} onChange={(e) => onChange("precio_unitario", e.target.value)} /></Field>
+        <Field label="Importe total S/" full><input type="number" step="0.01" className="ocr-input" value={item.importe_total ?? ""} onChange={(e) => onChange("importe_total", e.target.value)} data-testid={`field-importe-${item.id}`} /></Field>
+      </div>
+      <div className="mt-3 flex items-center justify-end gap-2">
+        {item._dirty && <span className="text-xs text-amber-600 font-bold">Sin guardar</span>}
+        <button onClick={onSave} disabled={saving || !item._dirty}
+          className="px-3 py-1.5 bg-brand text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"
+          data-testid={`invoice-save-${item.id}`}>
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Guardar
+        </button>
+      </div>
+      <style>{`.ocr-input{width:100%;height:38px;padding:0 10px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;font-size:13px;}.ocr-input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.1);}`}</style>
+    </div>
+  );
+}
+
+/* ============================================================ */
+/* Etapa 4 — Declaración jurada                                  */
+/* ============================================================ */
+function DeclaracionEtapa({ data, totals, onAccepted }) {
+  const [accepted, setAccepted] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const already = data.declaracion;
+
+  const empresa = data.user?.empresa || "[RAZÓN SOCIAL]";
+  const repre = data.user?.contacto || data.user?.name || "[REPRESENTANTE LEGAL]";
+
+  const canSign = totals.byEtapa.empresa.done === totals.byEtapa.empresa.total
+               && totals.byEtapa.flota.done === totals.byEtapa.flota.total
+               && totals.byEtapa.combustible.done > 0;
+
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try {
+      await api.post("/subsidio/declaracion", { accepted: true, representante: repre });
+      onAccepted?.();
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      setError(typeof d === "string" ? d : (d?.message || "Error al firmar"));
+    } finally { setBusy(false); }
+  };
+
+  if (already) {
+    return (
+      <div>
+        <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada" subtitle="Firmada electrónicamente ✓" />
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-sm">
+          <div className="flex items-center gap-2 mb-2"><CheckCircle2 className="w-5 h-5 text-emerald-700" /><strong className="font-cabinet text-base">Declaración firmada</strong></div>
+          <ul className="space-y-1 text-emerald-900">
+            <li><strong>Fecha y hora:</strong> {new Date(already.accepted_at).toLocaleString("es-PE")}</li>
+            <li><strong>Empresa:</strong> {already.empresa} (RUC {already.ruc})</li>
+            <li><strong>Representante:</strong> {already.representante}</li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada" subtitle="Antes de presentar tu solicitud a la ATU, necesitamos que confirmes que tu información es veraz" />
+
+      {!canSign && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900 flex gap-2 mb-4">
+          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <div>Completa primero las etapas 1, 2 y 3 (al menos una factura confirmada) para poder firmar.</div>
+        </div>
+      )}
+
+      <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5">
+        <h4 className="font-cabinet font-bold text-base mb-2">Declaración jurada de veracidad</h4>
+        <p className="text-sm text-neutral-700 mb-3">
+          Antes de presentar tu solicitud a la ATU, necesitamos que confirmes que tu información es veraz. La solicitud
+          del subsidio tiene carácter de declaración jurada ante el Estado.
+        </p>
+        <blockquote className="bg-white border-l-4 border-brand rounded-r-lg p-4 text-sm text-neutral-700 italic mb-4">
+          Declaro bajo juramento que la información, documentos y comprobantes presentados para acceder al subsidio
+          económico del Decreto de Urgencia N.° 004-2026 son verdaderos, exactos y corresponden a unidades con
+          habilitación vigente. Reconozco que la presentación de información falsa, adulterada o inexacta genera la
+          pérdida automática del subsidio, sin perjuicio de las responsabilidades administrativas, civiles y penales
+          que correspondan.
+        </blockquote>
+
+        <label className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border ${accepted ? "bg-brand/5 border-brand" : "bg-white border-neutral-300"} ${!canSign ? "opacity-50 cursor-not-allowed" : "hover:bg-brand/5"}`}>
+          <input type="checkbox" checked={accepted} disabled={!canSign}
+            onChange={(e) => setAccepted(e.target.checked)} className="mt-1 w-5 h-5 accent-violet-600"
+            data-testid="declaracion-checkbox" />
+          <span className="text-sm text-neutral-800">
+            He leído y acepto la declaración de veracidad. Acepto en nombre de <strong>{empresa}</strong>, representada por <strong>{repre}</strong>.
+          </span>
+        </label>
+        <p className="text-[11px] text-neutral-500 mt-2">
+          Al marcar esta casilla, tu aceptación queda registrada con fecha, hora y usuario. Esto reemplaza la firma física
+          para efectos de tu gestión con Enered.
+        </p>
+
+        {error && <div className="mt-3 bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm" data-testid="declaracion-error">{error}</div>}
+
+        <div className="mt-4 flex items-center justify-end">
+          <button onClick={submit} disabled={!accepted || !canSign || busy}
+            className="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg flex items-center gap-2 disabled:opacity-50"
+            data-testid="declaracion-submit">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            Firmar y enviar a la ATU
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================ */
+/* Etapa 5 — Envío exitoso                                       */
+/* ============================================================ */
+function EnvioEtapa({ declaracion, data, navigate }) {
+  if (!declaracion) {
+    return (
+      <div className="text-center py-10">
+        <Lock className="w-10 h-10 text-neutral-300 mx-auto mb-3" />
+        <p className="text-sm text-neutral-500">Esta etapa se desbloquea al firmar la declaración jurada (Etapa 4).</p>
+      </div>
+    );
+  }
+  const expedNo = `DU-2026-${declaracion.id.slice(0, 8).toUpperCase()}`;
+  return (
+    <div data-testid="envio-success">
+      <EtapaHeader n={5} icon={Send} title="Envío de documentos exitoso a la ATU" subtitle="Tu expediente ya está en revisión" />
+
+      <div className="bg-gradient-to-br from-emerald-50 via-emerald-50 to-brand/10 border border-emerald-200 rounded-2xl p-8 text-center">
+        <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center mb-4">
+          <CheckCircle2 className="w-10 h-10" />
+        </div>
+        <h3 className="font-cabinet text-2xl font-bold mb-1">¡Envío exitoso!</h3>
+        <p className="text-sm text-neutral-600 mb-6 max-w-md mx-auto">
+          Tu expediente para el subsidio DU 004-2026 fue registrado correctamente y será presentado ante la ATU.
+        </p>
+        <div className="inline-flex flex-col items-start gap-2 bg-white border border-emerald-200 rounded-xl p-4 text-sm text-left">
+          <div className="flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /><strong>N° de expediente:</strong> <code className="font-mono">{expedNo}</code></div>
+          <div><strong>Empresa:</strong> {declaracion.empresa} (RUC {declaracion.ruc})</div>
+          <div><strong>Representante:</strong> {declaracion.representante}</div>
+          <div><strong>Fecha de envío:</strong> {new Date(declaracion.accepted_at).toLocaleString("es-PE")}</div>
+        </div>
+
+        <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
+          <button onClick={() => navigate("/dashboard")} className="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg flex items-center gap-2" data-testid="envio-dashboard">
+            <PartyPopper className="w-4 h-4" /> Ir al dashboard
+          </button>
+          <button onClick={() => navigate("/flotas")} className="px-5 py-2.5 border border-neutral-300 bg-white font-bold rounded-lg hover:bg-neutral-50" data-testid="envio-combustible">
+            Ver mis consumos →
+          </button>
+        </div>
+      </div>
+
+      <p className="text-xs text-neutral-500 mt-4 text-center">
+        Te avisaremos por correo cuando la ATU procese tu solicitud. Mientras tanto, puedes seguir subiendo facturas para sumar al subsidio.
+      </p>
+    </div>
+  );
+}
+
+/* ============================================================ */
+/* UI helpers compartidos                                        */
+/* ============================================================ */
+function EtapaHeader({ n, icon: Ic, title, subtitle, inline }) {
+  return (
+    <div className={`flex items-center gap-3 ${inline ? "" : "mb-5"}`}>
+      <span className="w-10 h-10 rounded-lg bg-brand/10 text-brand flex items-center justify-center"><Ic className="w-5 h-5" /></span>
+      <div>
+        <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Etapa 0{n}</span>
+        <h3 className="font-cabinet text-xl font-bold">{title}</h3>
+        <p className="text-xs text-neutral-500">{subtitle}</p>
+      </div>
+    </div>
+  );
+}
+
+function DocItem({ item, onChange, hint, accept, acceptLabel }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true); setErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("categoria", item.categoria);
+      if (item.placa) fd.append("placa", item.placa);
+      await api.post("/subsidio/documents", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      onChange?.();
+    } catch (e2) {
+      setErr(e2?.response?.data?.detail || "Error al subir");
+    } finally { setBusy(false); }
+  };
+  const handleDelete = async (docId) => {
+    if (!window.confirm("¿Eliminar este documento?")) return;
+    setBusy(true);
+    try { await api.delete(`/subsidio/documents/${docId}`); onChange?.(); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+      <div className="flex items-start gap-3">
+        <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${item.uploaded ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+          {item.uploaded ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-neutral-900 text-sm">{item.label}</div>
+          {hint && <div className="text-xs text-neutral-500 mt-0.5">{hint}</div>}
+          <div className="text-[10px] text-neutral-400 mt-0.5 uppercase tracking-wider font-bold">Acepta: {acceptLabel}</div>
+          {item.files?.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {item.files.map((f) => (
+                <li key={f.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 text-xs">
+                  <span className="truncate flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-neutral-400" />{f.filename}</span>
+                  <button onClick={() => handleDelete(f.id)} disabled={busy} className="text-neutral-400 hover:text-red-500" aria-label="Eliminar"><Trash2 className="w-3.5 h-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {err && <div className="mt-2 text-xs text-red-600">{err}</div>}
+        </div>
+        <label className="px-3 py-1.5 border border-neutral-300 bg-white rounded-lg text-xs font-bold cursor-pointer hover:bg-neutral-50 flex items-center gap-1.5">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+          {item.uploaded ? "Reemplazar" : "Subir"}
+          <input type="file" hidden onChange={handleUpload} accept={accept} />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children, full }) {
+  return (
+    <div className={full ? "col-span-2 md:col-span-2" : ""}>
+      <label className="block text-[10px] font-bold text-neutral-700 uppercase tracking-wider mb-1">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+const FIELD_CSS = `.field-input{width:100%;height:42px;padding:0 12px;border:1px solid #d4d4d4;border-radius:10px;background:#fff;font-size:14px;}.field-input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.1);}`;
+const nz = (v) => (v === "" || v == null ? null : Number(v));
