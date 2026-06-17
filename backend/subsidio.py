@@ -660,7 +660,7 @@ async def invoices_upload(
     """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
     guarda el archivo en storage y un draft en consumos_subsidio (status=draft).
     Devuelve la lista con los datos extraídos para verificación."""
-    from services.invoice_ocr import extract_invoice_data
+    from services.pdf_invoice_reader import extract_invoice_data
 
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
