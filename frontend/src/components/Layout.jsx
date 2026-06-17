@@ -20,21 +20,13 @@ const ICON_BASE = "/assets/icons";
 const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contabilidad", "cliente_subsidio"];
 
 const MENU = [
-  { to: "/subsidio/documentos", label: "Mi Expediente DU 004-2026", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
+  { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
-  { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica", badge: "NUEVO", badgeColor: "amber"},
-  { to: "/monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo", badge: "PRÓXIMO", badgeColor: "cyan" },
   { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
   { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
-  { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ALL_REGULAR_ROLES, testid: "nav-gestion-gastos", badge: "NUEVO", badgeColor: "amber", disabled: true },
-  { to: "/calendario", label: "Calendario", icon: Calendar, roles: ALL_REGULAR_ROLES, testid: "nav-calendario", badge: "NUEVO", badgeColor: "amber" },
-  { to: "/tickets", label: "Tickets", icon: Ticket, roles: ALL_REGULAR_ROLES, testid: "nav-tickets", badge: "NUEVO", badgeColor: "amber" },
   { to: "/mantenimiento", label: "Mantenimiento", iconImg: `${ICON_BASE}/mantenimiento.png`, icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
-  { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist", badge: "NUEVO", badgeColor: "amber"},
   { to: "/infracciones", label: "Infracciones", iconImg: `${ICON_BASE}/infracciones.png`, icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
-  { to: "/vehiculos", label: "Vehículos", icon: Car, roles: ALL_REGULAR_ROLES, testid: "nav-vehiculos", badge: "NUEVO", badgeColor: "amber" },
   { to: "/neumaticos", label: "Neumáticos", iconImg: `${ICON_BASE}/neumaticos.png`, icon: Disc, roles: ALL_REGULAR_ROLES, testid: "nav-neumaticos" },
-  { to: "/viajes", label: "Viajes", icon: Route, roles: ALL_REGULAR_ROLES, testid: "nav-viajes", badge: "NUEVO", badgeColor: "amber" },
   { to: "/documentacion", label: "Documentación", iconImg: `${ICON_BASE}/documentacion.png`, icon: FileText, roles: ALL_REGULAR_ROLES, testid: "nav-documentacion" },
   { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ALL_REGULAR_ROLES, testid: "nav-soporte" },
 ];
