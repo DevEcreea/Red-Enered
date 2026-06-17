@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { Loader2, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, Globe } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import EmayFooter from "../components/EmayFooter";
 
+const HERO_IMG = "https://customer-assets.emergentagent.com/job_ui-update-11/artifacts/mbmk49w0_WhatsApp%20Image%202026-06-10%20at%206.26.35%20PM.jpeg";
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
 
 export default function RegistroSubsidio() {
@@ -92,26 +94,49 @@ export default function RegistroSubsidio() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 py-10 px-4">
-      <div className="max-w-2xl mx-auto">
-        <img src={LOGO_IMG} alt="ENERED" className="h-10 mb-6 mx-auto" />
+    <div className="min-h-screen flex flex-col lg:flex-row bg-white" data-testid="registro-subsidio">
+      {/* Left - Hero image panel (idéntico al Login) */}
+      <div
+        className="hidden lg:block lg:w-1/2 xl:w-[55%] bg-black bg-cover bg-center"
+        style={{ backgroundImage: `url(${HERO_IMG})` }}
+        data-testid="registro-hero"
+      />
 
-        <div className="bg-gradient-to-br from-brand to-brand-hover text-white rounded-2xl p-6 mb-6 shadow-md">
-          <div className="text-xs uppercase tracking-widest opacity-80">Tu subsidio recuperable</div>
-          <div className="font-cabinet text-5xl font-bold mt-1">
-            S/ {Number(calc.subsidio_estimado || 0).toLocaleString("es-PE", { maximumFractionDigits: 0 })}
+      {/* Mobile hero (shorter) */}
+      <div
+        className="lg:hidden h-56 bg-cover bg-center"
+        style={{ backgroundImage: `url(${HERO_IMG})` }}
+      />
+
+      {/* Right - Form panel */}
+      <div className="flex-1 flex flex-col justify-between px-6 py-8 md:px-12 md:py-10 lg:px-16 xl:px-24 bg-white">
+        <div className="w-full max-w-md mx-auto flex-1 flex flex-col justify-center">
+          {/* Logo */}
+          <div className="mb-8">
+            <img src={LOGO_IMG} alt="ENERED" className="h-10 md:h-12 w-auto" />
           </div>
-          <div className="text-sm opacity-90 mt-1">DU 004-2026 · Junio + Julio 2026</div>
-        </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 md:p-8">
-          <h1 className="font-cabinet text-3xl font-bold tracking-tight">Crea tu cuenta</h1>
-          <p className="text-neutral-600 text-sm mt-2">Para continuar con el expediente DU 004-2026 necesitamos los datos de tu empresa.</p>
+          {/* Subsidio recuperable card */}
+          <div className="bg-gradient-to-br from-brand to-brand-hover text-white rounded-2xl p-5 mb-7 shadow-md">
+            <div className="text-[10px] uppercase tracking-widest opacity-80 font-bold">Tu subsidio recuperable</div>
+            <div className="font-cabinet text-4xl font-bold mt-1 leading-tight">
+              S/ {Number(calc.subsidio_estimado || 0).toLocaleString("es-PE", { maximumFractionDigits: 0 })}
+            </div>
+            <div className="text-xs opacity-90 mt-1">DU 004-2026 · Junio + Julio 2026</div>
+          </div>
 
-          <form onSubmit={submit} className="mt-6 space-y-4" data-testid="registro-subsidio-form">
+          {/* Title */}
+          <h1 className="text-brand text-3xl md:text-4xl font-bold font-cabinet mb-2" style={{ letterSpacing: "-0.01em" }}>
+            Crea tu cuenta
+          </h1>
+          <p className="text-neutral-600 text-sm mb-7">
+            Para continuar con el expediente DU 004-2026 necesitamos los datos de tu empresa.
+          </p>
+
+          <form onSubmit={submit} className="space-y-4" data-testid="registro-subsidio-form">
             <Field label="RUC (11 dígitos)">
               <input
-                className="field-input"
+                className="ru-input"
                 placeholder="20123456789"
                 maxLength={11}
                 value={form.ruc}
@@ -120,38 +145,38 @@ export default function RegistroSubsidio() {
               />
             </Field>
             <Field label="Razón social">
-              <input className="field-input" value={form.razon_social}
+              <input className="ru-input" value={form.razon_social}
                 onChange={(e) => upd("razon_social", e.target.value)}
                 data-testid="reg-razon" placeholder="Transportes Juan SAC" />
             </Field>
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Nombre de contacto">
-                <input className="field-input" value={form.contacto}
+                <input className="ru-input" value={form.contacto}
                   onChange={(e) => upd("contacto", e.target.value)} data-testid="reg-contacto" />
               </Field>
               <Field label="Teléfono">
-                <input className="field-input" value={form.telefono}
+                <input className="ru-input" value={form.telefono}
                   onChange={(e) => upd("telefono", e.target.value)} data-testid="reg-telefono"
                   placeholder="+51 987 654 321" />
               </Field>
             </div>
             <Field label="Email">
-              <input type="email" className="field-input" value={form.email}
+              <input type="email" className="ru-input" value={form.email}
                 onChange={(e) => upd("email", e.target.value.trim())} data-testid="reg-email" />
             </Field>
             <div className="grid sm:grid-cols-2 gap-4">
               <Field label="Contraseña (mín. 8)">
-                <input type="password" className="field-input" value={form.password}
+                <input type="password" className="ru-input" value={form.password}
                   onChange={(e) => upd("password", e.target.value)} data-testid="reg-password" minLength={8} />
               </Field>
               <Field label="Repite la contraseña">
-                <input type="password" className="field-input" value={form.password2}
+                <input type="password" className="ru-input" value={form.password2}
                   onChange={(e) => upd("password2", e.target.value)} data-testid="reg-password2" minLength={8} />
               </Field>
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm flex gap-2 items-start">
+              <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-sm flex gap-2 items-start" data-testid="reg-error">
                 <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /> {error}
               </div>
             )}
@@ -159,28 +184,61 @@ export default function RegistroSubsidio() {
             <button
               type="submit"
               disabled={!valid || submitting}
-              className="w-full h-13 py-4 bg-brand hover:bg-brand-hover active:bg-brand-active text-white font-bold rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full h-14 bg-brand hover:bg-brand-hover active:bg-brand-active text-white font-bold rounded-2xl text-base flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md disabled:opacity-60"
               data-testid="reg-submit"
             >
               {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
               {submitting ? "Creando cuenta..." : "Crear cuenta y continuar"}
             </button>
 
-            <p className="text-center text-xs text-neutral-500 pt-2">
+            <p className="text-center text-xs text-neutral-500 pt-1">
               Al continuar aceptas los Términos y la Política de Privacidad de Enered.
             </p>
+
+            <div className="text-center pt-2">
+              <span className="text-sm text-neutral-500">¿Ya tienes cuenta? </span>
+              <Link to="/login" className="text-sm font-medium text-brand hover:text-brand-hover hover:underline">
+                Inicia sesión
+              </Link>
+            </div>
           </form>
+
+          {/* Contact block */}
+          <div className="mt-10 pt-8 border-t border-neutral-100 text-sm text-neutral-700 leading-relaxed">
+            <p className="font-bold text-neutral-900 mb-2">¿Necesitas ayuda?</p>
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
+                <Globe className="w-4 h-4 text-white" strokeWidth={2} />
+              </div>
+              <div className="flex-1 text-xs md:text-sm text-neutral-700 pt-1.5">
+                (044) 659-3519 | +51 972 228 870 | <a href="mailto:hola@enered.pe" className="hover:text-brand">hola@enered.pe</a>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="text-center mt-6 text-sm text-neutral-500">
-          ¿Ya tienes cuenta?{" "}
-          <Link to="/login" className="text-brand font-bold hover:underline">Inicia sesión</Link>
+        {/* Footer ENERED */}
+        <div className="w-full max-w-md mx-auto pt-8 space-y-3 text-center">
+          <div className="text-xs text-neutral-600">
+            <a href="#" className="hover:text-brand">Asistencia técnica</a>
+            <span className="mx-2">•</span>
+            <a href="#" className="hover:text-brand">Términos y condiciones</a>
+            <span className="mx-2">•</span>
+            <a href="#" className="hover:text-brand">Avisos de copyright</a>
+          </div>
+          <div className="text-xs text-neutral-500">
+            <a href="https://www.energix.pe" target="_blank" rel="noreferrer" className="hover:text-brand">www.energix.pe</a>
+          </div>
+          <div className="text-[11px] text-neutral-400 pt-2 border-t border-neutral-100">
+            ENERED | Soluciones en Energías | Copyright © {new Date().getFullYear()} | Energix Perú | Todos los derechos reservados.
+          </div>
+          <EmayFooter variant="card" />
         </div>
       </div>
 
       <style>{`
-        .field-input { width:100%; height:48px; padding:0 16px; border:1px solid #d4d4d4; border-radius:12px; background:#fff; transition:all .15s; font-size:15px; }
-        .field-input:focus { outline:none; border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,0.1); }
+        .ru-input { width:100%; height:48px; padding:0 16px; border:1px solid #d4d4d4; border-radius:12px; background:#fff; transition:all .15s; font-size:15px; }
+        .ru-input:focus { outline:none; border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,0.1); }
       `}</style>
     </div>
   );
