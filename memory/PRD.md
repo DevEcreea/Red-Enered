@@ -75,6 +75,21 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 
 
 
+## Subsidio DU 004-2026 — Iter 2: 5 Etapas + Declaración Jurada (Feb 2026)
+- **Mi Flota rediseñada por 2da vez (definitiva)**: ahora son **5 etapas** con **una sola barra de progreso continua** en lugar de 3 capas con barras separadas.
+  1. **Etapa 1 – Empresa** (Solo PDF): Ficha RUC + Resolución + DNI + Cuenta bancaria con **nota de seguridad bancaria 🔒**.
+  2. **Etapa 2 – Flota** (PDF/PNG/JPG): habilitación + propiedad por placa.
+  3. **Etapa 3 – Combustible** (PDF/PNG/JPG): **OCR inline** dentro de la misma pantalla (no más redirect a /subsidio/verificar). Carga libre sin meses. Botones "Adjuntar más" / "Enviar reporte". Si OCR falla, badge rojo + edición manual de campos antes de confirmar.
+  4. **Etapa 4 – Declaración Jurada**: texto legal exacto del DU 004-2026 + checkbox. Habilitada solo cuando etapas 1+2+3 al 100%. Registra `accepted_at + user + IP + user_agent`.
+  5. **Etapa 5 – Envío exitoso**: confirmación read-only con N° de expediente, empresa, representante y fecha.
+- **Validación MIME por etapa** en `POST /api/subsidio/documents`: 400 si formato no coincide (PDF-only para empresa).
+- **Endpoints nuevos**:
+  - `POST /api/subsidio/declaracion` — firma con guards (facturas confirmadas, docs empresa/flota completos). Cambia `expediente_status` a `submitted`.
+  - `GET /api/subsidio/declaracion` — consulta estado.
+- **SubsidioGate** ahora acepta `expediente_status` en {`confirmed`, `submitted`} → `/flotas` se desbloquea al firmar la declaración.
+- **Colección nueva**: `subsidio_declaraciones`.
+- **Tests**: 16/16 nuevos en `/app/backend/tests/test_subsidio_etapas.py` (MIME, guards, firma, regresión admin).
+
 ## Subsidio DU 004-2026 — Updates (Feb 2026, sesión actual)
 - **Renombrado "Mi Expediente DU 004-2026" → "Mi Flota"** (Layout.jsx). Badge "DU 004" se mantiene.
 - **Removed "NUEVO" y "PRÓXIMO" badges** del sidebar.
