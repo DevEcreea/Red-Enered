@@ -18,7 +18,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://ui-update-11.preview.emergentagent.com".rstrip("/")
+BASE_URL = "https://expediente-verificar.preview.emergentagent.com".rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN = ("admin@enered.com", "admin123")
