@@ -95,6 +95,7 @@ def user_public(u: dict) -> dict:
         "role": u["role"],
         "empresa": u.get("empresa"),
         "created_at": u.get("created_at"),
+        "documentos_completos": u.get("documentos_completos", True),
     }
 
 
@@ -2319,6 +2320,14 @@ async def infracciones_dashboard(req: Request):
     }
 
 app.include_router(api)
+
+# ============================================================================
+# SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
+# ============================================================================
+from subsidio import subsidio_router, _set_db as _set_subsidio_db
+_set_subsidio_db(db)
+app.include_router(subsidio_router)
+
 
 # CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
 _origins_env = os.environ.get("CORS_ORIGINS", "")

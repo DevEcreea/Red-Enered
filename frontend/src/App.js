@@ -37,6 +37,9 @@ import Documentacion from "./pages/Documentacion";
 import Mantenimiento from "./pages/Mantenimiento";
 import Neumaticos from "./pages/Neumaticos";
 import Infracciones from "./pages/Infracciones";
+import RegistroSubsidio from "./pages/RegistroSubsidio";
+import SubsidioDocumentos from "./pages/SubsidioDocumentos";
+import SubsidioFinalizado from "./pages/SubsidioFinalizado";
 
 function Shell({ children, roles }) {
   return (
@@ -54,6 +57,9 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
+          <Route path="/subsidio/documentos" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioDocumentos /></ProtectedRoute>} />
+          <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Shell><Dashboard /></Shell>} />
           <Route path="/flotas" element={<Shell><Flotas /></Shell>} />
