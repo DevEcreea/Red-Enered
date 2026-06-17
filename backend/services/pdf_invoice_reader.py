@@ -14,10 +14,43 @@ async def extract_invoice_data(content, content_type, session_id=None):
                 text += t + "\n"
 
     fecha = None
-    m = re.search(r'(\d{2}/\d{2}/\d{4})', text)
+    m = re.search(
+        r'Fecha de (?:emisión|factura)\s+(\d{2}/\d{2}/\d{4})',
+        text,
+        re. IGNORECASE
+    )
     if m:
         fecha = m.group(1)
 
+
+    estacion = None
+
+    m = re.search(
+        r'Factura electrónica.*?\n([^\n]+)\nRUC\s+206',
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+
+    if m:
+        estacion = m.group(1).strip()
+
+    ciudad = None
+
+    ciudades = [
+        "Trujillo",
+        "Lima",
+        "Huancayo",
+        "Arequipa",
+        "Chiclayo",
+        "Piura",
+        "Cusco"
+    ]
+
+    for c in ciudades:
+        if c.lower() in text.lower():
+            ciudad = c
+            break
+        
     ruc = None
     m = re.search(r'RUC[:\s]+(\d{11})', text, re.IGNORECASE)
     if m:
@@ -56,9 +89,8 @@ async def extract_invoice_data(content, content_type, session_id=None):
     return {
         "extracted": {
             "fecha": fecha,
-            "hora": None,
-            "estacion": None,
-            "ciudad": None,
+            "estacion": estacion,
+            "ciudad": ciudad,
             "ruc_emisor": ruc,
             "placa": placa,
             "producto": producto,
