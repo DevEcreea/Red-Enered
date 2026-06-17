@@ -21,8 +21,12 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
-      navigate("/dashboard");
+      const u = await login(email, password);
+      if (u?.role === "cliente_subsidio" && !u?.documentos_completos) {
+        navigate("/subsidio/documentos");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (e2) {
       setError(formatApiError(e2.response?.data?.detail) || "Error al iniciar sesión");
     } finally {

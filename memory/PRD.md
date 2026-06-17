@@ -75,6 +75,17 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 
 
 
+## Subsidio DU 004-2026 — Updates (Feb 2026, sesión actual)
+- **Renombrado "Mi Expediente DU 004-2026" → "Mi Flota"** (Layout.jsx). Badge "DU 004" se mantiene.
+- **Removed "NUEVO" y "PRÓXIMO" badges** del sidebar.
+- **EMERGENT_LLM_KEY agregada** a `/app/backend/.env` — fix de bug crítico: OCR retornaba todos los campos vacíos porque el servicio fallaba silenciosamente al no encontrar la key.
+- **`SubsidioDocumentos.jsx` rediseñado completamente**: pasó de 3 acordeones verticales apilados a un **stepper horizontal de 3 capas** (CAPA 1 Empresa / CAPA 2 Flota / CAPA 3 Combustible) con header "Asistente de subsidio · DU 004-2026", "Paso X de N · X% completado", progress bars por capa, contenido tab-like debajo. Capa 3 ahora tiene botón `combustible-go-ocr` → `/subsidio/verificar` (en lugar de upload directo sin OCR).
+- **`Flotas.jsx` con tabs por rol**: `cliente_subsidio` ve solo "Reportes Consumo"; admin/administrador/logistica/contabilidad ven los 3 tabs (Reportes Consumo, Control Integral, Descarga tus QR).
+- **`/api/consumptions` y `/api/dashboard/filter-options` bifurcadas por rol**: `cliente_subsidio` lee de `consumos_subsidio` (status=confirmed) con mapeo a schema UPPERCASE (CANTIDAD_GL, IMPORTE_TOTAL, PLACA, FECHA, AHORRO=galones*1.5, SEMANA derivada).
+- **Login redirige `cliente_subsidio` con expediente incompleto** directo a `/subsidio/documentos`.
+- **Seed `seed_subsidio_test.py`** (idempotente) crea `cliente.subsidio@test.com` / `subsidio123` con 3 placas pre-cargadas.
+- **Tests**: 18/18 backend pass (incl. nuevo `test_subsidio_ocr_integration.py`), 12/12 frontend flows.
+
 ## Backlog / Future
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
 - **P2**: Magic-byte validation en upload de QR (rechazar payloads disfrazados)
