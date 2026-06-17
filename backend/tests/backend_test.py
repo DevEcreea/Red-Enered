@@ -18,7 +18,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://expediente-verificar.preview.emergentagent.com".rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://6b9b8be9-efd0-47fc-89da-399a4c95e0c4.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN = ("admin@enered.com", "admin123")

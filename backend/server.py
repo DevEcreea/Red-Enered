@@ -96,6 +96,7 @@ def user_public(u: dict) -> dict:
         "empresa": u.get("empresa"),
         "created_at": u.get("created_at"),
         "documentos_completos": u.get("documentos_completos", True),
+        "expediente_status": u.get("expediente_status", "confirmed"),
     }
 
 

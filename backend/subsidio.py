@@ -510,7 +510,277 @@ async def finalize(user: dict = Depends(_require_subsidio)):
         {"id": user["id"]},
         {"$set": {
             "documentos_completos": True,
+            "expediente_status": "verifying",
             "documentos_completados_at": datetime.now(timezone.utc).isoformat(),
         }}
     )
     return {"ok": True}
+
+
+# ============================================================================
+# OCR de facturas — DU 004-2026
+# ============================================================================
+class InvoiceUpdateIn(BaseModel):
+    fecha: Optional[str] = None
+    hora: Optional[str] = None
+    estacion: Optional[str] = None
+    ciudad: Optional[str] = None
+    placa: Optional[str] = None
+    producto: Optional[str] = None
+    galones: Optional[float] = None
+    precio_unitario: Optional[float] = None
+    importe_total: Optional[float] = None
+    numero_documento: Optional[str] = None
+    ruc_emisor: Optional[str] = None
+
+
+@subsidio_router.post("/subsidio/invoices/upload")
+async def invoices_upload(
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(_require_subsidio),
+):
+    """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
+    guarda el archivo en storage y un draft en consumos_subsidio (status=draft).
+    Devuelve la lista con los datos extraídos para verificación."""
+    from services.invoice_ocr import extract_invoice_data
+
+    if not files:
+        raise HTTPException(status_code=400, detail="Sin archivos")
+    if len(files) > 60:
+        raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
+
+    # Cargar placas del usuario para auto-match
+    vehicles = await db.subsidio_vehicles.find(
+        {"user_id": user["id"]}, {"_id": 0, "placa": 1}
+    ).to_list(200)
+    user_placas = {v["placa"] for v in vehicles}
+
+    results = []
+    for f in files:
+        content = await f.read()
+        if len(content) > 20 * 1024 * 1024:
+            results.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
+            continue
+        content_type = f.content_type or "application/octet-stream"
+
+        # Save raw file
+        key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
+        storage.save_object(key, content, content_type)
+
+        # OCR
+        try:
+            ocr = await extract_invoice_data(content, content_type, session_id=f"ocr-{user['id']}-{uuid.uuid4().hex[:6]}")
+            extracted = ocr["extracted"]
+            raw_resp = ocr["raw_response"]
+            ocr_ok = True
+            ocr_error = None
+        except Exception as e:
+            logger.warning(f"OCR error en {f.filename}: {e}")
+            extracted = {
+                "fecha": None, "hora": None, "estacion": None, "ciudad": None,
+                "placa": None, "producto": None, "galones": None,
+                "precio_unitario": None, "importe_total": None,
+                "numero_documento": None, "ruc_emisor": None, "confianza": 0.0,
+            }
+            raw_resp = ""
+            ocr_ok = False
+            ocr_error = str(e)[:200]
+
+        # Auto-match con flota del usuario
+        placa_match = None
+        if extracted.get("placa") and extracted["placa"] in user_placas:
+            placa_match = extracted["placa"]
+
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "empresa": user.get("empresa"),
+            "empresa_id": user.get("empresa"),
+            "calc_id": user.get("calc_id"),
+            "factura_filename": f.filename,
+            "factura_storage_key": key,
+            "factura_content_type": content_type,
+            "factura_size": len(content),
+            "raw_ocr_response": raw_resp,
+            "ocr_ok": ocr_ok,
+            "ocr_error": ocr_error,
+            "placa_match": placa_match,  # placa que coincide con flota, si la hubo
+            "status": "draft",  # draft → confirmed
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "confirmed_at": None,
+            # Campos OCR
+            "fecha": extracted.get("fecha"),
+            "hora": extracted.get("hora"),
+            "estacion": extracted.get("estacion"),
+            "ciudad": extracted.get("ciudad"),
+            "ruc_emisor": extracted.get("ruc_emisor"),
+            "placa": extracted.get("placa"),
+            "producto": extracted.get("producto"),
+            "galones": extracted.get("galones"),
+            "precio_unitario": extracted.get("precio_unitario"),
+            "importe_total": extracted.get("importe_total"),
+            "numero_documento": extracted.get("numero_documento"),
+            "confianza": extracted.get("confianza", 0.0),
+        }
+        await db.consumos_subsidio.insert_one(doc)
+        results.append({
+            "id": doc["id"],
+            "filename": f.filename,
+            "ok": ocr_ok,
+            "error": ocr_error,
+            "data": {k: v for k, v in doc.items() if k != "_id" and k != "raw_ocr_response"},
+        })
+
+    # Mark expediente as verifying
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"expediente_status": "verifying"}},
+    )
+    return {"uploaded": len(results), "items": results}
+
+
+@subsidio_router.get("/subsidio/invoices/preview")
+async def invoices_preview(user: dict = Depends(_require_subsidio)):
+    """Devuelve facturas en draft (pendientes de confirmar) del usuario."""
+    rows = await db.consumos_subsidio.find(
+        {"user_id": user["id"], "status": "draft"},
+        {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+    ).sort("created_at", -1).to_list(500)
+    # Placas registradas para mostrar dropdown de corrección
+    vehicles = await db.subsidio_vehicles.find(
+        {"user_id": user["id"]}, {"_id": 0, "placa": 1, "categoria": 1}
+    ).to_list(200)
+    return {"items": rows, "vehicles": vehicles}
+
+
+@subsidio_router.put("/subsidio/invoices/{invoice_id}")
+async def invoices_update(
+    invoice_id: str,
+    payload: InvoiceUpdateIn,
+    user: dict = Depends(_require_subsidio),
+):
+    inv = await db.consumos_subsidio.find_one(
+        {"id": invoice_id, "user_id": user["id"]}, {"_id": 0}
+    )
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if "placa" in patch and patch["placa"]:
+        patch["placa"] = patch["placa"].upper().strip()
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": patch})
+    updated = await db.consumos_subsidio.find_one(
+        {"id": invoice_id},
+        {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+    )
+    return {"ok": True, "item": updated}
+
+
+@subsidio_router.delete("/subsidio/invoices/{invoice_id}")
+async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidio)):
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user["id"]})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    try:
+        storage.delete_object(inv["factura_storage_key"])
+    except Exception:
+        pass
+    await db.consumos_subsidio.delete_one({"id": invoice_id})
+    return {"ok": True}
+
+
+@subsidio_router.post("/subsidio/invoices/confirm")
+async def invoices_confirm(user: dict = Depends(_require_subsidio)):
+    """Confirma TODAS las facturas en draft del usuario → status=confirmed.
+    Marca expediente_status=confirmed si no quedan drafts."""
+    now = datetime.now(timezone.utc).isoformat()
+    res = await db.consumos_subsidio.update_many(
+        {"user_id": user["id"], "status": "draft"},
+        {"$set": {"status": "confirmed", "confirmed_at": now}},
+    )
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"expediente_status": "confirmed"}},
+    )
+    return {"ok": True, "confirmed": res.modified_count}
+
+
+@subsidio_router.get("/subsidio/invoices/confirmed")
+async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
+    """Lista facturas confirmadas (para módulos del cliente_subsidio)."""
+    rows = await db.consumos_subsidio.find(
+        {"user_id": user["id"], "status": "confirmed"},
+        {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+    ).sort("fecha", -1).to_list(2000)
+    return rows
+
+
+@subsidio_router.get("/subsidio/dashboard-data")
+async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
+    """KPIs específicos del dashboard del cliente_subsidio (lee consumos_subsidio)."""
+    rows = await db.consumos_subsidio.find(
+        {"user_id": user["id"], "status": "confirmed"},
+        {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+    ).to_list(5000)
+
+    def _f(x):
+        try:
+            return float(x) if x not in (None, "") else 0.0
+        except Exception:
+            return 0.0
+
+    total_gal = sum(_f(r.get("galones")) for r in rows)
+    total_importe = sum(_f(r.get("importe_total")) for r in rows)
+    facturas = len(rows)
+
+    # Subsidio estimado (de la calculadora) y reconocido (a partir de galones confirmados)
+    calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
+    subsidio_estimado = float(calc.get("subsidio_estimado", 0) or 0)
+
+    # Galones confirmados / promedio mensual
+    # Agrupar por mes
+    by_month = {}
+    for r in rows:
+        f = r.get("fecha") or ""
+        ym = f[:7] if len(f) >= 7 else "sin-fecha"
+        d = by_month.setdefault(ym, {"galones": 0.0, "importe": 0.0, "facturas": 0})
+        d["galones"] += _f(r.get("galones"))
+        d["importe"] += _f(r.get("importe_total"))
+        d["facturas"] += 1
+
+    serie_mensual = [
+        {"mes": k, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "facturas": v["facturas"]}
+        for k, v in sorted(by_month.items())
+        if k != "sin-fecha"
+    ]
+
+    # Top placas
+    by_placa = {}
+    for r in rows:
+        p = r.get("placa") or "Sin placa"
+        d = by_placa.setdefault(p, {"galones": 0.0, "importe": 0.0, "facturas": 0})
+        d["galones"] += _f(r.get("galones"))
+        d["importe"] += _f(r.get("importe_total"))
+        d["facturas"] += 1
+    top_placas = sorted(
+        [{"placa": p, **{kk: round(vv, 2) if isinstance(vv, float) else vv for kk, vv in v.items()}} for p, v in by_placa.items()],
+        key=lambda x: -x["galones"],
+    )[:10]
+
+    # Subsidio reconocido: galones * (precio_pizarra - precio_enered)
+    # Como aún no tenemos pizarra/enered para el cliente subsidio, usamos un mock simple:
+    # subsidio_reconocido = subsidio_estimado * (facturas reales / facturas esperadas)
+    # Pero para una métrica más útil, devolvemos solo lo confirmado en S/.
+    return {
+        "kpis": {
+            "facturas_confirmadas": facturas,
+            "galones_confirmados": round(total_gal, 2),
+            "importe_total": round(total_importe, 2),
+            "subsidio_estimado": round(subsidio_estimado, 2),
+            "subsidio_reconocido": round(total_gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón
+            "precio_promedio": round(total_importe / total_gal, 2) if total_gal > 0 else 0,
+        },
+        "serie_mensual": serie_mensual,
+        "top_placas": top_placas,
+        "ultimas_facturas": sorted(rows, key=lambda r: r.get("fecha") or "", reverse=True)[:10],
+    }

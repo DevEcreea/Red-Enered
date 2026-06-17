@@ -34,7 +34,9 @@ export default function SubsidioDocumentos() {
     setFinalizeError(null);
     try {
       await api.post("/subsidio/finalize");
-      navigate("/subsidio/finalizado", { replace: true });
+      // Forzar refresh de auth/me para que documentos_completos quede actualizado
+      await api.get("/auth/me").catch(() => {});
+      navigate("/subsidio/verificar", { replace: true });
     } catch (e) {
       setFinalizeError(e?.response?.data?.detail || "Faltan documentos");
     } finally {
@@ -42,70 +44,55 @@ export default function SubsidioDocumentos() {
     }
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand" /></div>;
+  if (loading) return <div className="min-h-[400px] flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-brand" /></div>;
   if (!data) return null;
 
   const { calculation, ahorro_estimado, ahorro_reconocido, checklist, progress, vehicles, bank_account, can_finalize } = data;
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      {/* Header */}
-      <div className="bg-white border-b border-neutral-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <img src={LOGO_IMG} alt="ENERED" className="h-8" />
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:block text-xs text-neutral-600 text-right">
-              <div>Ahorro estimado</div>
-              <div className="font-bold text-brand text-base">S/ {Number(ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
-            </div>
-            <button onClick={logout} className="text-sm text-neutral-500 hover:text-neutral-900" data-testid="subsidio-signout">Salir</button>
+    <div className="space-y-6" data-testid="subsidio-documentos">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Mi Expediente DU 004-2026</span>
+          <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">
+            Sube los documentos de tu expediente
+          </h2>
+          <p className="text-neutral-500 mt-1 max-w-2xl text-sm">
+            Cada documento queda guardado en tu plataforma. Los de flota encienden tus indicadores y alertas de vencimiento.
+          </p>
+        </div>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Guardado automático
+        </span>
+      </div>
+
+      {/* Savings comparison */}
+      <div className="bg-white border border-brand/20 rounded-2xl p-6 shadow-sm">
+        <h3 className="font-bold text-lg flex items-center gap-2">
+          <span className="text-brand">📊</span> Tu ahorro: estimado vs. reconocido
+        </h3>
+        <div className="grid sm:grid-cols-2 gap-4 mt-4">
+          <StatCard label="Ahorro estimado (calculadora)" value={ahorro_estimado} muted />
+          <StatCard label="Ahorro reconocido (con documentos validados)" value={ahorro_reconocido} highlight />
+        </div>
+        {progress.pct < 100 && (
+          <div className="mt-4 flex gap-2 items-start text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div>El monto reconocido se confirma cuando subas y validemos todos los documentos. Te faltan <strong>{progress.total_required - progress.total_done}</strong> de <strong>{progress.total_required}</strong>.</div>
+          </div>
+        )}
+        <div className="mt-5">
+          <div className="flex justify-between text-xs font-bold text-neutral-600 uppercase tracking-widest">
+            <span>Progreso del expediente</span><span>{progress.pct}%</span>
+          </div>
+          <div className="mt-2 h-2 bg-neutral-100 rounded-full overflow-hidden">
+            <div className="h-full bg-brand transition-all duration-700" style={{ width: `${progress.pct}%` }} />
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <span className="text-xs uppercase tracking-widest font-bold text-neutral-500">Carga de documentos · Capa 2</span>
-            <h1 className="font-cabinet text-3xl sm:text-4xl font-bold tracking-tight mt-1">
-              Sube los documentos de tu expediente
-            </h1>
-            <p className="text-neutral-600 mt-2 max-w-2xl text-sm">
-              Cada documento queda guardado en tu plataforma Enered. Los de flota encienden tus indicadores y alertas de vencimiento.
-            </p>
-          </div>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold">
-            <CheckCircle2 className="w-3.5 h-3.5" /> Guardado automático
-          </span>
-        </div>
-
-        {/* Savings comparison */}
-        <div className="mt-6 bg-white border border-brand/20 rounded-2xl p-6 shadow-sm">
-          <h3 className="font-bold text-lg flex items-center gap-2">
-            <span className="text-brand">📊</span> Tu ahorro: estimado vs. reconocido
-          </h3>
-          <div className="grid sm:grid-cols-2 gap-4 mt-4">
-            <StatCard label="Ahorro estimado (calculadora)" value={ahorro_estimado} muted />
-            <StatCard label="Ahorro reconocido (con documentos validados)" value={ahorro_reconocido} highlight />
-          </div>
-          {progress.pct < 100 && (
-            <div className="mt-4 flex gap-2 items-start text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3">
-              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-              <div>El monto reconocido se confirma cuando subas y validemos todos los documentos. Te faltan <strong>{progress.total_required - progress.total_done}</strong> de <strong>{progress.total_required}</strong>.</div>
-            </div>
-          )}
-          <div className="mt-5">
-            <div className="flex justify-between text-xs font-bold text-neutral-600 uppercase tracking-widest">
-              <span>Progreso del expediente</span><span>{progress.pct}%</span>
-            </div>
-            <div className="mt-2 h-2 bg-neutral-100 rounded-full overflow-hidden">
-              <div className="h-full bg-brand transition-all duration-700" style={{ width: `${progress.pct}%` }} />
-            </div>
-          </div>
-        </div>
-
-        {/* Sections */}
-        <div className="mt-6 space-y-4">
+      {/* Sections */}
+      <div className="space-y-4">
           <Section
             n={1} id="empresa"
             open={openSection === "empresa"}
@@ -144,12 +131,12 @@ export default function SubsidioDocumentos() {
         </div>
 
         {/* Finalize */}
-        <div className="mt-8 bg-white border-2 border-brand rounded-2xl p-6 shadow-sm">
+        <div className="bg-white border-2 border-brand rounded-2xl p-6 shadow-sm">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h3 className="font-cabinet text-xl font-bold">Finalizar carga del expediente</h3>
+              <h3 className="font-cabinet text-xl font-bold">Finalizar y verificar facturas</h3>
               <p className="text-sm text-neutral-600 mt-1">
-                Cuando termines de subir todos los documentos, envía el expediente para revisión.
+                Cuando termines, pasa al paso 2 para escanear tus facturas con OCR y verificar los datos.
               </p>
             </div>
             <button
@@ -159,7 +146,7 @@ export default function SubsidioDocumentos() {
               data-testid="subsidio-finalize"
             >
               {finalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-              Finalizar carga →
+              Finalizar y verificar →
             </button>
           </div>
           {finalizeError && (
@@ -176,7 +163,6 @@ export default function SubsidioDocumentos() {
           )}
         </div>
       </div>
-    </div>
   );
 }
 

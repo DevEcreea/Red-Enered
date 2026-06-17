@@ -13,11 +13,9 @@ export default function ProtectedRoute({ children, roles }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  // Cliente subsidio: si aún no completó documentos, forzar a /subsidio/documentos
-  if (user.role === "cliente_subsidio" && !user.documentos_completos
-      && !location.pathname.startsWith("/subsidio/")) {
-    return <Navigate to="/subsidio/documentos" replace />;
-  }
+  // Cliente subsidio: si aún no completó documentos y trata de entrar a /subsidio/documentos,
+  // que pase. Si trata de entrar a /subsidio/* sin terminar, también pasa. Pero ya NO forzamos
+  // redirect duro: los módulos se gatean con <SubsidioGate>, no con redirect.
   if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
   return children;
 }

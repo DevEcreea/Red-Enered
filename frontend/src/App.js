@@ -5,9 +5,11 @@ import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
+import SubsidioGate from "./components/SubsidioGate";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
+import DashboardSubsidioView from "./pages/DashboardSubsidioView";
 import Reportes from "./pages/Reportes";
 import Facturacion from "./pages/Facturacion";
 import EstadoCuentaHistorial from "./pages/EstadoCuentaHistorial";
@@ -39,7 +41,9 @@ import Neumaticos from "./pages/Neumaticos";
 import Infracciones from "./pages/Infracciones";
 import RegistroSubsidio from "./pages/RegistroSubsidio";
 import SubsidioDocumentos from "./pages/SubsidioDocumentos";
+import SubsidioVerificar from "./pages/SubsidioVerificar";
 import SubsidioFinalizado from "./pages/SubsidioFinalizado";
+import { useAuth } from "./context/AuthContext";
 
 function Shell({ children, roles }) {
   return (
@@ -47,6 +51,24 @@ function Shell({ children, roles }) {
       <Layout>{children}</Layout>
     </ProtectedRoute>
   );
+}
+
+/** Envuelve una página dentro de Layout y la "gatea" para cliente_subsidio si no tiene expediente. */
+function Gated({ children, titulo, roles }) {
+  return (
+    <ProtectedRoute roles={roles}>
+      <Layout>
+        <SubsidioGate titulo={titulo}>{children}</SubsidioGate>
+      </Layout>
+    </ProtectedRoute>
+  );
+}
+
+/** Render distinto del Dashboard según rol. */
+function DashboardRouter() {
+  const { user } = useAuth();
+  if (user?.role === "cliente_subsidio") return <DashboardSubsidioView />;
+  return <Dashboard />;
 }
 
 function App() {
@@ -58,38 +80,40 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
-          <Route path="/subsidio/documentos" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioDocumentos /></ProtectedRoute>} />
+          {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
+          <Route path="/subsidio/documentos" element={<Shell roles={["cliente_subsidio"]}><SubsidioDocumentos /></Shell>} />
+          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Shell><Dashboard /></Shell>} />
-          <Route path="/flotas" element={<Shell><Flotas /></Shell>} />
+          {/* Dashboard: router por rol; gateado para subsidio */}
+          <Route path="/dashboard" element={<Gated titulo="Dashboard"><DashboardRouter /></Gated>} />
+          <Route path="/flotas" element={<Gated titulo="Combustible"><Flotas /></Gated>} />
           <Route path="/reportes" element={<Navigate to="/flotas" replace />} />
           <Route path="/reportes-consumo" element={<Navigate to="/flotas" replace />} />
           <Route path="/qr" element={<Navigate to="/flotas" replace />} />
           {/* Analytics BI - submódulos */}
-          {/* Analytics BI - submódulos */}
-          <Route path="/analitica" element={<Shell><AnalyticsIndex /></Shell>} />
-          <Route path="/analitica/combustible" element={<Shell><AnalyticsCombustible /></Shell>} />
-          <Route path="/analitica/ecodriving" element={<Shell><AnalyticsEcodriving /></Shell>} />
-          <Route path="/analitica/emisiones" element={<Shell><AnalyticsEmisionesCO2 /></Shell>} />
-          <Route path="/analitica/mantenimiento" element={<Shell><AnalyticsMantenimiento /></Shell>} />
-          <Route path="/analitica/neumaticos" element={<Shell><AnalyticsNeumaticos /></Shell>} />
-          <Route path="/analitica/seguridad" element={<Shell><AnalyticsSeguridadVial /></Shell>} />
-          <Route path="/analitica/checklist" element={<Shell><AnalyticsChecklist /></Shell>} />  
-          <Route path="/facturacion" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><Facturacion /></Shell>} />
-          <Route path="/facturacion/historial" element={<Shell roles={["admin_enered", "administrador", "contabilidad"]}><EstadoCuentaHistorial /></Shell>} />
+          <Route path="/analitica" element={<Gated titulo="Analytics BI"><AnalyticsIndex /></Gated>} />
+          <Route path="/analitica/combustible" element={<Gated titulo="Analytics BI"><AnalyticsCombustible /></Gated>} />
+          <Route path="/analitica/ecodriving" element={<Gated titulo="Analytics BI"><AnalyticsEcodriving /></Gated>} />
+          <Route path="/analitica/emisiones" element={<Gated titulo="Analytics BI"><AnalyticsEmisionesCO2 /></Gated>} />
+          <Route path="/analitica/mantenimiento" element={<Gated titulo="Analytics BI"><AnalyticsMantenimiento /></Gated>} />
+          <Route path="/analitica/neumaticos" element={<Gated titulo="Analytics BI"><AnalyticsNeumaticos /></Gated>} />
+          <Route path="/analitica/seguridad" element={<Gated titulo="Analytics BI"><AnalyticsSeguridadVial /></Gated>} />
+          <Route path="/analitica/checklist" element={<Gated titulo="Analytics BI"><AnalyticsChecklist /></Gated>} />
+          <Route path="/facturacion" element={<Gated titulo="Cuenta" roles={["admin_enered", "administrador", "contabilidad", "cliente_subsidio"]}><Facturacion /></Gated>} />
+          <Route path="/facturacion/historial" element={<Gated titulo="Cuenta" roles={["admin_enered", "administrador", "contabilidad", "cliente_subsidio"]}><EstadoCuentaHistorial /></Gated>} />
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
-          <Route path="/seguridad" element={<Shell><Seguridad /></Shell>} />
-          <Route path="/monitoreo" element={<Shell><Monitoreo /></Shell>} />
-          <Route path="/capacitacion" element={<Shell><Capacitacion /></Shell>} />
-          <Route path="/documentacion" element={<Shell><Documentacion /></Shell>} />
-          <Route path="/mantenimiento" element={<Shell><Mantenimiento /></Shell>} />
-          <Route path="/neumaticos" element={<Shell><Neumaticos /></Shell>} />
-          <Route path="/calendario" element={<Shell><Calendario /></Shell>} />
-          <Route path="/tickets" element={<Shell><Tickets /></Shell>} />
-          <Route path="/checklist" element={<Shell><Checklist /></Shell>} />
-          <Route path="/viajes" element={<Shell><Viajes /></Shell>} />
-          <Route path="/infracciones" element={<Shell><Infracciones /></Shell>} />
+          <Route path="/seguridad" element={<Gated titulo="Seguridad"><Seguridad /></Gated>} />
+          <Route path="/monitoreo" element={<Gated titulo="Monitoreo"><Monitoreo /></Gated>} />
+          <Route path="/capacitacion" element={<Gated titulo="Capacitación"><Capacitacion /></Gated>} />
+          <Route path="/documentacion" element={<Gated titulo="Documentación"><Documentacion /></Gated>} />
+          <Route path="/mantenimiento" element={<Gated titulo="Mantenimiento"><Mantenimiento /></Gated>} />
+          <Route path="/neumaticos" element={<Gated titulo="Neumáticos"><Neumaticos /></Gated>} />
+          <Route path="/calendario" element={<Gated titulo="Calendario"><Calendario /></Gated>} />
+          <Route path="/tickets" element={<Gated titulo="Tickets"><Tickets /></Gated>} />
+          <Route path="/checklist" element={<Gated titulo="Checklist"><Checklist /></Gated>} />
+          <Route path="/viajes" element={<Gated titulo="Viajes"><Viajes /></Gated>} />
+          <Route path="/infracciones" element={<Gated titulo="Infracciones"><Infracciones /></Gated>} />
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
