@@ -8,7 +8,6 @@ import { api } from "../lib/api";
 
 const PRODUCTOS = [
   "DIESEL B5", "DIESEL B20", "DIESEL B5 S50",
-  "GASOHOL 90", "GASOHOL 95", "GASOHOL 97", "GLP", "GNV", "OTRO",
 ];
 
 export default function SubsidioVerificar() {
