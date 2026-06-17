@@ -278,6 +278,7 @@ function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
         <Field label="Fecha" full={false}>
           <input type="date" className="ocr-input" value={item.fecha || ""}
             onChange={(e) => onChange("fecha", e.target.value)} data-testid={`field-fecha-${item.id}`} />
+          </Field>
         <Field label="Placa">
           {vehicles.length > 0 ? (
             <select className="ocr-input" value={item.placa || ""}
@@ -297,7 +298,6 @@ function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
           <input className="ocr-input" value={item.numero_documento || ""}
             onChange={(e) => onChange("numero_documento", e.target.value)} />
         </Field>
-
         <Field label="Estación">
           <input className="ocr-input" value={item.estacion || ""}
             onChange={(e) => onChange("estacion", e.target.value)} />
