@@ -61,6 +61,20 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 - Sin tabla de horarios de Terminales (eliminada por pedido del usuario).
 - **Dashboard /api/dashboard/overview**: la `linea_credito.utilizada` ahora suma facturas pendientes (saldo) + notas de despacho (consumos `ESTADO != "FACTURADO"`), alineado con `/api/account-state`. Antes solo contaba facturas no pagadas y quedaba en 0 cuando no había facturas todavía.
 
+## Subsidio DU 004-2026 (Feb 2026)
+- **Nuevo rol** `cliente_subsidio`: tiene acceso a TODOS los módulos del sidebar, pero gateados con overlay "Completa tu expediente" hasta confirmar facturas.
+- **Sidebar destacado** "Mi Expediente DU 004-2026" (primer item, badge "DU 004").
+- **OCR Gemini Vision** vía `emergentintegrations` (Emergent LLM Key, modelo `gemini-2.5-flash`): extrae fecha, hora, estación, RUC, placa, producto, galones, precio_unitario, importe_total, n° doc, ciudad de facturas de combustible (JPG/PNG/WEBP/PDF). PDFs se convierten a PNG con `pdf2image` + `poppler-utils`. Falla del OCR es graceful: el draft se crea con `ocr_ok=false` y el usuario completa manualmente.
+- **Colección nueva** `consumos_subsidio` separada de `consumos` (aislamiento estricto).
+- **Endpoints nuevos** (en `subsidio.py`): `POST /api/subsidio/invoices/upload`, `GET /api/subsidio/invoices/preview`, `PUT /api/subsidio/invoices/{id}`, `DELETE /api/subsidio/invoices/{id}`, `POST /api/subsidio/invoices/confirm`, `GET /api/subsidio/invoices/confirmed`, `GET /api/subsidio/dashboard-data`.
+- **Schema users** extendido con `documentos_completos: bool`, `expediente_status: uploading|verifying|confirmed`.
+- **Schema empresas_config** extendido con `canal_origen: directo|calculadora_du004`.
+- **Frontend nuevos componentes**: `SubsidioGate.jsx` (wrapper de gate), `DashboardSubsidioView.jsx` (KPIs exclusivos: facturas confirmadas, galones, importe, subsidio estimado/reconocido, gráficos por mes/placa), `SubsidioVerificar.jsx` (uploader + tabla editable inline + auto-match de placa con flota + confirmar masivo).
+- **Auto-match de placa**: se valida contra `subsidio_vehicles` del usuario; si OCR detecta una placa que pertenece a la flota, se marca PLACA OK. Si no, el usuario corrige manualmente con dropdown.
+- **`subsidio_reconocido` MOCKED** como `galones × 1.5` hasta tener tabla de pizarra de precios.
+
+
+
 ## Backlog / Future
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
 - **P2**: Magic-byte validation en upload de QR (rechazar payloads disfrazados)
