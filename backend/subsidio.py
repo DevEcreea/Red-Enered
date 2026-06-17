@@ -365,6 +365,10 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
         and bank is not None
     )
 
+    # Conteos de facturas (drafts y confirmadas)
+    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "draft"})
+    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "confirmed"})
+
     return {
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "_id")},
         "calculation": calc,
@@ -376,6 +380,7 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
         "progress": {"total_required": total_required, "total_done": total_done, "pct": pct},
         "can_finalize": can_finalize,
         "documentos_completos": bool(user.get("documentos_completos")),
+        "invoices": {"draft": invoices_draft, "confirmed": invoices_confirmed},
         "declaracion": await db.subsidio_declaraciones.find_one(
             {"user_id": user["id"]}, {"_id": 0}
         ),

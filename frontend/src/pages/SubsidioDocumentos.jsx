@@ -137,7 +137,7 @@ export default function SubsidioDocumentos() {
           <FlotaEtapa items={checklist.flota} vehicles={vehicles} onChange={load} />
         )}
         {activeEtapa === "combustible" && (
-          <CombustibleEtapa onAnyChange={load} />
+          <CombustibleEtapa onAnyChange={load} confirmedCountFromDashboard={data?.invoices?.confirmed ?? 0} />
         )}
         {activeEtapa === "declaracion" && (
           <DeclaracionEtapa
@@ -200,17 +200,17 @@ function calcTotals(data) {
   const empresaTot = c.empresa.length + 1;
   const flotaDone = c.flota.filter((x) => x.uploaded).length;
   const flotaTot = Math.max(c.flota.length, 1);
-  // For combustible: we count confirmed invoices (from server). Until invoices exist we treat 1 minimum target.
-  // Will be refreshed from the OCR preview load
-  const combDone = data._combustible_done ?? 0;
-  const combTot = data._combustible_total ?? 1;
+  // Combustible: contamos facturas confirmadas (drafts aún no se aceptan como completos)
+  const confirmedCount = data?.invoices?.confirmed ?? 0;
+  const combDone = confirmedCount > 0 ? 1 : 0;
+  const combTot = 1;
   const declDone = data.declaracion ? 1 : 0;
   const envDone = data.declaracion ? 1 : 0;
 
   const byEtapa = {
     empresa: { done: empresaDone, total: empresaTot, pct: pct(empresaDone, empresaTot) },
     flota: { done: flotaDone, total: flotaTot, pct: pct(flotaDone, flotaTot) },
-    combustible: { done: combDone, total: combTot, pct: pct(combDone, combTot) },
+    combustible: { done: combDone, total: combTot, pct: combDone * 100, confirmedCount },
     declaracion: { done: declDone, total: 1, pct: declDone * 100 },
     envio: { done: envDone, total: 1, pct: envDone * 100 },
   };
@@ -407,7 +407,7 @@ function FlotaEtapa({ items, vehicles, onChange }) {
 /* ============================================================ */
 /* Etapa 3 — Combustible: OCR inline (upload + draft preview + confirm) */
 /* ============================================================ */
-function CombustibleEtapa({ onAnyChange }) {
+function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -418,7 +418,7 @@ function CombustibleEtapa({ onAnyChange }) {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const fileRef = useRef(null);
-  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [confirmedList, setConfirmedList] = useState([]);
 
   const load = async () => {
     try {
@@ -428,12 +428,13 @@ function CombustibleEtapa({ onAnyChange }) {
       ]);
       setItems(prev.items || []);
       setVehicles(prev.vehicles || []);
-      setConfirmedCount((conf.items || []).length);
+      setConfirmedList(conf.items || []);
     } finally {
       setLoading(false);
     }
   };
   useEffect(() => { load(); }, []);
+  const confirmedCount = confirmedList.length || confirmedCountFromDashboard || 0;
 
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -535,10 +536,29 @@ function CombustibleEtapa({ onAnyChange }) {
       </div>
 
       {items.length === 0 ? (
-        <div className="bg-neutral-50 border-2 border-dashed border-neutral-300 rounded-xl p-8 text-center">
-          <FileText className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
-          <p className="text-sm text-neutral-500">No tienes facturas en borrador. Sube tus comprobantes arriba ⬆️</p>
-        </div>
+        confirmedCount > 0 ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5" data-testid="combustible-confirmadas">
+            <div className="flex items-center gap-2 mb-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-700" />
+              <strong className="font-cabinet text-base">Ya tienes {confirmedCount} factura(s) confirmada(s)</strong>
+            </div>
+            <p className="text-xs text-emerald-900 mb-3">Estas facturas ya alimentan tus Reportes de Consumo. Puedes adjuntar más con el botón de arriba o pasar a la Etapa 4 (Declaración Jurada).</p>
+            <ul className="space-y-1 text-xs bg-white border border-emerald-200 rounded-lg p-3 max-h-48 overflow-auto">
+              {confirmedList.slice(0, 10).map((c) => (
+                <li key={c.id} className="flex justify-between gap-2 py-1 border-b border-neutral-100 last:border-0">
+                  <span className="truncate"><FileText className="w-3 h-3 inline mr-1 text-neutral-400" />{c.factura_filename || "factura"}</span>
+                  <span className="font-mono text-neutral-600">{c.placa || "—"} · {c.galones ?? "?"} gl · S/ {c.importe_total ?? "?"}</span>
+                </li>
+              ))}
+              {confirmedList.length > 10 && <li className="text-center text-neutral-500 pt-1">… y {confirmedList.length - 10} más</li>}
+            </ul>
+          </div>
+        ) : (
+          <div className="bg-neutral-50 border-2 border-dashed border-neutral-300 rounded-xl p-8 text-center">
+            <FileText className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+            <p className="text-sm text-neutral-500">No tienes facturas en borrador. Sube tus comprobantes arriba ⬆️</p>
+          </div>
+        )
       ) : (
         <>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-900 flex gap-2 mb-3">
@@ -652,9 +672,15 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const empresa = data.user?.empresa || "[RAZÓN SOCIAL]";
   const repre = data.user?.contacto || data.user?.name || "[REPRESENTANTE LEGAL]";
 
-  const canSign = totals.byEtapa.empresa.done === totals.byEtapa.empresa.total
-               && totals.byEtapa.flota.done === totals.byEtapa.flota.total
-               && totals.byEtapa.combustible.done > 0;
+  const empresaOk = totals.byEtapa.empresa.done === totals.byEtapa.empresa.total;
+  const flotaOk = totals.byEtapa.flota.done === totals.byEtapa.flota.total;
+  const combOk = totals.byEtapa.combustible.done > 0;
+  const canSign = empresaOk && flotaOk && combOk;
+  const missingList = [
+    !empresaOk && `Etapa 1 · Empresa (${totals.byEtapa.empresa.done}/${totals.byEtapa.empresa.total})`,
+    !flotaOk && `Etapa 2 · Flota (${totals.byEtapa.flota.done}/${totals.byEtapa.flota.total})`,
+    !combOk && `Etapa 3 · al menos 1 factura confirmada`,
+  ].filter(Boolean);
 
   const submit = async () => {
     setBusy(true); setError(null);
@@ -688,9 +714,14 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
       <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada" subtitle="Antes de presentar tu solicitud a la ATU, necesitamos que confirmes que tu información es veraz" />
 
       {!canSign && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900 flex gap-2 mb-4">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900 flex gap-2 mb-4" data-testid="declaracion-missing">
           <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <div>Completa primero las etapas 1, 2 y 3 (al menos una factura confirmada) para poder firmar.</div>
+          <div>
+            <strong>Para firmar te falta completar:</strong>
+            <ul className="list-disc pl-5 mt-1">
+              {missingList.map((m, i) => <li key={i}>{m}</li>)}
+            </ul>
+          </div>
         </div>
       )}
 
