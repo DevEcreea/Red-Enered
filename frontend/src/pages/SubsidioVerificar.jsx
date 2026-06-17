@@ -71,7 +71,6 @@ export default function SubsidioVerificar() {
     setSavingId(item.id);
     try {
       const patch = {
-        fecha: item.fecha, hora: item.hora,
         estacion: item.estacion, ciudad: item.ciudad,
         ruc_emisor: item.ruc_emisor, placa: item.placa,
         producto: item.producto,
@@ -280,11 +279,6 @@ function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
         <Field label="Fecha" full={false}>
           <input type="date" className="ocr-input" value={item.fecha || ""}
             onChange={(e) => onChange("fecha", e.target.value)} data-testid={`field-fecha-${item.id}`} />
-        </Field>
-        <Field label="Hora">
-          <input type="time" className="ocr-input" value={item.hora || ""}
-            onChange={(e) => onChange("hora", e.target.value)} />
-        </Field>
         <Field label="Placa">
           {vehicles.length > 0 ? (
             <select className="ocr-input" value={item.placa || ""}
