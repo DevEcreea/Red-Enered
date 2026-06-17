@@ -17,7 +17,7 @@ const ETAPAS = [
   { id: "envio",        n: 5, label: "Envío a la ATU",           icon: Send,       short: "Envío",        hint: "Confirmación" },
 ];
 
-const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50", "GASOHOL 90", "GASOHOL 95", "GASOHOL 97", "GLP", "GNV", "OTRO"];
+const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50"];
 
 export default function SubsidioDocumentos() {
   const navigate = useNavigate();
@@ -620,7 +620,6 @@ function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
       )}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Field label="Fecha"><input type="date" className="ocr-input" value={item.fecha || ""} onChange={(e) => onChange("fecha", e.target.value)} data-testid={`field-fecha-${item.id}`} /></Field>
-        <Field label="Hora"><input type="time" className="ocr-input" value={item.hora || ""} onChange={(e) => onChange("hora", e.target.value)} /></Field>
         <Field label="Placa">
           {vehicles.length > 0 ? (
             <select className="ocr-input" value={item.placa || ""} onChange={(e) => onChange("placa", e.target.value)} data-testid={`field-placa-${item.id}`}>
@@ -799,12 +798,9 @@ function EnvioEtapa({ declaracion, data, navigate }) {
           <div><strong>Fecha de envío:</strong> {new Date(declaracion.accepted_at).toLocaleString("es-PE")}</div>
         </div>
 
-        <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
-          <button onClick={() => navigate("/dashboard")} className="px-5 py-2.5 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg flex items-center gap-2" data-testid="envio-dashboard">
-            <PartyPopper className="w-4 h-4" /> Ir al dashboard
-          </button>
-          <button onClick={() => navigate("/flotas")} className="px-5 py-2.5 border border-neutral-300 bg-white font-bold rounded-lg hover:bg-neutral-50" data-testid="envio-combustible">
-            Ver mis consumos →
+        <div className="mt-6 flex items-center justify-center">
+          <button onClick={() => navigate("/dashboard")} className="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg">
+            Gestiona el control de tu flota →
           </button>
         </div>
       </div>
