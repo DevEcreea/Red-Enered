@@ -112,6 +112,7 @@ export default function SubsidioVerificar() {
     try {
       await api.post("/subsidio/invoices/confirm");
       await api.get("/auth/me").catch(() => {});
+      // Forzar refresh para que el AuthProvider levante el nuevo expediente_status
       window.location.assign("/dashboard");
     } catch (e) {
       setError(e?.response?.data?.detail || "Error al confirmar");

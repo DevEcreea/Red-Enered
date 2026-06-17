@@ -2379,7 +2379,13 @@ async def seed_demo_data():
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
 
-    demo_users = []
+    demo_users = [
+        ("administrador@lima.com", "demo123", "Administrador Lima", "administrador", "TRANSPORTES LIMA SAC"),
+        ("logistica@lima.com", "demo123", "Logística Lima", "logistica", "TRANSPORTES LIMA SAC"),
+        ("contabilidad@lima.com", "demo123", "Contabilidad Lima", "contabilidad", "TRANSPORTES LIMA SAC"),
+        ("administrador@andina.com", "demo123", "Administrador Andina", "administrador", "LOGISTICA ANDINA SA"),
+        ("administrador@cargo.com", "demo123", "Administrador Cargo", "administrador", "CARGO PERU EIRL"),
+    ]
     for email, pwd, name, role, empresa in demo_users:
         if not await db.users.find_one({"email": email}):
             await db.users.insert_one({
