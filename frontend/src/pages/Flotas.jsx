@@ -5,11 +5,12 @@ import ReportesConsumo from "./ReportesConsumo";
 import QRDescarga from "./QRDescarga";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
+import { useAuth } from "../context/AuthContext";
 
-const TABS = [
-  { id: "consumo", label: "Reportes Consumo", icon: FileBarChart, Component: ReportesConsumo, testid: "tab-reportes-consumo" },
-  { id: "control", label: "Control Integral", icon: ClipboardList, Component: ControlIntegral, testid: "tab-control-integral" },
-  { id: "qr", label: "Descarga tus QR", icon: QrCode, Component: QRDescarga, testid: "tab-qr" },
+const ALL_TABS = [
+  { id: "consumo", label: "Reportes Consumo", icon: FileBarChart, Component: ReportesConsumo, testid: "tab-reportes-consumo", roles: ["admin_enered", "administrador", "logistica", "contabilidad", "cliente_subsidio"] },
+  { id: "control", label: "Control Integral", icon: ClipboardList, Component: ControlIntegral, testid: "tab-control-integral", roles: ["admin_enered", "administrador", "logistica", "contabilidad"] },
+  { id: "qr",      label: "Descarga tus QR",  icon: QrCode,       Component: QRDescarga,      testid: "tab-qr",                roles: ["admin_enered", "administrador", "logistica", "contabilidad"] },
 ];
 
 function SmallKpi({ label, value, accent, icon: Icon }) {
@@ -32,7 +33,9 @@ function SmallKpi({ label, value, accent, icon: Icon }) {
 }
 
 export default function Flotas() {
-  const [active, setActive] = useState("consumo");
+  const { user } = useAuth();
+  const TABS = useMemo(() => ALL_TABS.filter((t) => !user?.role || t.roles.includes(user.role)), [user]);
+  const [active, setActive] = useState(TABS[0]?.id || "consumo");
   const Current = TABS.find((t) => t.id === active)?.Component || ReportesConsumo;
 
   const [rows, setRows] = useState([]);

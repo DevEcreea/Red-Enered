@@ -15,6 +15,7 @@
   - Flota pre-cargada: ABC-123 (N2), DEF-456 (N2), GHI-789 (N3)
   - Estado inicial: `expediente_status = uploading`, `documentos_completos = false`
   - Para "desbloquear" módulos: subir facturas → /subsidio/verificar → confirmar todas
+  - Re-seed: `cd /app/backend && python seed_subsidio_test.py` (idempotente)
 
 ## Production (Render — to be set in env vars on first deploy)
 - **Admin email**: `admin@enered.com`

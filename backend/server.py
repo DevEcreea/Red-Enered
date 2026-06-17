@@ -352,6 +352,41 @@ def tenant_filter(user: dict) -> dict:
     return {"EMPRESA": user.get("empresa")}
 
 
+def _subsidio_row_to_consumption(r: dict) -> dict:
+    """Map consumos_subsidio doc → schema esperado por el frontend (UPPERCASE keys)."""
+    gal = float(r.get("galones") or 0)
+    imp = float(r.get("importe_total") or 0)
+    pre = float(r.get("precio_unitario") or 0)
+    fecha = r.get("fecha") or ""
+    # Semana ISO desde fecha
+    semana = ""
+    try:
+        from datetime import date as _date
+        y, m, d = (int(x) for x in fecha[:10].split("-"))
+        wk = _date(y, m, d).isocalendar()
+        semana = f"{wk.year}-W{wk.week:02d}"
+    except Exception:
+        pass
+    return {
+        "EMPRESA": r.get("empresa") or "",
+        "FECHA": fecha,
+        "HORA": r.get("hora") or "",
+        "PLACA": r.get("placa") or "",
+        "CIUDAD": r.get("ciudad") or "",
+        "ESTACION": r.get("estacion") or "",
+        "PRODUCTO": r.get("producto") or "",
+        "CANTIDAD_GL": gal,
+        "PRECIO_UNITARIO": pre,
+        "IMPORTE_TOTAL": imp,
+        "AHORRO": round(gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón (alineado con dashboard subsidio)
+        "SEMANA": semana,
+        "RUC_EMISOR": r.get("ruc_emisor") or "",
+        "NUMERO_DOCUMENTO": r.get("numero_documento") or "",
+        "ESTADO": "FACTURADO",
+        "_origen": "subsidio",
+    }
+
+
 @api.get("/consumptions")
 async def list_consumptions(
     user: dict = Depends(get_current_user),
@@ -365,6 +400,25 @@ async def list_consumptions(
     semana: Optional[str] = None,
     limit: int = 2000,
 ):
+    # cliente_subsidio: leer de consumos_subsidio confirmados y mapear al schema /consumptions
+    if user.get("role") == "cliente_subsidio":
+        raw = await db.consumos_subsidio.find(
+            {"user_id": user["id"], "status": "confirmed"},
+            {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+        ).sort("fecha", -1).to_list(limit)
+        mapped = [_subsidio_row_to_consumption(r) for r in raw]
+        # Filtros opcionales
+        def keep(row):
+            if fecha_desde and (row["FECHA"] or "") < fecha_desde: return False
+            if fecha_hasta and (row["FECHA"] or "") > fecha_hasta: return False
+            if placa and row["PLACA"] != placa: return False
+            if ciudad and row["CIUDAD"] != ciudad: return False
+            if estacion and row["ESTACION"] != estacion: return False
+            if producto and row["PRODUCTO"] != producto: return False
+            if semana and row["SEMANA"] != semana: return False
+            return True
+        return [r for r in mapped if keep(r)]
+
     q = tenant_filter(user)
     if empresa and user["role"] == "admin_enered":
         q["EMPRESA"] = empresa
@@ -388,6 +442,30 @@ async def list_consumptions(
 
 @api.get("/dashboard/filter-options")
 async def dashboard_filter_options(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    # cliente_subsidio: opciones desde consumos_subsidio confirmados
+    if user.get("role") == "cliente_subsidio":
+        raw = await db.consumos_subsidio.find(
+            {"user_id": user["id"], "status": "confirmed"},
+            {"_id": 0, "placa": 1, "estacion": 1, "producto": 1, "fecha": 1},
+        ).to_list(100000)
+        from datetime import date as _date
+        placas, estaciones, productos, semanas = set(), set(), set(), set()
+        for r in raw:
+            if r.get("placa"): placas.add(r["placa"])
+            if r.get("estacion"): estaciones.add(r["estacion"])
+            if r.get("producto"): productos.add(r["producto"])
+            f = (r.get("fecha") or "")[:10]
+            try:
+                y, m, d = (int(x) for x in f.split("-"))
+                wk = _date(y, m, d).isocalendar()
+                semanas.add(f"{wk.year}-W{wk.week:02d}")
+            except Exception:
+                pass
+        return {
+            "placas": sorted(placas), "semanas": sorted(semanas),
+            "estaciones": sorted(estaciones), "productos": sorted(productos),
+        }
+
     q = tenant_filter(user)
     if empresa and user["role"] == "admin_enered":
         q["EMPRESA"] = empresa
