@@ -8,6 +8,7 @@ import os
 import io
 import uuid
 import logging
+import httpx
 from datetime import datetime, timezone
 from typing import List, Optional, Literal
 
@@ -202,6 +203,46 @@ async def get_calculation(calc_id: str):
 # ============================================================================
 # PUBLIC: Self-register from calculator
 # ============================================================================
+@subsidio_router.get("/sunat/ruc/{ruc}")
+async def lookup_ruc(ruc: str):
+    """Consulta pública SUNAT vía api.apis.net.pe (gratuita, sin token).
+    Devuelve razon_social y estado del contribuyente para autocompletar formularios.
+    """
+    ruc = (ruc or "").strip()
+    if not ruc.isdigit() or len(ruc) != 11:
+        raise HTTPException(status_code=400, detail="RUC inválido: deben ser 11 dígitos numéricos")
+
+    url = f"https://api.apis.net.pe/v1/ruc?numero={ruc}"
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(url, headers={"Referer": "https://enered.netlify.app"})
+        if r.status_code == 404:
+            raise HTTPException(status_code=404, detail="RUC no encontrado en SUNAT")
+        if r.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"SUNAT respondió con {r.status_code}")
+        data = r.json() or {}
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.warning("RUC lookup failed: %s", ex)
+        raise HTTPException(status_code=502, detail="No pudimos consultar SUNAT en este momento")
+
+    razon_social = (data.get("nombre") or data.get("razonSocial") or "").strip()
+    if not razon_social:
+        raise HTTPException(status_code=404, detail="RUC no encontrado en SUNAT")
+
+    return {
+        "ruc": ruc,
+        "razon_social": razon_social,
+        "estado": data.get("estado") or "",
+        "condicion": data.get("condicion") or "",
+        "direccion": data.get("direccion") or "",
+        "departamento": data.get("departamento") or "",
+        "provincia": data.get("provincia") or "",
+        "distrito": data.get("distrito") or "",
+    }
+
+
 @subsidio_router.post("/auth/register-from-calculator")
 async def register_from_calculator(payload: RegisterFromCalculator, response: Response):
     calc = await db.calculations.find_one({"id": payload.calc_id})
