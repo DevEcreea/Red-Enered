@@ -4,7 +4,7 @@ import uuid
 import pytest
 import requests
 
-BASE_URL = "https://practical-dev-1.preview.emergentagent.com".rstrip("/")
+BASE_URL = "https://role-manager-52.preview.emergentagent.com".rstrip("/")
 API = f"{BASE_URL}/api"
 
 ADMIN = ("admin@enered.com", "admin123")
