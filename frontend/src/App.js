@@ -43,6 +43,7 @@ import RegistroSubsidio from "./pages/RegistroSubsidio";
 import SubsidioDocumentos from "./pages/SubsidioDocumentos";
 import SubsidioVerificar from "./pages/SubsidioVerificar";
 import SubsidioFinalizado from "./pages/SubsidioFinalizado";
+import SubsidioAdmin from "./pages/SubsidioAdmin";
 import { useAuth } from "./context/AuthContext";
 
 function Shell({ children, roles }) {
@@ -118,6 +119,7 @@ function App() {
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
           <Route path="/admin/qr" element={<Shell roles={["admin_enered"]}><AdminQRUpload /></Shell>} />
+          <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>

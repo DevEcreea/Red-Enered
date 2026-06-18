@@ -902,3 +902,123 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         "top_placas": top_placas,
         "ultimas_facturas": sorted(rows, key=lambda r: r.get("fecha") or "", reverse=True)[:10],
     }
+
+
+
+# ============================================================================
+# ADMIN — Vista de expedientes para admin_enered (read-only)
+# ============================================================================
+async def _require_admin_enered(request: Request) -> dict:
+    user = await _get_current_user(request)
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="Solo admin_enered")
+    return user
+
+
+@subsidio_router.get("/admin/subsidio/expedientes")
+async def admin_list_expedientes(
+    _: dict = Depends(_require_admin_enered),
+    q: Optional[str] = None,
+    estado: Optional[str] = None,
+    limit: int = 200,
+):
+    """Lista todos los clientes de subsidio con resumen del expediente."""
+    filt = {"role": "cliente_subsidio"}
+    if q:
+        filt["$or"] = [
+            {"empresa": {"$regex": q, "$options": "i"}},
+            {"ruc": {"$regex": q}},
+            {"email": {"$regex": q, "$options": "i"}},
+        ]
+    if estado:
+        filt["expediente_status"] = estado
+
+    users = await db.users.find(filt, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(limit)
+
+    out = []
+    for u in users:
+        uid = u["id"]
+        calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
+        docs_count = await db.subsidio_documents.count_documents({"user_id": uid})
+        vehicles_count = await db.subsidio_vehicles.count_documents({"user_id": uid})
+        invoices_draft = await db.consumos_subsidio.count_documents({"user_id": uid, "status": "draft"})
+        invoices_conf = await db.consumos_subsidio.count_documents({"user_id": uid, "status": "confirmed"})
+        decl = await db.subsidio_declaraciones.find_one({"user_id": uid}, {"_id": 0, "accepted_at": 1, "representante": 1})
+        # Suma galones confirmados → ahorro reconocido
+        agg = await db.consumos_subsidio.aggregate([
+            {"$match": {"user_id": uid, "status": "confirmed"}},
+            {"$group": {"_id": None, "gal": {"$sum": "$galones"}, "imp": {"$sum": "$importe_total"}}},
+        ]).to_list(1)
+        galones_conf = (agg[0]["gal"] if agg else 0) or 0
+        importe_conf = (agg[0]["imp"] if agg else 0) or 0
+
+        out.append({
+            "user_id": uid,
+            "empresa": u.get("empresa"),
+            "ruc": u.get("ruc"),
+            "email": u.get("email"),
+            "contacto": u.get("contacto"),
+            "telefono": u.get("telefono"),
+            "created_at": u.get("created_at"),
+            "expediente_status": u.get("expediente_status") or "uploading",
+            "documentos_completos": bool(u.get("documentos_completos")),
+            "expediente_submitted_at": u.get("expediente_submitted_at"),
+            "ahorro_estimado": (calc or {}).get("subsidio_estimado", 0),
+            "ahorro_reconocido": round(float(galones_conf) * 1.5, 2),
+            "galones_confirmados": round(float(galones_conf), 2),
+            "importe_confirmado": round(float(importe_conf), 2),
+            "docs_count": docs_count,
+            "vehicles_count": vehicles_count,
+            "invoices": {"draft": invoices_draft, "confirmed": invoices_conf},
+            "declaracion_firmada": bool(decl),
+            "declaracion_at": (decl or {}).get("accepted_at"),
+        })
+    return {"items": out, "total": len(out)}
+
+
+@subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
+async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
+    """Detalle completo de un cliente_subsidio: cálculo, banco, docs, flota, facturas, declaración."""
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
+    bank = await db.subsidio_bank_accounts.find_one({"user_id": user_id}, {"_id": 0})
+    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 0}).sort("created_at", -1).to_list(500)
+    vehicles = await db.subsidio_vehicles.find({"user_id": user_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    invoices = await db.consumos_subsidio.find(
+        {"user_id": user_id},
+        {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
+    ).sort("fecha", -1).to_list(2000)
+    decl = await db.subsidio_declaraciones.find_one({"user_id": user_id}, {"_id": 0})
+
+    # Etiquetas legibles
+    for d in docs:
+        d["label"] = DOCUMENT_LABELS.get(d.get("categoria"), d.get("categoria"))
+
+    return {
+        "user": u,
+        "calculation": calc,
+        "bank_account": bank,
+        "documents": docs,
+        "vehicles": vehicles,
+        "invoices": invoices,
+        "declaracion": decl,
+        "stats": {
+            "docs_count": len(docs),
+            "vehicles_count": len(vehicles),
+            "invoices_draft": sum(1 for i in invoices if i.get("status") == "draft"),
+            "invoices_confirmed": sum(1 for i in invoices if i.get("status") == "confirmed"),
+            "galones_confirmados": round(sum((i.get("galones") or 0) for i in invoices if i.get("status") == "confirmed"), 2),
+            "importe_confirmado": round(sum((i.get("importe_total") or 0) for i in invoices if i.get("status") == "confirmed"), 2),
+        },
+    }
+
+
+@subsidio_router.get("/admin/subsidio/documents/{doc_id}/download")
+async def admin_download_document(doc_id: str, _: dict = Depends(_require_admin_enered)):
+    """Admin descarga cualquier documento del expediente."""
+    d = await db.subsidio_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
