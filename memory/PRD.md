@@ -111,6 +111,22 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 - **Seed `seed_subsidio_test.py`** (idempotente) crea `cliente.subsidio@test.com` / `subsidio123` con 3 placas pre-cargadas.
 - **Tests**: 18/18 backend pass (incl. nuevo `test_subsidio_ocr_integration.py`), 12/12 frontend flows.
 
+## Subsidio DU 004-2026 — Iter 4: Dashboard Cliente revamp + Stages Admin (Feb 2026, sesión actual)
+- **Dashboard del `cliente_subsidio` reescrito** (`DashboardSubsidioView.jsx`, 5 filas):
+  - Fila 1: Stepper read-only de 4 etapas (solicitud_enviada → evaluacion_atu → aprobada → abonado_en_cuenta).
+  - Fila 2: 6 KPIs (Unidades incluidas, Unidades habilitadas y activas, Galones reconocidos, Gasto total S/, Precio promedio x galón, Costo promedio x unidad).
+  - Fila 3: Bar chart de evolución semanal (semanas de 7 días desde 01/06/2026) con toggle Galones/Soles.
+  - Fila 4: Top unidades + Top estaciones (bar charts horizontales con toggle Galones/Soles cada uno).
+  - Fila 5: Semáforo de vencimiento de documentos de empresa (Activo verde / Por vencer ≤30d amarillo / Vencido rojo / Faltante). Vigencia MOCKED de 365 días desde upload.
+- **Dashboard DESGATEADO para cliente_subsidio**: ahora `/dashboard` se ve siempre (no más SubsidioGate). Otros módulos siguen gateados.
+- **Backend `GET /api/subsidio/dashboard-data` ampliado** con: `stages`, `current_stage`, `kpis` (6 nuevos + legacy), `serie_semanal`, `top_unidades`, `top_estaciones`, `documentos_semaforo` (items + summary). Mantiene compatibilidad legacy con `serie_mensual`, `top_placas`, `ultimas_facturas`.
+- **Etapas controladas solo por admin_enered**:
+  - Nuevo `PUT /api/admin/subsidio/expedientes/{user_id}/stage` (literal enum, 403 si no admin, 404 si user no existe).
+  - Al firmar la **declaración jurada** se setea automáticamente `expediente_stage = 'solicitud_enviada'`.
+  - `SubsidioAdmin.jsx` muestra columna "Etapa DU 004" + componente `StageController` (4 botones, confirm dialog) en el detalle del expediente.
+- **`ReportesConsumo.jsx`**: oculta columnas "Hora" y "Ahorro" cuando `user.role === 'cliente_subsidio'`. Para admin/logistica/contabilidad siguen visibles.
+- **Tests**: 9/9 backend nuevos PASS + 36/36 regresión, 26/26 testids frontend verificados.
+
 ## Backlog / Future
 - **P1**: Brute force / rate limiting en login (playbook lo sugiere)
 - **P2**: Magic-byte validation en upload de QR (rechazar payloads disfrazados)
