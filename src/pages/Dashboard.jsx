@@ -1,627 +1,699 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft,
-  Plus,
-  Trash2,
-  Pencil,
+  Lock,
   Truck,
-  Fuel,
-  Wallet,
-  TrendingUp,
   CheckCircle2,
-  Clock,
+  Fuel,
   FileCheck2,
-  Send,
   AlertCircle,
+  ArrowLeft,
   LogOut,
-  Search,
-  Download,
+  TrendingDown,
+  Wrench,
+  MapPin,
+  Calendar,
+  Gauge,
+  DollarSign,
+  Activity,
 } from "lucide-react";
-import {
-  VEHICLE_CATEGORIES,
-  calculateSubsidy,
-  formatSoles,
-  formatSolesInt,
-  formatGalones,
-  MESES,
-  SUBSIDIO_GL,
-} from "../lib/calculatorData";
 
-// ---------- Storage helpers ----------
+// ============== Storage ==============
 const STORAGE_KEY = "enered_client_session";
-
 const loadClient = () => {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 };
 
-const saveClient = (data) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+// ============== Demo data (fallback) ==============
+const DEMO = {
+  expediente: "ENR-2026-00001",
+  expedienteAtu: "ATU-2026-048817",
+  subsidio: 18240,
+  gastoTotal: 129400,
+  ahorroPct: 14.1,
+  stage: "evaluacion", // enviada | evaluacion | aprobada | abonada
+  fechas: {
+    enviada: "02 ago 2026",
+    evaluacion: "desde 05 ago",
+    aprobada: "—",
+    abonada: "—",
+  },
+  unidades: { incluidas: 12, total: 12, breakdown: "8 N3 · 4 N2" },
+  habilitadas: { activas: 12, total: 12 },
+  galones: { reconocidos: 4560, comprobOk: 181, comprobTotal: 184 },
+  docs: { pct: 92, alert: "1 por vencer pronto" },
+  flota: {
+    gasto: 129400,
+    galones: 12400,
+    precioGal: 10.43,
+    precioDelta: -0.22,
+    costoUnidad: 10783,
+    antiguedad: 7.2,
+    masDeDiez: 3,
+  },
+  gastoSemanal: [
+    { sem: "S1", val: 15800 },
+    { sem: "S2", val: 16200 },
+    { sem: "S3", val: 14500 },
+    { sem: "S4", val: 16700 },
+    { sem: "S5", val: 15400 },
+    { sem: "S6", val: 18900, peak: true },
+    { sem: "S7", val: 15600 },
+    { sem: "S8", val: 14100 },
+  ],
+  estaciones: [
+    { name: "Grifo Repsol · Av. Industrial", city: "Trujillo", precio: 10.55, total: 48200 },
+    { name: "Primax · Panamericana Norte", city: "Chiclayo", precio: 10.31, total: 29900 },
+    { name: "Petroperú · Vía Evitamiento", city: "Trujillo", precio: 10.62, total: 24300 },
+    { name: "Repsol · Av. España", city: "Trujillo", precio: 10.48, total: 18800 },
+  ],
+  ciudades: [
+    { name: "Trujillo", pct: 57, color: "#8039F4" },
+    { name: "Chiclayo", pct: 28, color: "#B98AFE" },
+    { name: "Otras", pct: 15, color: "#E6D4FF" },
+  ],
+  topUnidades: [
+    { placa: "V1B-209", cat: "N3", anio: 2014, gasto: 14820, note: "Unidad más antigua de la flota", alert: true },
+    { placa: "T2H-841", cat: "N3", anio: 2015, gasto: 12440, note: "Consumo sobre el promedio de su categoría" },
+    { placa: "L9P-115", cat: "N2", anio: 2017, gasto: 11210, note: "Operación frecuente en ruta Trujillo-Chiclayo" },
+    { placa: "M4R-307", cat: "N3", anio: 2018, gasto: 10980, note: "Consumo dentro del promedio" },
+  ],
 };
 
-// ---------- Trámite stages ----------
-const TRAMITE_STAGES = [
-  { id: "registro", label: "Registro de flota", icon: Truck },
-  { id: "documentos", label: "Documentos cargados", icon: FileCheck2 },
-  { id: "presentado", label: "Solicitud presentada", icon: Send },
-  { id: "aprobado", label: "Aprobado por MTC", icon: CheckCircle2 },
-  { id: "pagado", label: "Devolución pagada", icon: Wallet },
+// ============== Formatters ==============
+const fmtSoles = (n) => `S/ ${Number(n || 0).toLocaleString("es-PE", { maximumFractionDigits: 0 })}`;
+const fmtSolesDec = (n) =>
+  `S/ ${Number(n || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// ============== Stages ==============
+const STAGES = [
+  { id: "enviada", label: "Solicitud enviada", date: (d) => d.enviada },
+  { id: "evaluacion", label: "En evaluación ATU", date: (d) => d.evaluacion },
+  { id: "aprobada", label: "Aprobada", date: (d) => d.aprobada },
+  { id: "abonada", label: "Abonado en cuenta", date: (d) => d.abonada },
 ];
 
-// ---------- Sub-components ----------
-const KpiCard = ({ icon: Icon, label, value, sub, tone = "brand", testId }) => {
-  const tones = {
-    brand: "from-brand-50 to-white text-brand border-brand-100",
-    emerald: "from-emerald-50 to-white text-emerald-700 border-emerald-100",
-    amber: "from-amber-50 to-white text-amber-700 border-amber-100",
-    sky: "from-sky-50 to-white text-sky-700 border-sky-100",
-  };
+// ============== Subcomponents ==============
+const Hero = ({ data }) => {
+  const currentIdx = STAGES.findIndex((s) => s.id === data.stage);
+  const progressPct = (currentIdx / (STAGES.length - 1)) * 100;
+
   return (
-    <div
-      data-testid={testId}
-      className={`rounded-2xl border bg-gradient-to-br ${tones[tone]} p-5 transition hover:shadow-lg hover:-translate-y-0.5`}
+    <section
+      className="relative overflow-hidden rounded-3xl text-white p-7 sm:p-9 shadow-xl"
+      style={{
+        background: "linear-gradient(135deg, #8039F4 0%, #6B26DC 55%, #5A1FB8 100%)",
+      }}
+      data-testid="hero-subsidio"
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="h-10 w-10 rounded-xl bg-white/80 grid place-items-center shadow-sm">
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-      <div className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-1">
-        {label}
-      </div>
-      <div className="text-2xl font-extrabold font-cabinet text-neutral-900 leading-tight">
-        {value}
-      </div>
-      {sub && <div className="text-xs text-neutral-500 mt-1">{sub}</div>}
-    </div>
-  );
-};
+      {/* decorative blobs */}
+      <div className="absolute -top-32 -right-20 h-80 w-80 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-24 -left-12 h-64 w-64 rounded-full bg-white/5 blur-3xl pointer-events-none" />
 
-const StatusBadge = ({ status }) => {
-  const map = {
-    activo: { text: "Activo", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    pendiente: { text: "Pendiente", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-    revision: { text: "En revisión", cls: "bg-sky-50 text-sky-700 border-sky-200" },
-    excedido: { text: "Tope excedido", cls: "bg-rose-50 text-rose-700 border-rose-200" },
-  };
-  const s = map[status] || map.pendiente;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border text-[11px] font-semibold ${s.cls}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {s.text}
-    </span>
-  );
-};
-
-const VehicleRow = ({ v, onEdit, onDelete }) => {
-  const cat = VEHICLE_CATEGORIES.find((c) => c.id === v.categoryId);
-  const consumoPeriodoUnidad = (v.consumo || 0) * MESES;
-  const reconocidos = Math.min(consumoPeriodoUnidad, cat?.tope || 0) * (v.unidades || 0);
-  const galonesBrutos = consumoPeriodoUnidad * (v.unidades || 0);
-  const subsidio = reconocidos * SUBSIDIO_GL;
-  const capped = consumoPeriodoUnidad > (cat?.tope || 0);
-
-  return (
-    <tr className="border-b border-neutral-100 hover:bg-brand-50/40 transition" data-testid={`fleet-row-${v.id}`}>
-      <td className="px-4 py-4">
-        <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-xl bg-brand-50 text-brand grid place-items-center text-sm font-bold">
-            {cat?.id || "—"}
-          </div>
-          <div>
-            <div className="font-semibold text-sm text-neutral-900">{cat?.label || "Sin categoría"}</div>
-            <div className="text-[11px] text-neutral-500">Placa: {v.placa || "—"}</div>
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-4 text-center">
-        <span className="font-bold text-neutral-900">{v.unidades}</span>
-      </td>
-      <td className="px-4 py-4 text-right tabular-nums">
-        <div className="text-sm font-semibold text-neutral-900">{formatGalones(v.consumo)}</div>
-        <div className="text-[11px] text-neutral-500">gal/mes/unidad</div>
-      </td>
-      <td className="px-4 py-4 text-right tabular-nums">
-        <div className="text-sm font-semibold text-neutral-900">{formatGalones(reconocidos)}</div>
-        <div className="text-[11px] text-neutral-500">de {formatGalones(galonesBrutos)} gal</div>
-      </td>
-      <td className="px-4 py-4 text-right tabular-nums">
-        <div className="text-base font-extrabold text-brand font-cabinet">{formatSolesInt(subsidio)}</div>
-      </td>
-      <td className="px-4 py-4">
-        <StatusBadge status={capped ? "excedido" : "activo"} />
-      </td>
-      <td className="px-4 py-4">
-        <div className="flex items-center gap-1 justify-end">
-          <button
-            onClick={() => onEdit(v)}
-            data-testid={`edit-vehicle-${v.id}`}
-            className="h-8 w-8 grid place-items-center rounded-lg hover:bg-neutral-100 text-neutral-600 transition"
-            title="Editar"
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => onDelete(v.id)}
-            data-testid={`delete-vehicle-${v.id}`}
-            className="h-8 w-8 grid place-items-center rounded-lg hover:bg-rose-50 text-rose-600 transition"
-            title="Eliminar"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
-};
-
-const VehicleModal = ({ open, initial, onClose, onSave }) => {
-  const [form, setForm] = useState(
-    initial || { id: "", categoryId: "M2", placa: "", unidades: 1, consumo: 0 }
-  );
-  useEffect(() => {
-    if (open) setForm(initial || { id: "", categoryId: "M2", placa: "", unidades: 1, consumo: 0 });
-  }, [open, initial]);
-
-  if (!open) return null;
-  const submit = (e) => {
-    e.preventDefault();
-    if (!form.placa.trim() || !form.consumo || !form.unidades) return;
-    onSave({ ...form, id: form.id || `v_${Date.now()}` });
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-neutral-900/50 backdrop-blur-sm p-4" data-testid="vehicle-modal">
-      <form
-        onSubmit={submit}
-        className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-neutral-200 overflow-hidden animate-pop-in"
-      >
-        <div className="px-6 py-4 border-b border-neutral-100">
-          <h3 className="font-cabinet font-extrabold text-lg text-neutral-900">
-            {form.id ? "Editar vehículo" : "Agregar vehículo"}
-          </h3>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 mb-1.5">Categoría</label>
-            <select
-              data-testid="vehicle-category-select"
-              value={form.categoryId}
-              onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-              className="w-full rounded-xl border-[1.5px] border-neutral-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-4 focus:ring-brand-50 focus:border-brand bg-white"
-            >
-              {VEHICLE_CATEGORIES.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.id} · {c.label} (tope {c.tope} gal)
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-neutral-600 mb-1.5">Placa</label>
-            <input
-              type="text"
-              data-testid="vehicle-placa-input"
-              value={form.placa}
-              onChange={(e) => setForm({ ...form, placa: e.target.value.toUpperCase() })}
-              placeholder="ABC-123"
-              className="w-full rounded-xl border-[1.5px] border-neutral-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-4 focus:ring-brand-50 focus:border-brand"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 mb-1.5">Unidades</label>
-              <input
-                type="number"
-                min="1"
-                data-testid="vehicle-unidades-input"
-                value={form.unidades}
-                onChange={(e) => setForm({ ...form, unidades: Number(e.target.value) })}
-                className="w-full rounded-xl border-[1.5px] border-neutral-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-4 focus:ring-brand-50 focus:border-brand"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-neutral-600 mb-1.5">Consumo (gal/mes)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.1"
-                data-testid="vehicle-consumo-input"
-                value={form.consumo}
-                onChange={(e) => setForm({ ...form, consumo: Number(e.target.value) })}
-                className="w-full rounded-xl border-[1.5px] border-neutral-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-4 focus:ring-brand-50 focus:border-brand"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="px-6 py-4 border-t border-neutral-100 bg-neutral-50 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            data-testid="modal-cancel-btn"
-            className="px-4 py-2 rounded-xl text-sm font-semibold text-neutral-700 hover:bg-neutral-200 transition"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            data-testid="modal-save-btn"
-            className="px-5 py-2 rounded-xl text-sm font-bold text-white bg-brand hover:bg-brand-hover shadow-sm transition"
-          >
-            Guardar
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-};
-
-const TramiteTimeline = ({ currentStage }) => {
-  const currentIdx = TRAMITE_STAGES.findIndex((s) => s.id === currentStage);
-  return (
-    <div className="bg-white rounded-2xl border border-neutral-200 p-6" data-testid="tramite-timeline">
-      <div className="flex items-center justify-between mb-5">
+      <div className="relative grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-6 items-start">
+        {/* Left: subsidy amount */}
         <div>
-          <h3 className="font-cabinet font-extrabold text-lg text-neutral-900">Estado del trámite</h3>
-          <p className="text-xs text-neutral-500 mt-0.5">Avance de tu solicitud DU 004-2026</p>
+          <div className="inline-flex items-center gap-2 text-[11px] sm:text-xs font-semibold text-white/85 mb-3">
+            <Lock className="h-3.5 w-3.5" />
+            Tu subsidio reconocido · N.° {data.expediente}
+          </div>
+          <div className="font-cabinet font-extrabold leading-none text-[44px] sm:text-[56px] tracking-tight">
+            {fmtSoles(data.subsidio)}
+          </div>
+          <div className="text-white/80 text-sm mt-2">
+            Validado de tus comprobantes · expediente {data.expedienteAtu}
+          </div>
         </div>
-        <div className="text-xs font-bold text-brand bg-brand-50 px-3 py-1.5 rounded-full">
-          Etapa {Math.max(currentIdx + 1, 1)} de {TRAMITE_STAGES.length}
+
+        {/* Right: % ahorro card */}
+        <div className="bg-white/15 backdrop-blur-md border border-white/20 rounded-2xl p-5 w-full lg:w-[340px]">
+          <div className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/80 mb-2">
+            % de ahorro del total consumido
+          </div>
+          <div className="font-cabinet font-extrabold text-5xl leading-none mb-2">
+            {data.ahorroPct.toFixed(1)}%
+          </div>
+          <div className="text-[12px] text-white/85 leading-snug">
+            De los {fmtSoles(data.gastoTotal)} que gastaste en diésel, el Estado te devuelve{" "}
+            <span className="font-bold">{fmtSoles(data.subsidio)}</span>.
+          </div>
         </div>
       </div>
-      <div className="relative">
-        <div className="absolute left-0 right-0 top-5 h-0.5 bg-neutral-200" />
+
+      {/* Timeline */}
+      <div className="relative mt-8">
+        <div className="absolute left-[6%] right-[6%] top-[14px] h-[3px] bg-white/20 rounded-full" />
         <div
-          className="absolute left-0 top-5 h-0.5 bg-brand transition-all duration-500"
-          style={{ width: `${(currentIdx / (TRAMITE_STAGES.length - 1)) * 100}%` }}
+          className="absolute left-[6%] top-[14px] h-[3px] bg-white rounded-full transition-all duration-700"
+          style={{ width: `calc(${progressPct}% * 0.88)` }}
         />
-        <div className="relative grid grid-cols-5 gap-2">
-          {TRAMITE_STAGES.map((s, i) => {
-            const done = i <= currentIdx;
+        <div className="relative grid grid-cols-4 gap-3">
+          {STAGES.map((s, i) => {
+            const done = i < currentIdx;
             const active = i === currentIdx;
-            const Icon = s.icon;
             return (
               <div key={s.id} className="flex flex-col items-center text-center">
                 <div
-                  className={`h-10 w-10 rounded-full grid place-items-center border-2 transition ${
+                  className={`relative h-8 w-8 rounded-full grid place-items-center transition ${
                     done
-                      ? "bg-brand border-brand text-white shadow-md shadow-brand/30"
-                      : "bg-white border-neutral-300 text-neutral-400"
-                  } ${active ? "ring-4 ring-brand-100" : ""}`}
+                      ? "bg-white text-brand"
+                      : active
+                      ? "bg-white text-brand ring-4 ring-white/40"
+                      : "bg-white/25 text-white/60"
+                  }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  {done ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : active ? (
+                    <div className="h-2.5 w-2.5 rounded-full bg-brand animate-pulse" />
+                  ) : (
+                    <div className="h-2 w-2 rounded-full bg-white/60" />
+                  )}
                 </div>
-                <div className={`mt-2 text-[11px] font-semibold leading-tight ${done ? "text-neutral-900" : "text-neutral-400"}`}>
+                <div className={`mt-2 text-[12px] font-bold ${done || active ? "text-white" : "text-white/60"}`}>
                   {s.label}
+                </div>
+                <div className={`text-[10px] mt-0.5 ${done || active ? "text-white/75" : "text-white/45"}`}>
+                  {s.date(data.fechas)}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+    </section>
+  );
+};
+
+const TopKpi = ({ icon, color, label, value, sub, subTone = "default", testId }) => {
+  const subColors = {
+    default: "text-neutral-500",
+    success: "text-emerald-600 font-semibold",
+    danger: "text-rose-600 font-semibold",
+    muted: "text-neutral-500",
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200/70 p-5 hover:shadow-md hover:-translate-y-0.5 transition" data-testid={testId}>
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-700 mb-3">
+        <span className={`inline-grid place-items-center h-5 w-5 rounded-md`} style={{ background: color + "22", color }}>
+          {icon}
+        </span>
+        {label}
+      </div>
+      <div className="font-cabinet font-extrabold text-[28px] leading-none text-neutral-900 mb-1.5">
+        {value}
+      </div>
+      <div className={`text-[12px] ${subColors[subTone]}`}>{sub}</div>
     </div>
   );
 };
 
-// ---------- Empty state (no client) ----------
+const FleetKpi = ({ icon, color, label, value, sub, subTone = "default", testId }) => {
+  const subColors = {
+    default: "text-neutral-500",
+    success: "text-emerald-600 font-semibold",
+    danger: "text-rose-600 font-semibold",
+  };
+  return (
+    <div className="bg-white rounded-2xl border border-neutral-200/70 p-5 hover:shadow-md hover:-translate-y-0.5 transition" data-testid={testId}>
+      <div className="flex items-center gap-2 text-[12px] font-semibold text-neutral-700 mb-3">
+        <span className="inline-grid place-items-center h-5 w-5 rounded-md" style={{ background: color + "22", color }}>
+          {icon}
+        </span>
+        {label}
+      </div>
+      <div className="font-cabinet font-extrabold text-[28px] leading-none text-neutral-900 mb-1.5">
+        {value}
+      </div>
+      <div className={`text-[12px] ${subColors[subTone]}`}>{sub}</div>
+    </div>
+  );
+};
+
+// ============== Bar chart (SVG, sin libs) ==============
+const BarChart = ({ data }) => {
+  const max = Math.max(...data.map((d) => d.val));
+  const W = 640;
+  const H = 240;
+  const PAD = { l: 44, r: 16, t: 16, b: 32 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+  const barW = innerW / data.length / 1.6;
+  const step = innerW / data.length;
+
+  // Y-axis ticks (5 niveles)
+  const yMax = Math.ceil(max / 4000) * 4000;
+  const ticks = [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Evolución semanal del gasto">
+      {/* grid */}
+      {ticks.map((t, i) => {
+        const y = PAD.t + innerH - (t / yMax) * innerH;
+        return (
+          <g key={i}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={y} y2={y} stroke="#E5E7EB" strokeDasharray="3,4" />
+            <text x={PAD.l - 8} y={y + 4} textAnchor="end" fontSize="10" fill="#9CA3AF" fontFamily="Manrope, sans-serif">
+              S/{Math.round(t / 1000)}k
+            </text>
+          </g>
+        );
+      })}
+      {/* bars */}
+      {data.map((d, i) => {
+        const h = (d.val / yMax) * innerH;
+        const x = PAD.l + i * step + (step - barW) / 2;
+        const y = PAD.t + innerH - h;
+        const color = d.peak ? "#F43F5E" : "#8039F4";
+        return (
+          <g key={d.sem}>
+            <rect x={x} y={y} width={barW} height={h} rx="6" fill={color}>
+              <title>{`${d.sem}: ${fmtSoles(d.val)}`}</title>
+            </rect>
+            <text
+              x={x + barW / 2}
+              y={H - PAD.b + 18}
+              textAnchor="middle"
+              fontSize="11"
+              fill="#6B7280"
+              fontFamily="Manrope, sans-serif"
+              fontWeight="600"
+            >
+              {d.sem}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+// ============== Donut chart (SVG) ==============
+const Donut = ({ data, size = 220 }) => {
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 18;
+  const inner = r - 28;
+  const total = data.reduce((s, d) => s + d.pct, 0) || 1;
+  let acc = 0;
+
+  const arc = (start, end) => {
+    const sa = (start / 100) * Math.PI * 2 - Math.PI / 2;
+    const ea = (end / 100) * Math.PI * 2 - Math.PI / 2;
+    const x1 = cx + r * Math.cos(sa);
+    const y1 = cy + r * Math.sin(sa);
+    const x2 = cx + r * Math.cos(ea);
+    const y2 = cy + r * Math.sin(ea);
+    const x3 = cx + inner * Math.cos(ea);
+    const y3 = cy + inner * Math.sin(ea);
+    const x4 = cx + inner * Math.cos(sa);
+    const y4 = cy + inner * Math.sin(sa);
+    const large = end - start > 50 ? 1 : 0;
+    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${inner} ${inner} 0 ${large} 0 ${x4} ${y4} Z`;
+  };
+
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className="w-[220px] h-[220px]" role="img" aria-label="Concentración de carga por ciudad">
+      {data.map((d, i) => {
+        const start = (acc / total) * 100;
+        acc += d.pct;
+        const end = (acc / total) * 100;
+        return <path key={i} d={arc(start, end)} fill={d.color}><title>{`${d.name}: ${d.pct}%`}</title></path>;
+      })}
+      <text x={cx} y={cy - 4} textAnchor="middle" fontSize="13" fill="#6B7280" fontFamily="Manrope, sans-serif" fontWeight="600">
+        Top ciudad
+      </text>
+      <text x={cx} y={cy + 18} textAnchor="middle" fontSize="18" fontWeight="800" fill="#111827" fontFamily="Cabinet Grotesk, sans-serif">
+        {data[0]?.name}
+      </text>
+    </svg>
+  );
+};
+
+// ============== Lists ==============
+const RankBar = ({ percent, color = "#8039F4" }) => (
+  <div className="mt-2 h-1.5 w-full rounded-full bg-neutral-100 overflow-hidden">
+    <div className="h-full rounded-full transition-all" style={{ width: `${percent}%`, background: color }} />
+  </div>
+);
+
+const UnidadesList = ({ items }) => {
+  const max = Math.max(...items.map((i) => i.gasto));
+  return (
+    <ol className="space-y-4" data-testid="lista-unidades">
+      {items.map((u, idx) => (
+        <li key={u.placa}>
+          <div className="flex items-center gap-3">
+            <span className="h-7 w-7 grid place-items-center rounded-lg bg-brand-50 text-brand text-sm font-extrabold flex-shrink-0">
+              {idx + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`font-bold text-sm truncate ${u.alert ? "text-rose-600" : "text-neutral-900"}`}>
+                    {u.placa} · {u.cat} ({u.anio})
+                  </span>
+                </div>
+                <span className={`font-cabinet font-extrabold text-sm tabular-nums ${u.alert ? "text-rose-600" : "text-neutral-900"}`}>
+                  {fmtSoles(u.gasto)}
+                </span>
+              </div>
+              <div className="text-[12px] text-neutral-500 mt-0.5">{u.note}</div>
+              <RankBar percent={(u.gasto / max) * 100} color={u.alert ? "#F43F5E" : "#8039F4"} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+};
+
+const EstacionesList = ({ items }) => {
+  const max = Math.max(...items.map((i) => i.total));
+  return (
+    <ol className="space-y-4" data-testid="lista-estaciones">
+      {items.map((e, idx) => (
+        <li key={e.name}>
+          <div className="flex items-center gap-3">
+            <span className="h-7 w-7 grid place-items-center rounded-lg bg-brand-50 text-brand text-sm font-extrabold flex-shrink-0">
+              {idx + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-bold text-sm text-neutral-900 truncate">{e.name}</div>
+                  <div className="text-[12px] text-neutral-500">
+                    {e.city} · {fmtSolesDec(e.precio)} por galón
+                  </div>
+                </div>
+                <span className="font-cabinet font-extrabold text-sm tabular-nums text-neutral-900">
+                  {fmtSoles(e.total)}
+                </span>
+              </div>
+              <RankBar percent={(e.total / max) * 100} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+};
+
+// ============== Empty State ==============
 const EmptyState = () => (
   <div className="min-h-screen grid place-items-center bg-[#F7F6FB] p-6">
     <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-neutral-200 p-8 text-center">
       <div className="h-14 w-14 rounded-2xl bg-brand-50 text-brand grid place-items-center mx-auto mb-4">
         <AlertCircle className="h-7 w-7" />
       </div>
-      <h2 className="font-cabinet font-extrabold text-xl text-neutral-900 mb-2">
-        No tienes una sesión activa
-      </h2>
+      <h2 className="font-cabinet font-extrabold text-xl text-neutral-900 mb-2">No tienes una sesión activa</h2>
       <p className="text-sm text-neutral-500 mb-6">
-        Para acceder a tu dashboard necesitas registrarte primero desde la calculadora de subsidio.
+        Para acceder al panel del subsidio debes registrarte primero desde la calculadora.
       </p>
-      <Link
-        to="/"
-        data-testid="back-to-calculator-btn"
-        className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-hover transition"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Ir a la calculadora
-      </Link>
+      <div className="flex flex-col gap-2">
+        <Link
+          to="/"
+          data-testid="back-to-calculator-btn"
+          className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-brand text-white font-bold text-sm hover:bg-brand-hover transition"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Ir a la calculadora
+        </Link>
+        <button
+          onClick={() => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...DEMO, _demo: true }));
+            window.location.reload();
+          }}
+          data-testid="load-demo-btn"
+          className="text-xs font-semibold text-brand hover:underline mt-2"
+        >
+          Ver demo del dashboard
+        </button>
+      </div>
     </div>
   </div>
 );
 
-// ---------- Main Dashboard ----------
+// ============== Main Dashboard ==============
 const Dashboard = () => {
   const navigate = useNavigate();
   const [client, setClient] = useState(() => loadClient());
-  const [search, setSearch] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
 
   useEffect(() => {
-    if (client) saveClient(client);
+    if (client && !client.subsidio && !client._demo) {
+      // Cliente sin datos del subsidio. Marcamos con DEMO mientras tanto.
+    }
   }, [client]);
-
-  const totals = useMemo(() => {
-    if (!client) return null;
-    return calculateSubsidy(client.fleet || [], client.precioDiesel || 16.5);
-  }, [client]);
-
-  const filteredFleet = useMemo(() => {
-    if (!client) return [];
-    const q = search.trim().toLowerCase();
-    if (!q) return client.fleet || [];
-    return (client.fleet || []).filter(
-      (v) =>
-        (v.placa || "").toLowerCase().includes(q) ||
-        (v.categoryId || "").toLowerCase().includes(q)
-    );
-  }, [client, search]);
 
   if (!client) return <EmptyState />;
 
-  const handleAdd = () => {
-    setEditing(null);
-    setModalOpen(true);
-  };
-  const handleEdit = (v) => {
-    setEditing(v);
-    setModalOpen(true);
-  };
-  const handleDelete = (id) => {
-    if (!window.confirm("¿Eliminar este vehículo de tu flota?")) return;
-    setClient({ ...client, fleet: (client.fleet || []).filter((v) => v.id !== id) });
-  };
-  const handleSave = (vehicle) => {
-    const existing = (client.fleet || []).find((v) => v.id === vehicle.id);
-    const newFleet = existing
-      ? client.fleet.map((v) => (v.id === vehicle.id ? vehicle : v))
-      : [...(client.fleet || []), vehicle];
-    setClient({ ...client, fleet: newFleet });
-    setModalOpen(false);
-  };
+  // Merge: si el cliente no trae todos los campos, usamos demo como fallback visual.
+  const data = { ...DEMO, ...client };
+
   const handleLogout = () => {
     localStorage.removeItem(STORAGE_KEY);
     navigate("/");
   };
-  const handleAdvanceStage = () => {
-    const idx = TRAMITE_STAGES.findIndex((s) => s.id === (client.stage || "registro"));
-    const next = TRAMITE_STAGES[Math.min(idx + 1, TRAMITE_STAGES.length - 1)];
-    setClient({ ...client, stage: next.id });
-  };
 
   return (
     <div className="min-h-screen bg-[#F7F6FB]">
-      {/* Top Bar */}
-      <header className="bg-gradient-to-r from-brand-700 via-brand to-brand-500 text-white">
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 py-5 flex items-center justify-between">
+      {/* Top bar */}
+      <header className="border-b border-neutral-200/70 bg-white/80 backdrop-blur sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-5 sm:px-8 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img
-              src="/assets/enered-logo.png"
-              alt="Enered"
-              className="h-8 w-auto drop-shadow"
-              data-testid="dashboard-logo"
-            />
-            <div className="hidden sm:block h-6 w-px bg-white/30" />
-            <div className="hidden sm:block">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70">Panel del cliente</div>
-              <div className="text-sm font-bold">DU 004-2026 · Subsidio diésel</div>
+            <img src="/assets/enered-logo.png" alt="Enered" className="h-7 w-auto" data-testid="dashboard-logo" />
+            <div className="hidden sm:flex items-center gap-2 text-xs">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span className="font-semibold text-neutral-700">Panel del cliente subsidio</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <Link
               to="/"
               data-testid="back-link"
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white/90 hover:bg-white/10 transition"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-neutral-600 hover:bg-neutral-100 transition"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Calculadora
             </Link>
             <button
               onClick={handleLogout}
               data-testid="logout-btn"
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-white/10 hover:bg-white/20 transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
             >
               <LogOut className="h-3.5 w-3.5" /> Salir
             </button>
           </div>
         </div>
-
-        <div className="max-w-7xl mx-auto px-6 sm:px-8 pb-8">
-          <div className="flex items-end justify-between flex-wrap gap-4">
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-white/70 mb-1">
-                Bienvenido,
-              </div>
-              <h1 className="font-cabinet font-extrabold text-3xl sm:text-4xl leading-tight" data-testid="client-name">
-                {client.empresa || client.nombre}
-              </h1>
-              <p className="text-white/80 text-sm mt-1">
-                RUC {client.ruc || "—"} · {client.email || "sin correo"}
-              </p>
-            </div>
-            <button
-              onClick={handleAdvanceStage}
-              data-testid="advance-stage-btn"
-              className="hidden sm:inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-brand font-bold text-sm shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition"
-            >
-              <Send className="h-4 w-4" />
-              Avanzar trámite
-            </button>
-          </div>
-        </div>
       </header>
 
-      {/* Content */}
-      <main className="max-w-7xl mx-auto px-6 sm:px-8 -mt-6 pb-12 relative z-10">
-        {/* KPIs */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6" data-testid="kpi-grid">
-          <KpiCard
-            icon={Wallet}
-            label="Subsidio estimado"
-            value={formatSolesInt(totals?.totalSubsidy || 0)}
-            sub={`${MESES} meses · S/ ${SUBSIDIO_GL.toFixed(2)}/gal`}
-            tone="brand"
-            testId="kpi-subsidio"
+      <main className="max-w-7xl mx-auto px-5 sm:px-8 py-7 space-y-6">
+        {/* HERO */}
+        <Hero data={data} />
+
+        {/* TOP KPIs (4) */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-top">
+          <TopKpi
+            icon={<Truck className="h-3 w-3" />}
+            color="#8039F4"
+            label="Unidades incluidas"
+            value={
+              <span>
+                {data.unidades.incluidas} <span className="text-neutral-400 text-lg font-bold">/ {data.unidades.total}</span>
+              </span>
+            }
+            sub={data.unidades.breakdown}
+            subTone="muted"
+            testId="kpi-unidades"
           />
-          <KpiCard
-            icon={Truck}
-            label="Vehículos en flota"
-            value={(client.fleet || []).reduce((sum, v) => sum + (v.unidades || 0), 0)}
-            sub={`${(client.fleet || []).length} categoría${(client.fleet || []).length === 1 ? "" : "s"}`}
-            tone="sky"
-            testId="kpi-flota"
+          <TopKpi
+            icon={<CheckCircle2 className="h-3 w-3" />}
+            color="#10B981"
+            label="Habilitadas y activas"
+            value={
+              <span>
+                {data.habilitadas.activas} <span className="text-neutral-400 text-lg font-bold">/ {data.habilitadas.total}</span>
+              </span>
+            }
+            sub="100% operativas"
+            subTone="success"
+            testId="kpi-habilitadas"
           />
-          <KpiCard
-            icon={Fuel}
+          <TopKpi
+            icon={<Fuel className="h-3 w-3" />}
+            color="#F43F5E"
             label="Galones reconocidos"
-            value={formatGalones(totals?.totalGallonsRecognized || 0)}
-            sub={`de ${formatGalones(totals?.totalGallonsRaw || 0)} gal consumidos`}
-            tone="emerald"
+            value={data.galones.reconocidos.toLocaleString("es-PE")}
+            sub={`${data.galones.comprobOk} de ${data.galones.comprobTotal} comprobantes`}
+            subTone="muted"
             testId="kpi-galones"
           />
-          <KpiCard
-            icon={TrendingUp}
-            label="Cobertura del gasto"
-            value={`${(totals?.coverage || 0).toFixed(1)}%`}
-            sub={`gasto S/ ${formatGalones(totals?.totalExpense || 0)}`}
-            tone="amber"
-            testId="kpi-cobertura"
+          <TopKpi
+            icon={<FileCheck2 className="h-3 w-3" />}
+            color="#6B7280"
+            label="Documentos en regla"
+            value={`${data.docs.pct}%`}
+            sub={data.docs.alert}
+            subTone="danger"
+            testId="kpi-docs"
           />
         </section>
 
-        {/* Timeline */}
-        <section className="mb-6">
-          <TramiteTimeline currentStage={client.stage || "registro"} />
+        {/* CONTROL DE FLOTA HEADER */}
+        <section data-testid="control-flota">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="h-9 w-9 grid place-items-center rounded-xl bg-brand-50 text-brand">
+              <Gauge className="h-4.5 w-4.5" />
+            </div>
+            <h2 className="font-cabinet font-extrabold text-xl text-neutral-900">Control de Flota</h2>
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Activo · gratis
+            </span>
+          </div>
+          <p className="text-sm text-neutral-500 max-w-3xl ml-12">
+            Indicadores accionables de tu operación, a partir de tus comprobantes y documentos. Te ayudan a reducir costos y detectar unidades ineficientes.
+          </p>
         </section>
 
-        {/* Fleet table */}
-        <section className="bg-white rounded-2xl border border-neutral-200 overflow-hidden" data-testid="fleet-section">
-          <div className="px-6 py-5 border-b border-neutral-100 flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <h2 className="font-cabinet font-extrabold text-lg text-neutral-900">Módulo de flota</h2>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                Gestiona los vehículos que entran al subsidio. KPIs en tiempo real por fila.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-neutral-400" />
-                <input
-                  type="text"
-                  data-testid="fleet-search-input"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar placa o categoría..."
-                  className="pl-9 pr-3 py-2 rounded-xl border-[1.5px] border-neutral-200 text-sm w-56 focus:outline-none focus:ring-4 focus:ring-brand-50 focus:border-brand"
-                />
+        {/* FLEET KPIs (4) */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4" data-testid="kpi-flota">
+          <FleetKpi
+            icon={<DollarSign className="h-3 w-3" />}
+            color="#10B981"
+            label="Gasto total en diésel"
+            value={fmtSoles(data.flota.gasto)}
+            sub={`2 meses · ${data.flota.galones.toLocaleString("es-PE")} gal`}
+            subTone="default"
+            testId="kpi-gasto"
+          />
+          <FleetKpi
+            icon={<Fuel className="h-3 w-3" />}
+            color="#F59E0B"
+            label="Precio promedio por galón"
+            value={fmtSolesDec(data.flota.precioGal)}
+            sub={
+              <span className="inline-flex items-center gap-1">
+                <TrendingDown className="h-3 w-3" />
+                {fmtSolesDec(data.flota.precioDelta)} vs. mes anterior
+              </span>
+            }
+            subTone="success"
+            testId="kpi-precio"
+          />
+          <FleetKpi
+            icon={<Activity className="h-3 w-3" />}
+            color="#3B82F6"
+            label="Costo promedio por unidad"
+            value={fmtSoles(data.flota.costoUnidad)}
+            sub="por unidad · 2 meses"
+            testId="kpi-costo-unidad"
+          />
+          <FleetKpi
+            icon={<Wrench className="h-3 w-3" />}
+            color="#EF4444"
+            label="Antigüedad de flota"
+            value={
+              <span>
+                {data.flota.antiguedad} <span className="text-neutral-500 text-base font-bold">años prom.</span>
+              </span>
+            }
+            sub={`${data.flota.masDeDiez} unidades +10 años`}
+            subTone="danger"
+            testId="kpi-antiguedad"
+          />
+        </section>
+
+        {/* CHARTS ROW */}
+        <section className="grid grid-cols-1 lg:grid-cols-[1.6fr_1fr] gap-4">
+          <div className="bg-white rounded-2xl border border-neutral-200/70 p-6" data-testid="chart-gasto">
+            <div className="flex items-end justify-between flex-wrap gap-2 mb-4">
+              <div>
+                <h3 className="font-cabinet font-extrabold text-base text-neutral-900">
+                  Evolución semanal del gasto en diésel
+                </h3>
+                <p className="text-xs text-neutral-500">de tus comprobantes · detecta picos de consumo</p>
               </div>
-              <button
-                data-testid="export-fleet-btn"
-                onClick={() => alert("Exportación CSV próximamente")}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-neutral-200 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 transition"
-              >
-                <Download className="h-3.5 w-3.5" /> Exportar
-              </button>
-              <button
-                onClick={handleAdd}
-                data-testid="add-vehicle-btn"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-hover shadow-sm transition"
-              >
-                <Plus className="h-3.5 w-3.5" /> Agregar vehículo
-              </button>
+              <div className="flex items-center gap-3 text-[11px] font-semibold">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-brand" />
+                  <span className="text-neutral-600">Semana</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-rose-500" />
+                  <span className="text-neutral-600">Pico</span>
+                </span>
+              </div>
             </div>
+            <BarChart data={data.gastoSemanal} />
           </div>
 
-          {(filteredFleet || []).length === 0 ? (
-            <div className="px-6 py-16 text-center">
-              <div className="h-14 w-14 rounded-2xl bg-neutral-100 grid place-items-center mx-auto mb-3">
-                <Truck className="h-6 w-6 text-neutral-400" />
+          <div className="bg-white rounded-2xl border border-neutral-200/70 p-6" data-testid="chart-ciudades">
+            <h3 className="font-cabinet font-extrabold text-base text-neutral-900">Dónde cargas combustible</h3>
+            <p className="text-xs text-neutral-500 mb-3">por ciudad · concentración de compra</p>
+            <div className="flex flex-col items-center">
+              <Donut data={data.ciudades} />
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-3 text-[11px] font-semibold">
+                {data.ciudades.map((c) => (
+                  <span key={c.name} className="inline-flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: c.color }} />
+                    <span className="text-neutral-700">{c.name}</span>
+                    <span className="text-neutral-400">{c.pct}%</span>
+                  </span>
+                ))}
               </div>
-              <div className="font-semibold text-neutral-900 mb-1">
-                {search ? "No se encontraron vehículos" : "Tu flota está vacía"}
-              </div>
-              <div className="text-sm text-neutral-500 mb-5">
-                {search ? "Prueba con otra placa o categoría." : "Agrega tu primer vehículo para comenzar."}
-              </div>
-              {!search && (
-                <button
-                  onClick={handleAdd}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand text-white text-xs font-bold hover:bg-brand-hover"
-                >
-                  <Plus className="h-3.5 w-3.5" /> Agregar vehículo
-                </button>
-              )}
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-50/70 text-[11px] font-bold uppercase tracking-wider text-neutral-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Categoría / Placa</th>
-                    <th className="px-4 py-3 text-center">Unid.</th>
-                    <th className="px-4 py-3 text-right">Consumo</th>
-                    <th className="px-4 py-3 text-right">Reconocidos (2 m)</th>
-                    <th className="px-4 py-3 text-right">Subsidio</th>
-                    <th className="px-4 py-3 text-left">Estado</th>
-                    <th className="px-4 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredFleet.map((v) => (
-                    <VehicleRow key={v.id} v={v} onEdit={handleEdit} onDelete={handleDelete} />
-                  ))}
-                </tbody>
-                <tfoot className="bg-brand-50/40 font-bold">
-                  <tr>
-                    <td className="px-4 py-4 text-sm text-neutral-900" colSpan="4">
-                      Total flota · {(client.fleet || []).length} categoría{(client.fleet || []).length === 1 ? "" : "s"}
-                    </td>
-                    <td className="px-4 py-4 text-right text-base text-brand font-cabinet">
-                      {formatSolesInt(totals?.totalSubsidy || 0)}
-                    </td>
-                    <td className="px-4 py-4" colSpan="2"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+          </div>
         </section>
 
-        {/* Footer hint */}
-        <div className="mt-6 flex items-center gap-2 text-xs text-neutral-500">
-          <Clock className="h-3.5 w-3.5" />
-          Última actualización: {new Date().toLocaleString("es-PE")}
+        {/* RANKINGS */}
+        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-2xl border border-neutral-200/70 p-6">
+            <h3 className="font-cabinet font-extrabold text-base text-neutral-900">Unidades que más gastan</h3>
+            <p className="text-xs text-neutral-500 mb-5">
+              revisa las primeras: posible problema mecánico o manejo ineficiente
+            </p>
+            <UnidadesList items={data.topUnidades} />
+          </div>
+
+          <div className="bg-white rounded-2xl border border-neutral-200/70 p-6">
+            <h3 className="font-cabinet font-extrabold text-base text-neutral-900">Estaciones donde más cargas</h3>
+            <p className="text-xs text-neutral-500 mb-5">
+              negocia descuento por volumen donde concentras compra
+            </p>
+            <EstacionesList items={data.estaciones} />
+          </div>
+        </section>
+
+        {/* Footer note */}
+        <div className="flex items-center gap-2 text-xs text-neutral-500 pt-2">
+          <Calendar className="h-3.5 w-3.5" />
+          Última actualización: {new Date().toLocaleString("es-PE", { dateStyle: "long", timeStyle: "short" })}
+          <span className="mx-2">·</span>
+          <MapPin className="h-3.5 w-3.5" />
+          Enered Perú
         </div>
       </main>
-
-      <VehicleModal
-        open={modalOpen}
-        initial={editing}
-        onClose={() => setModalOpen(false)}
-        onSave={handleSave}
-      />
     </div>
   );
 };
 
 export default Dashboard;
 
-// Helper export so Calculator can create a session
+// Helper exportado para que la calculadora pueda crear una sesión.
 export const createClientSession = (data) => {
   const session = {
     nombre: data.nombre || "",
     empresa: data.empresa || data.nombre || "Mi empresa",
     ruc: data.ruc || "",
     email: data.email || "",
-    fleet: data.fleet || [],
-    precioDiesel: data.precioDiesel || 16.5,
-    stage: "registro",
+    ...data,
     createdAt: new Date().toISOString(),
   };
-  saveClient(session);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
   return session;
 };
