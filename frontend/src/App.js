@@ -72,6 +72,25 @@ function DashboardRouter() {
   return <Dashboard />;
 }
 
+/** Dashboard route: gateado para todos excepto cliente_subsidio (su dashboard es su vista principal). */
+function DashboardRoute() {
+  const { user } = useAuth();
+  if (user?.role === "cliente_subsidio") {
+    return (
+      <ProtectedRoute>
+        <Layout>
+          <DashboardSubsidioView />
+        </Layout>
+      </ProtectedRoute>
+    );
+  }
+  return (
+    <Gated titulo="Dashboard">
+      <DashboardRouter />
+    </Gated>
+  );
+}
+
 function App() {
   return (
     <AuthProvider>
@@ -87,7 +106,7 @@ function App() {
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           {/* Dashboard: router por rol; gateado para subsidio */}
-          <Route path="/dashboard" element={<Gated titulo="Dashboard"><DashboardRouter /></Gated>} />
+          <Route path="/dashboard" element={<DashboardRoute />} />
           <Route path="/flotas" element={<Gated titulo="Combustible"><Flotas /></Gated>} />
           <Route path="/reportes" element={<Navigate to="/flotas" replace />} />
           <Route path="/reportes-consumo" element={<Navigate to="/flotas" replace />} />

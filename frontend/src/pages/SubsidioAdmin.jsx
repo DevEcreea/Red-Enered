@@ -11,6 +11,14 @@ const ESTADO_BADGE = {
   submitted:  { label: "Enviado ATU", color: "bg-emerald-100 text-emerald-700 border-emerald-200" },
 };
 
+const STAGES = [
+  { key: "solicitud_enviada",  label: "Solicitud enviada" },
+  { key: "evaluacion_atu",     label: "Evaluación ATU" },
+  { key: "aprobada",           label: "Aprobada" },
+  { key: "abonado_en_cuenta",  label: "Abonado en cuenta" },
+];
+const STAGE_LABEL = Object.fromEntries(STAGES.map(s => [s.key, s.label]));
+
 export default function SubsidioAdmin() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +111,7 @@ export default function SubsidioAdmin() {
                 <th className="text-left px-4 py-3">Empresa</th>
                 <th className="text-left px-4 py-3">RUC</th>
                 <th className="text-left px-4 py-3">Estado</th>
+                <th className="text-left px-4 py-3">Etapa DU 004</th>
                 <th className="text-right px-4 py-3">Docs</th>
                 <th className="text-right px-4 py-3">Flota</th>
                 <th className="text-right px-4 py-3">Facturas</th>
@@ -125,6 +134,15 @@ export default function SubsidioAdmin() {
                     <td className="px-4 py-3 font-mono text-xs">{it.ruc || "—"}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold border ${badge.color}`}>{badge.label}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {it.expediente_stage ? (
+                        <span className="px-2 py-1 rounded-full text-[10px] font-bold bg-brand/10 text-brand border border-brand/20" data-testid={`exp-stage-${it.user_id}`}>
+                          {STAGE_LABEL[it.expediente_stage] || it.expediente_stage}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-neutral-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">{it.docs_count}</td>
                     <td className="px-4 py-3 text-right">{it.vehicles_count}</td>
@@ -159,6 +177,7 @@ function ExpedienteDetalle({ userId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("general");
+  const [savingStage, setSavingStage] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -168,6 +187,23 @@ function ExpedienteDetalle({ userId, onBack }) {
       } finally { setLoading(false); }
     })();
   }, [userId]);
+
+  const updateStage = async (newStage) => {
+    if (!data) return;
+    if (!window.confirm(`¿Confirmas cambiar la etapa a "${STAGE_LABEL[newStage]}"?`)) return;
+    setSavingStage(true);
+    try {
+      const { data: res } = await api.put(`/admin/subsidio/expedientes/${userId}/stage`, { stage: newStage });
+      setData((d) => ({
+        ...d,
+        user: { ...d.user, expediente_stage: res.expediente_stage, expediente_stage_updated_at: res.updated_at },
+      }));
+    } catch (err) {
+      alert(`No se pudo actualizar: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setSavingStage(false);
+    }
+  };
 
   if (loading) return <div className="py-16 text-center"><Loader2 className="w-8 h-8 animate-spin text-brand mx-auto" /></div>;
   if (!data) return <div className="py-16 text-center text-sm text-red-600">Expediente no encontrado.</div>;
@@ -204,6 +240,15 @@ function ExpedienteDetalle({ userId, onBack }) {
             <Kpi label="Galones confirm." value={num(stats.galones_confirmados)} color="violet" />
           </div>
         </div>
+
+        {/* Control de etapas DU 004 (solo admin_enered) */}
+        <StageController
+          currentStage={user.expediente_stage}
+          updatedAt={user.expediente_stage_updated_at}
+          isSubmitted={user.expediente_status === "submitted"}
+          onChange={updateStage}
+          saving={savingStage}
+        />
 
         {/* Tabs */}
         <div className="flex gap-1 mt-5 border-b border-neutral-200 -mb-px overflow-x-auto">
@@ -431,6 +476,62 @@ function TabDeclaracion({ declaracion }) {
         <blockquote className="bg-neutral-50 border-l-4 border-brand rounded-r-lg p-4 text-sm text-neutral-700 italic">
           {declaracion.texto}
         </blockquote>
+      </div>
+    </div>
+  );
+}
+
+/* ====== Stage controller (admin) ====== */
+function StageController({ currentStage, updatedAt, isSubmitted, onChange, saving }) {
+  const idx = currentStage ? STAGES.findIndex(s => s.key === currentStage) : -1;
+  return (
+    <div className="mt-5 p-4 bg-gradient-to-br from-brand/5 to-emerald-50/30 border border-brand/20 rounded-xl" data-testid="stage-controller">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Avance del trámite ATU</div>
+          <p className="text-xs text-neutral-500 mt-0.5">
+            Solo el equipo Enered puede mover estas etapas.
+            {updatedAt && <span className="ml-1">Última actualización: {fmtDate(updatedAt, true)}.</span>}
+          </p>
+        </div>
+        {!isSubmitted && idx === -1 && (
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-1 rounded-full">
+            El cliente aún no firma la declaración jurada
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+        {STAGES.map((s, i) => {
+          const isDone = idx >= 0 && i < idx;
+          const isCurrent = i === idx;
+          const isNext = i === idx + 1;
+          const base = "w-full text-left px-3 py-2.5 rounded-lg border transition text-xs font-bold flex items-center justify-between gap-2 disabled:opacity-50";
+          const cls = isCurrent
+            ? "bg-brand text-white border-brand shadow-md cursor-default"
+            : isDone
+            ? "bg-emerald-100 border-emerald-200 text-emerald-700 hover:bg-emerald-200"
+            : isNext
+            ? "bg-white border-brand text-brand hover:bg-brand/5"
+            : "bg-white border-neutral-200 text-neutral-500 hover:border-neutral-300";
+          return (
+            <button
+              key={s.key}
+              onClick={() => !isCurrent && onChange(s.key)}
+              disabled={saving || isCurrent}
+              data-testid={`stage-btn-${s.key}`}
+              className={`${base} ${cls}`}
+            >
+              <span className="flex items-center gap-1.5">
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${isCurrent ? "bg-white/30" : isDone ? "bg-emerald-500 text-white" : "bg-neutral-200 text-neutral-600"}`}>
+                  {i + 1}
+                </span>
+                <span className="truncate">{s.label}</span>
+              </span>
+              {isCurrent && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

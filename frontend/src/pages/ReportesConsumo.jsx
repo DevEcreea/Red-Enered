@@ -16,6 +16,8 @@ export default function ReportesConsumo() {
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
 
+  const isSubsidio = user?.role === "cliente_subsidio";
+
   const handleImport = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -188,7 +190,7 @@ export default function ReportesConsumo() {
                 <thead className="bg-neutral-50">
                   <tr className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
                     <th className="px-3 py-3 text-left">Fecha</th>
-                    <th className="px-3 py-3 text-left">Hora</th>
+                    {!isSubsidio && <th className="px-3 py-3 text-left">Hora</th>}
                     {user?.role === "admin_enered" && <th className="px-3 py-3 text-left">Empresa</th>}
                     <th className="px-3 py-3 text-left">Placa</th>
                     <th className="px-3 py-3 text-left">Ciudad</th>
@@ -197,14 +199,14 @@ export default function ReportesConsumo() {
                     <th className="px-3 py-3 text-right">Galones</th>
                     <th className="px-3 py-3 text-right">Precio</th>
                     <th className="px-3 py-3 text-right">Importe</th>
-                    <th className="px-3 py-3 text-right">Ahorro</th>
+                    {!isSubsidio && <th className="px-3 py-3 text-right">Ahorro</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100">
                   {paginated.map((r, i) => (
                     <tr key={i} className="hover:bg-neutral-50">
                       <td className="px-3 py-2 font-mono text-[12px]">{r.FECHA || "—"}</td>
-                      <td className="px-3 py-2 font-mono text-[12px] text-neutral-500">{r.HORA || "—"}</td>
+                      {!isSubsidio && <td className="px-3 py-2 font-mono text-[12px] text-neutral-500">{r.HORA || "—"}</td>}
                       {user?.role === "admin_enered" && <td className="px-3 py-2 truncate max-w-[140px]">{r.EMPRESA || "—"}</td>}
                       <td className="px-3 py-2 font-mono font-bold text-neutral-900">{r.PLACA || "—"}</td>
                       <td className="px-3 py-2">{r.CIUDAD || "—"}</td>
@@ -213,7 +215,7 @@ export default function ReportesConsumo() {
                       <td className="px-3 py-2 text-right font-bold">{formatNumber(parseFloat(r.CANTIDAD_GL || 0), 2)}</td>
                       <td className="px-3 py-2 text-right text-neutral-700">S/ {formatNumber(parseFloat(r.PRECIO_UNITARIO || 0), 2)}</td>
                       <td className="px-3 py-2 text-right font-bold text-neutral-900">{formatSoles(parseFloat(r.IMPORTE_TOTAL || 0))}</td>
-                      <td className="px-3 py-2 text-right font-bold text-green-600">{formatSoles(parseFloat(r.AHORRO || 0))}</td>
+                      {!isSubsidio && <td className="px-3 py-2 text-right font-bold text-green-600">{formatSoles(parseFloat(r.AHORRO || 0))}</td>}
                     </tr>
                   ))}
                 </tbody>

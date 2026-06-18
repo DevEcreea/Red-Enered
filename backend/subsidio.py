@@ -147,6 +147,14 @@ class VehicleIn(BaseModel):
     categoria: Literal["M2", "M3", "N1", "N2", "N3"]
 
 
+# Etapas del trámite (controladas por admin_enered)
+SUBSIDIO_STAGES = ["solicitud_enviada", "evaluacion_atu", "aprobada", "abonado_en_cuenta"]
+
+
+class StageUpdateIn(BaseModel):
+    stage: Literal["solicitud_enviada", "evaluacion_atu", "aprobada", "abonado_en_cuenta"]
+
+
 # ============================================================================
 # PUBLIC: Calculator
 # ============================================================================
@@ -459,11 +467,13 @@ async def aceptar_declaracion(
         ),
     }
     await db.subsidio_declaraciones.insert_one(record)
-    # Marcar expediente como enviado a la ATU
+    # Marcar expediente como enviado a la ATU + iniciar etapa "solicitud enviada"
     await db.users.update_one(
         {"id": user["id"]},
         {"$set": {"expediente_status": "submitted", "documentos_completos": True,
-                  "expediente_submitted_at": record["accepted_at"]}},
+                  "expediente_submitted_at": record["accepted_at"],
+                  "expediente_stage": "solicitud_enviada",
+                  "expediente_stage_updated_at": record["accepted_at"]}},
     )
     rec_out = {k: v for k, v in record.items() if k != "_id"}
     return {"ok": True, "declaracion": rec_out, "expediente_status": "submitted"}
@@ -835,7 +845,15 @@ async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
 
 @subsidio_router.get("/subsidio/dashboard-data")
 async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
-    """KPIs específicos del dashboard del cliente_subsidio (lee consumos_subsidio)."""
+    """Datos del dashboard del cliente_subsidio (5 filas):
+    Fila 1: Etapas del trámite
+    Fila 2: 6 KPIs
+    Fila 3: Evolución semanal (semanas de 7 días desde 01/06/2026)
+    Fila 4: Top unidades, Top estaciones
+    Fila 5: Semáforo de vencimientos de documentos
+    """
+    from datetime import date, timedelta
+
     rows = await db.consumos_subsidio.find(
         {"user_id": user["id"], "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
@@ -847,16 +865,180 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         except Exception:
             return 0.0
 
+    # === KPIs base (galones, importe) ===
     total_gal = sum(_f(r.get("galones")) for r in rows)
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
-    facturas = len(rows)
 
-    # Subsidio estimado (de la calculadora) y reconocido (a partir de galones confirmados)
+    # === Unidades (vehículos) ===
+    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    unidades_incluidas = len(vehicles)
+    placas_activas = {(r.get("placa") or "").upper().strip() for r in rows if (r.get("placa") or "").strip()}
+    unidades_activas = len({v["placa"] for v in vehicles if v["placa"].upper() in placas_activas})
+
+    precio_promedio_gl = (total_importe / total_gal) if total_gal > 0 else 0
+    costo_promedio_unidad = (total_importe / unidades_activas) if unidades_activas > 0 else 0
+
+    # === Etapas (Fila 1) ===
+    current_stage = user.get("expediente_stage")
+    stages_list = [
+        {"key": "solicitud_enviada",  "label": "Solicitud enviada"},
+        {"key": "evaluacion_atu",     "label": "Evaluación ATU"},
+        {"key": "aprobada",           "label": "Aprobada"},
+        {"key": "abonado_en_cuenta",  "label": "Abonado en cuenta"},
+    ]
+    if current_stage in SUBSIDIO_STAGES:
+        cur_idx = SUBSIDIO_STAGES.index(current_stage)
+    else:
+        cur_idx = -1
+    for i, s in enumerate(stages_list):
+        s["status"] = "done" if i < cur_idx else ("current" if i == cur_idx else "pending")
+
+    # === Serie semanal (Fila 3): semanas de 7 días empezando 01/06/2026 ===
+    WEEK_START = date(2026, 6, 1)
+    weeks_map = {}
+
+    def _parse_date(s):
+        if not s:
+            return None
+        s = str(s).strip()
+        # ISO YYYY-MM-DD
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except Exception:
+            pass
+        # DD/MM/YYYY
+        try:
+            return datetime.strptime(s[:10], "%d/%m/%Y").date()
+        except Exception:
+            pass
+        # DD-MM-YYYY
+        try:
+            return datetime.strptime(s[:10], "%d-%m-%Y").date()
+        except Exception:
+            return None
+
+    for r in rows:
+        d = _parse_date(r.get("fecha"))
+        if not d:
+            continue
+        delta_days = (d - WEEK_START).days
+        if delta_days < 0:
+            continue
+        week_idx = delta_days // 7  # 0-based
+        wk_start = WEEK_START + timedelta(days=week_idx * 7)
+        wk_end = wk_start + timedelta(days=6)
+        key = week_idx
+        slot = weeks_map.setdefault(key, {
+            "semana": f"Sem {week_idx + 1}",
+            "rango": f"{wk_start.strftime('%d/%m')}–{wk_end.strftime('%d/%m')}",
+            "galones": 0.0,
+            "importe": 0.0,
+            "cargas": 0,
+        })
+        slot["galones"] += _f(r.get("galones"))
+        slot["importe"] += _f(r.get("importe_total"))
+        slot["cargas"] += 1
+
+    serie_semanal = []
+    if weeks_map:
+        max_week = max(weeks_map.keys())
+        for i in range(max_week + 1):
+            wk_start = WEEK_START + timedelta(days=i * 7)
+            wk_end = wk_start + timedelta(days=6)
+            slot = weeks_map.get(i, {
+                "semana": f"Sem {i + 1}",
+                "rango": f"{wk_start.strftime('%d/%m')}–{wk_end.strftime('%d/%m')}",
+                "galones": 0.0,
+                "importe": 0.0,
+                "cargas": 0,
+            })
+            serie_semanal.append({
+                "semana": slot["semana"],
+                "rango": slot["rango"],
+                "galones": round(slot["galones"], 2),
+                "importe": round(slot["importe"], 2),
+                "cargas": slot["cargas"],
+            })
+
+    # === Top unidades (Fila 4 izq) ===
+    by_placa = {}
+    for r in rows:
+        p = (r.get("placa") or "Sin placa").upper().strip() or "Sin placa"
+        d = by_placa.setdefault(p, {"galones": 0.0, "importe": 0.0, "cargas": 0})
+        d["galones"] += _f(r.get("galones"))
+        d["importe"] += _f(r.get("importe_total"))
+        d["cargas"] += 1
+    top_unidades = sorted(
+        [{"placa": p, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "cargas": v["cargas"]} for p, v in by_placa.items()],
+        key=lambda x: -x["galones"],
+    )[:5]
+
+    # === Top estaciones (Fila 4 der) ===
+    by_est = {}
+    for r in rows:
+        e = (r.get("estacion") or "Sin estación").strip() or "Sin estación"
+        d = by_est.setdefault(e, {"galones": 0.0, "importe": 0.0, "cargas": 0})
+        d["galones"] += _f(r.get("galones"))
+        d["importe"] += _f(r.get("importe_total"))
+        d["cargas"] += 1
+    top_estaciones = sorted(
+        [{"estacion": e, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "cargas": v["cargas"]} for e, v in by_est.items()],
+        key=lambda x: -x["galones"],
+    )[:5]
+
+    # === Semáforo de vencimiento de documentos (Fila 5) — MOCK simple ===
+    # Heurística sin créditos extra: cada documento de empresa tiene vigencia
+    # de 365 días desde su carga. Verde > 30d, Amarillo ≤30d, Rojo vencido.
+    docs = await db.subsidio_documents.find(
+        {"user_id": user["id"], "categoria": {"$in": EMPRESA_CATEGORIES}},
+        {"_id": 0, "categoria": 1, "uploaded_at": 1, "filename": 1},
+    ).to_list(50)
+    today = datetime.now(timezone.utc).date()
+    DOC_LIFETIME_DAYS = 365
+    docs_semaforo = []
+    for cat in EMPRESA_CATEGORIES:
+        match = next((d for d in docs if d.get("categoria") == cat), None)
+        if not match:
+            docs_semaforo.append({
+                "categoria": cat,
+                "label": DOCUMENT_LABELS.get(cat, cat),
+                "uploaded": False,
+                "expires_at": None,
+                "days_remaining": None,
+                "status": "missing",
+            })
+            continue
+        try:
+            up_date = datetime.fromisoformat(match["uploaded_at"].replace("Z", "+00:00")).date()
+        except Exception:
+            up_date = today
+        expires_at = up_date + timedelta(days=DOC_LIFETIME_DAYS)
+        days_rem = (expires_at - today).days
+        if days_rem < 0:
+            status = "expired"
+        elif days_rem <= 30:
+            status = "expiring"
+        else:
+            status = "active"
+        docs_semaforo.append({
+            "categoria": cat,
+            "label": DOCUMENT_LABELS.get(cat, cat),
+            "uploaded": True,
+            "expires_at": expires_at.isoformat(),
+            "days_remaining": days_rem,
+            "status": status,
+        })
+
+    summary_active = sum(1 for d in docs_semaforo if d["status"] == "active")
+    summary_expiring = sum(1 for d in docs_semaforo if d["status"] == "expiring")
+    summary_expired = sum(1 for d in docs_semaforo if d["status"] == "expired")
+    summary_missing = sum(1 for d in docs_semaforo if d["status"] == "missing")
+
+    # Calc para subsidio_estimado (legacy)
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
     subsidio_estimado = float(calc.get("subsidio_estimado", 0) or 0)
 
-    # Galones confirmados / promedio mensual
-    # Agrupar por mes
+    # Serie mensual (legacy compatibility para no romper otras vistas)
     by_month = {}
     for r in rows:
         f = r.get("fecha") or ""
@@ -865,41 +1047,49 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         d["galones"] += _f(r.get("galones"))
         d["importe"] += _f(r.get("importe_total"))
         d["facturas"] += 1
-
     serie_mensual = [
         {"mes": k, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "facturas": v["facturas"]}
-        for k, v in sorted(by_month.items())
-        if k != "sin-fecha"
+        for k, v in sorted(by_month.items()) if k != "sin-fecha"
     ]
 
-    # Top placas
-    by_placa = {}
-    for r in rows:
-        p = r.get("placa") or "Sin placa"
-        d = by_placa.setdefault(p, {"galones": 0.0, "importe": 0.0, "facturas": 0})
-        d["galones"] += _f(r.get("galones"))
-        d["importe"] += _f(r.get("importe_total"))
-        d["facturas"] += 1
-    top_placas = sorted(
-        [{"placa": p, **{kk: round(vv, 2) if isinstance(vv, float) else vv for kk, vv in v.items()}} for p, v in by_placa.items()],
-        key=lambda x: -x["galones"],
-    )[:10]
-
-    # Subsidio reconocido: galones * (precio_pizarra - precio_enered)
-    # Como aún no tenemos pizarra/enered para el cliente subsidio, usamos un mock simple:
-    # subsidio_reconocido = subsidio_estimado * (facturas reales / facturas esperadas)
-    # Pero para una métrica más útil, devolvemos solo lo confirmado en S/.
     return {
+        # Fila 1
+        "stages": stages_list,
+        "current_stage": current_stage,
+        # Fila 2 (6 KPIs)
         "kpis": {
-            "facturas_confirmadas": facturas,
+            "unidades_incluidas": unidades_incluidas,
+            "unidades_activas": unidades_activas,
+            "galones_reconocidos": round(total_gal, 2),
+            "gasto_total": round(total_importe, 2),
+            "precio_promedio_galon": round(precio_promedio_gl, 2),
+            "costo_promedio_unidad": round(costo_promedio_unidad, 2),
+            # Legacy (no romper UI antigua/admin)
+            "facturas_confirmadas": len(rows),
             "galones_confirmados": round(total_gal, 2),
             "importe_total": round(total_importe, 2),
             "subsidio_estimado": round(subsidio_estimado, 2),
-            "subsidio_reconocido": round(total_gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón
-            "precio_promedio": round(total_importe / total_gal, 2) if total_gal > 0 else 0,
+            "subsidio_reconocido": round(total_gal * 1.5, 2),
+            "precio_promedio": round(precio_promedio_gl, 2),
         },
+        # Fila 3
+        "serie_semanal": serie_semanal,
+        # Fila 4
+        "top_unidades": top_unidades,
+        "top_estaciones": top_estaciones,
+        # Fila 5
+        "documentos_semaforo": {
+            "items": docs_semaforo,
+            "summary": {
+                "active": summary_active,
+                "expiring": summary_expiring,
+                "expired": summary_expired,
+                "missing": summary_missing,
+            },
+        },
+        # Legacy
         "serie_mensual": serie_mensual,
-        "top_placas": top_placas,
+        "top_placas": top_unidades,
         "ultimas_facturas": sorted(rows, key=lambda r: r.get("fecha") or "", reverse=True)[:10],
     }
 
@@ -961,6 +1151,8 @@ async def admin_list_expedientes(
             "telefono": u.get("telefono"),
             "created_at": u.get("created_at"),
             "expediente_status": u.get("expediente_status") or "uploading",
+            "expediente_stage": u.get("expediente_stage"),
+            "expediente_stage_updated_at": u.get("expediente_stage_updated_at"),
             "documentos_completos": bool(u.get("documentos_completos")),
             "expediente_submitted_at": u.get("expediente_submitted_at"),
             "ahorro_estimado": (calc or {}).get("subsidio_estimado", 0),
@@ -1022,3 +1214,26 @@ async def admin_download_document(doc_id: str, _: dict = Depends(_require_admin_
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
+
+
+@subsidio_router.put("/admin/subsidio/expedientes/{user_id}/stage")
+async def admin_update_stage(
+    user_id: str,
+    payload: StageUpdateIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    """Admin cambia la etapa del expediente del cliente_subsidio.
+    Etapas: solicitud_enviada → evaluacion_atu → aprobada → abonado_en_cuenta
+    """
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "expediente_stage": payload.stage,
+            "expediente_stage_updated_at": now,
+        }},
+    )
+    return {"ok": True, "expediente_stage": payload.stage, "updated_at": now}
