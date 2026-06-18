@@ -75,6 +75,16 @@ Construir una plataforma web y mobile responsive tipo dashboard fintech para ENE
 
 
 
+## Subsidio DU 004-2026 — Iter 3: Admin View (Feb 2026)
+- **Nueva página `/admin/subsidio`** (solo `admin_enered`): listado de todos los clientes del subsidio con KPIs (empresas, enviadas ATU, ahorro estimado/reconocido), búsqueda por razón social/RUC/email, filtro por estado.
+- **Detalle del expediente** con 6 tabs: Datos generales · Cuenta bancaria · Documentos (con descarga) · Flota · Facturas · Declaración Jurada (texto completo + IP + user-agent).
+- **3 endpoints backend** en `subsidio.py`:
+  - `GET /api/admin/subsidio/expedientes` (listado)
+  - `GET /api/admin/subsidio/expedientes/{user_id}` (detalle)
+  - `GET /api/admin/subsidio/documents/{doc_id}/download` (admin descarga cualquier doc)
+- Item de sidebar "Subsidio DU 004" visible solo para `admin_enered`.
+- Read-only (sin aprobar/rechazar/editar/eliminar desde aquí).
+
 ## Subsidio DU 004-2026 — Iter 2: 5 Etapas + Declaración Jurada (Feb 2026)
 - **Mi Flota rediseñada por 2da vez (definitiva)**: ahora son **5 etapas** con **una sola barra de progreso continua** en lugar de 3 capas con barras separadas.
   1. **Etapa 1 – Empresa** (Solo PDF): Ficha RUC + Resolución + DNI + Cuenta bancaria con **nota de seguridad bancaria 🔒**.
