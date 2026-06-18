@@ -1038,6 +1038,11 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
     subsidio_estimado = float(calc.get("subsidio_estimado", 0) or 0)
 
+    # Contar drafts pendientes (facturas subidas pero no confirmadas)
+    pending_drafts = await db.consumos_subsidio.count_documents(
+        {"user_id": user["id"], "status": "draft"}
+    )
+
     # Serie mensual (legacy compatibility para no romper otras vistas)
     by_month = {}
     for r in rows:
@@ -1056,6 +1061,8 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         # Fila 1
         "stages": stages_list,
         "current_stage": current_stage,
+        # Pending drafts (banner)
+        "pending_drafts": pending_drafts,
         # Fila 2 (6 KPIs)
         "kpis": {
             "unidades_incluidas": unidades_incluidas,

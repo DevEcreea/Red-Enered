@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2, Fuel, Banknote, Truck, Building2, FileCheck2,
   CheckCircle2, Circle, AlertTriangle, ShieldCheck, BarChart3, Gauge, Users,
-  MapPin, FileText, Clock,
+  MapPin, FileText, Clock, RefreshCw,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
@@ -21,20 +21,34 @@ export default function DashboardSubsidioView() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [serieView, setSerieView] = useState("galones"); // galones | importe
   const [topUView, setTopUView] = useState("galones");
   const [topEView, setTopEView] = useState("galones");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get("/subsidio/dashboard-data");
-        setData(data);
-      } finally {
-        setLoading(false);
-      }
-    })();
+  const fetchData = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true);
+    try {
+      const { data } = await api.get("/subsidio/dashboard-data");
+      setData(data);
+    } finally {
+      if (silent) setRefreshing(false);
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+    // Refetch al volver el foco a la pestaña (p.ej. tras confirmar facturas en otra ruta)
+    const onFocus = () => fetchData(true);
+    const onVisibility = () => { if (!document.hidden) fetchData(true); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [fetchData]);
 
   if (loading) {
     return (
@@ -49,9 +63,15 @@ export default function DashboardSubsidioView() {
     stages = [], kpis = {}, serie_semanal = [],
     top_unidades = [], top_estaciones = [],
     documentos_semaforo = { items: [], summary: {} },
+    pending_drafts = 0,
   } = data;
 
   const fmt = (n) => Number(n || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
+  const hasNoData =
+    (kpis.galones_reconocidos || 0) === 0 &&
+    (kpis.gasto_total || 0) === 0 &&
+    serie_semanal.length === 0 &&
+    top_unidades.length === 0;
 
   return (
     <div className="space-y-6" data-testid="dashboard-subsidio">
@@ -62,14 +82,78 @@ export default function DashboardSubsidioView() {
           <h2 className="font-cabinet text-2xl font-bold text-neutral-900 mt-1">Tu subsidio en cifras</h2>
           <p className="text-sm text-neutral-500 mt-1">Avance del expediente, consumo y vencimientos de documentos.</p>
         </div>
-        <button
-          onClick={() => navigate("/subsidio/documentos")}
-          className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2"
-          data-testid="dashboard-subsidio-cta-expediente"
-        >
-          <FileCheck2 className="w-4 h-4" /> Subir más facturas
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => fetchData(true)}
+            disabled={refreshing}
+            className="h-10 px-3 border border-neutral-300 hover:border-brand text-neutral-600 hover:text-brand text-sm font-bold rounded-lg flex items-center gap-2 disabled:opacity-50"
+            data-testid="dashboard-subsidio-refresh"
+            title="Actualizar datos"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Actualizando..." : "Actualizar"}
+          </button>
+          <button
+            onClick={() => navigate("/subsidio/documentos")}
+            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2"
+            data-testid="dashboard-subsidio-cta-expediente"
+          >
+            <FileCheck2 className="w-4 h-4" /> Subir más facturas
+          </button>
+        </div>
       </div>
+
+      {/* Banner: hay drafts pendientes de confirmar */}
+      {pending_drafts > 0 && (
+        <div
+          className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3 shadow-sm"
+          data-testid="dashboard-drafts-banner"
+        >
+          <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="font-cabinet font-bold text-amber-900">
+              Tienes {pending_drafts} {pending_drafts === 1 ? "factura subida" : "facturas subidas"} sin confirmar
+            </div>
+            <p className="text-xs text-amber-800 mt-0.5">
+              El dashboard solo muestra facturas <strong>confirmadas</strong>. Revísalas y confírmalas para que los KPIs y gráficos se actualicen.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/subsidio/verificar")}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg flex items-center gap-2 flex-shrink-0"
+            data-testid="dashboard-drafts-banner-cta"
+          >
+            <CheckCircle2 className="w-4 h-4" /> Verificar y confirmar
+          </button>
+        </div>
+      )}
+
+      {/* Banner: sin facturas confirmadas todavía (sin drafts tampoco) */}
+      {hasNoData && pending_drafts === 0 && (
+        <div
+          className="bg-gradient-to-r from-brand/5 to-cyan-50 border border-brand/20 rounded-2xl p-4 flex items-start gap-3 shadow-sm"
+          data-testid="dashboard-empty-banner"
+        >
+          <div className="w-10 h-10 rounded-lg bg-brand text-white flex items-center justify-center flex-shrink-0">
+            <Fuel className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <div className="font-cabinet font-bold text-neutral-900">Aún no hay facturas confirmadas</div>
+            <p className="text-xs text-neutral-600 mt-0.5">
+              Carga tus comprobantes de combustible y confírmalos para alimentar el dashboard con KPIs, evolución semanal y rankings.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate("/subsidio/documentos")}
+            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2 flex-shrink-0"
+            data-testid="dashboard-empty-banner-cta"
+          >
+            <FileCheck2 className="w-4 h-4" /> Subir facturas
+          </button>
+        </div>
+      )}
 
       {/* FILA 1 — Stages */}
       <StagesRow stages={stages} />
