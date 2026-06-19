@@ -42,9 +42,11 @@ export default function SubsidioAdmin() {
     const total = items.length;
     const submitted = items.filter(i => i.expediente_status === "submitted").length;
     const ahorroEst = items.reduce((s, i) => s + (i.ahorro_estimado || 0), 0);
-    const ahorroRec = items.reduce((s, i) => s + (i.ahorro_reconocido || 0), 0);
+    const ahorroRec = items.reduce((s, i) => s + ((i.galones_confirmados || 0) * 4), 0);
     return { total, submitted, ahorroEst, ahorroRec };
   }, [items]);
+
+  const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
 
   if (selectedId) {
     return <ExpedienteDetalle userId={selectedId} onBack={() => setSelectedId(null)} />;
@@ -64,7 +66,7 @@ export default function SubsidioAdmin() {
             <Kpi label="Empresas" value={stats.total} />
             <Kpi label="Enviadas ATU" value={stats.submitted} color="emerald" />
             <Kpi label="Ahorro est." value={`S/ ${num(stats.ahorroEst)}`} color="violet" />
-            <Kpi label="Ahorro reconocido" value={`S/ ${num(stats.ahorroRec)}`} color="emerald" />
+            <Kpi label="Ahorro recalculado" value={`S/ ${num(stats.ahorroRec)}`} color="emerald" />
           </div>
         </div>
 
@@ -152,7 +154,7 @@ export default function SubsidioAdmin() {
                     </td>
                     <td className="px-4 py-3 text-right">{num(it.galones_confirmados)}</td>
                     <td className="px-4 py-3 text-right text-violet-700 font-bold">S/ {num(it.ahorro_estimado)}</td>
-                    <td className="px-4 py-3 text-right text-emerald-700 font-bold">S/ {num(it.ahorro_reconocido)}</td>
+                    <td className="px-4 py-3 text-right text-emerald-700 font-bold">S/ {num(it.galones_confirmados * 4)}</td>
                     <td className="px-4 py-3 text-center">
                       {it.declaracion_firmada ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <Clock className="w-4 h-4 text-neutral-300 inline" />}
                     </td>
@@ -211,10 +213,14 @@ function ExpedienteDetalle({ userId, onBack }) {
   const { user, calculation, bank_account, documents, vehicles, invoices, declaracion, stats } = data;
   const badge = ESTADO_BADGE[user.expediente_status] || ESTADO_BADGE.uploading;
 
+  const companyDocs = useMemo(() => {
+    return (documents || []).filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.category));
+  }, [documents]);
+
   const tabs = [
     { id: "general", label: "Datos generales", icon: Building2 },
     { id: "banco", label: "Cuenta bancaria", icon: Banknote },
-    { id: "documentos", label: `Documentos (${stats.docs_count})`, icon: FileText },
+    { id: "documentos", label: `Documentos (${companyDocs.length})`, icon: FileText },
     { id: "flota", label: `Flota (${stats.vehicles_count})`, icon: Truck },
     { id: "facturas", label: `Facturas (${stats.invoices_confirmed}/${stats.invoices_confirmed + stats.invoices_draft})`, icon: Fuel },
     { id: "declaracion", label: "Declaración jurada", icon: ShieldCheck },
@@ -236,7 +242,7 @@ function ExpedienteDetalle({ userId, onBack }) {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`px-3 py-1.5 rounded-full text-xs font-bold border ${badge.color}`}>{badge.label}</span>
-            <Kpi label="Ahorro reconocido" value={`S/ ${num(stats.galones_confirmados * 1.5)}`} color="emerald" />
+            <Kpi label="Ahorro recalculado" value={`S/ ${num(stats.galones_confirmados * 4)}`} color="emerald" />
             <Kpi label="Galones confirm." value={num(stats.galones_confirmados)} color="violet" />
           </div>
         </div>
@@ -274,8 +280,8 @@ function ExpedienteDetalle({ userId, onBack }) {
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         {tab === "general" && <TabGeneral user={user} calculation={calculation} />}
         {tab === "banco" && <TabBanco bank={bank_account} />}
-        {tab === "documentos" && <TabDocumentos docs={documents} />}
-        {tab === "flota" && <TabFlota vehicles={vehicles} />}
+        {tab === "documentos" && <TabDocumentos docs={companyDocs} />}
+        {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} />}
         {tab === "facturas" && <TabFacturas invoices={invoices} />}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
       </div>
@@ -384,21 +390,71 @@ function TabDocumentos({ docs }) {
   );
 }
 
-function TabFlota({ vehicles }) {
+function TabFlota({ vehicles, docs = [] }) {
   if (!vehicles?.length) return <Empty msg="Sin unidades registradas." />;
+  const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
+
   return (
     <table className="w-full text-sm">
       <thead className="bg-neutral-50 text-[10px] uppercase tracking-widest font-bold text-neutral-500 border-b">
-        <tr><th className="text-left px-4 py-2">Placa</th><th className="text-left px-4 py-2">Categoría</th><th className="text-left px-4 py-2">Registrada</th></tr>
+        <tr>
+          <th className="text-left px-4 py-2">Placa</th>
+          <th className="text-left px-4 py-2">Categoría</th>
+          <th className="text-left px-4 py-2">Registrada</th>
+          <th className="text-left px-4 py-2">Tarjeta Habilitación</th>
+          <th className="text-left px-4 py-2">Tarjeta Propiedad</th>
+        </tr>
       </thead>
       <tbody className="divide-y divide-neutral-100">
-        {vehicles.map((v) => (
-          <tr key={v.placa}>
-            <td className="px-4 py-2 font-mono font-bold">{v.placa}</td>
-            <td className="px-4 py-2"><span className="px-2 py-0.5 bg-neutral-100 rounded text-xs font-bold">{v.categoria}</span></td>
-            <td className="px-4 py-2 text-xs">{fmtDate(v.created_at)}</td>
-          </tr>
-        ))}
+        {vehicles.map((v) => {
+          const docHabil = docs.find(
+            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && d.category === "tarjeta_habilitacion"
+          );
+          const docProp = docs.find(
+            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && d.category === "tarjeta_propiedad"
+          );
+
+          return (
+            <tr key={v.placa}>
+              <td className="px-4 py-2 font-mono font-bold">{v.placa}</td>
+              <td className="px-4 py-2">
+                <span className="px-2 py-0.5 bg-neutral-100 rounded text-xs font-bold">{v.categoria}</span>
+              </td>
+              <td className="px-4 py-2 text-xs">{fmtDate(v.created_at)}</td>
+              <td className="px-4 py-2 text-xs">
+                {docHabil ? (
+                  <a
+                    href={downloadHref(docHabil.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
+                    data-testid={`vehicle-habil-${v.placa}`}
+                  >
+                    <Download className="w-3.5 h-3.5" /> Descargar
+                  </a>
+                ) : (
+                  <span className="text-neutral-400">—</span>
+                )}
+              </td>
+              <td className="px-4 py-2 text-xs">
+                {docProp ? (
+                  <a
+                    href={downloadHref(docProp.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
+                    data-testid={`vehicle-prop-${v.placa}`}
+                  >
+                    <Download className="w-3.5 h-3.5" /> Descargar
+                  </a>
+                ) : (
+                  <span className="text-neutral-400">—</span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
