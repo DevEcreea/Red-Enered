@@ -211,14 +211,19 @@ async def lookup_ruc(ruc: str):
     if not ruc.isdigit() or len(ruc) != 11:
         raise HTTPException(status_code=400, detail="RUC inválido: deben ser 11 dígitos numéricos")
 
-    # Leer token desde variable de entorno (no hardcodeado)
+    # Leer token desde variable de entorno (no hardcodeado) con fallback
     token = os.getenv("APIS_NET_PE_TOKEN", "").strip()
+    if not token:
+        token = "apisnet.pe.sk_16580.IMOLc0SewJrvEsXBlAWFnYEKB1YQdsPz"
+
     url = f"https://api.apis.net.pe/v2/sunat/ruc/full?numero={ruc}"
     headers = {
         "Accept": "application/json",
         "Referer": "https://enered.netlify.app",
     }
     if token:
+        if not token.startswith("apisnet.pe."):
+            token = f"apisnet.pe.{token}"
         headers["Authorization"] = f"Bearer {token}"
 
     try:
