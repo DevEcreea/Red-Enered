@@ -205,20 +205,32 @@ async def get_calculation(calc_id: str):
 # ============================================================================
 @subsidio_router.get("/sunat/ruc/{ruc}")
 async def lookup_ruc(ruc: str):
-    """Consulta pública SUNAT vía api.apis.net.pe (gratuita, sin token).
-    Devuelve razon_social y estado del contribuyente para autocompletar formularios.
-    """
+    """Consulta SUNAT vía api.apis.net.pe usando token (más estable)."""
     ruc = (ruc or "").strip()
     if not ruc.isdigit() or len(ruc) != 11:
         raise HTTPException(status_code=400, detail="RUC inválido: deben ser 11 dígitos numéricos")
 
-    url = f"https://api.apis.net.pe/v1/ruc?numero={ruc}"
+    token = os.getenv("sk_16580.IMOLc0SewJrvEsXBlAWFnYEKB1YQdsPz", "").strip()
+    url = f"https://api.apis.net.pe/v2/sunat/ruc/full?numero={ruc}"
+    headers = {
+        "Accept": "application/json",
+        "Referer": "https://enered.netlify.app",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            r = await client.get(url, headers={"Referer": "https://enered.netlify.app"})
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(url, headers=headers)
+        if r.status_code in (401, 403):
+            logger.warning("apis.net.pe auth error %s: %s", r.status_code, r.text[:200])
+            raise HTTPException(status_code=502, detail="Servicio SUNAT no autorizado. Verifica APIS_NET_PE_TOKEN.")
         if r.status_code == 404:
             raise HTTPException(status_code=404, detail="RUC no encontrado en SUNAT")
+        if r.status_code == 422:
+            raise HTTPException(status_code=429, detail="Límite de consultas SUNAT alcanzado. Intenta en unos segundos.")
         if r.status_code != 200:
+            logger.warning("apis.net.pe respondió %s: %s", r.status_code, r.text[:200])
             raise HTTPException(status_code=502, detail=f"SUNAT respondió con {r.status_code}")
         data = r.json() or {}
     except HTTPException:
@@ -227,7 +239,12 @@ async def lookup_ruc(ruc: str):
         logger.warning("RUC lookup failed: %s", ex)
         raise HTTPException(status_code=502, detail="No pudimos consultar SUNAT en este momento")
 
-    razon_social = (data.get("nombre") or data.get("razonSocial") or "").strip()
+    razon_social = (
+        data.get("razonSocial")
+        or data.get("nombre")
+        or data.get("razon_social")
+        or ""
+    ).strip()
     if not razon_social:
         raise HTTPException(status_code=404, detail="RUC no encontrado en SUNAT")
 
