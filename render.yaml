@@ -29,6 +29,8 @@ services:
         sync: false           # optional: ^https://.*--YOUR-SITE\.netlify\.app$
       - key: FRONTEND_URL
         sync: false
+      - key: DECOLECTA_TOKEN
+        sync: false           # set to your Decolecta API key
       # ---- Cloudflare R2 (file storage) ----
       - key: R2_ACCESS_KEY_ID
         sync: false
