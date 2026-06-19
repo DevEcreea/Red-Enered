@@ -205,12 +205,14 @@ async def get_calculation(calc_id: str):
 # ============================================================================
 @subsidio_router.get("/sunat/ruc/{ruc}")
 async def lookup_ruc(ruc: str):
-    """Consulta SUNAT vía api.apis.net.pe usando token (más estable)."""
+    """Consulta SUNAT vía api.apis.net.pe usando token desde variable de entorno.
+    Si falla, permite escribir la razón social a mano (fallback manual)."""
     ruc = (ruc or "").strip()
     if not ruc.isdigit() or len(ruc) != 11:
         raise HTTPException(status_code=400, detail="RUC inválido: deben ser 11 dígitos numéricos")
 
-    token = os.getenv("sk_16580.IMOLc0SewJrvEsXBlAWFnYEKB1YQdsPz", "").strip()
+    # Leer token desde variable de entorno (no hardcodeado)
+    token = os.getenv("APIS_NET_PE_TOKEN", "").strip()
     url = f"https://api.apis.net.pe/v2/sunat/ruc/full?numero={ruc}"
     headers = {
         "Accept": "application/json",
@@ -222,22 +224,29 @@ async def lookup_ruc(ruc: str):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             r = await client.get(url, headers=headers)
-        if r.status_code in (401, 403):
+        
+        # Manejo de errores más tolerante
+        if r.status_code == 401 or r.status_code == 403:
             logger.warning("apis.net.pe auth error %s: %s", r.status_code, r.text[:200])
-            raise HTTPException(status_code=502, detail="Servicio SUNAT no autorizado. Verifica APIS_NET_PE_TOKEN.")
+            # Fallback: permitir entrada manual
+            raise HTTPException(
+                status_code=206,  # Partial Content — requiere entrada manual
+                detail="SUNAT no disponible en este momento. Por favor, ingresa la razón social manualmente."
+            )
         if r.status_code == 404:
             raise HTTPException(status_code=404, detail="RUC no encontrado en SUNAT")
-        if r.status_code == 422:
+        if r.status_code == 429 or r.status_code == 422:
             raise HTTPException(status_code=429, detail="Límite de consultas SUNAT alcanzado. Intenta en unos segundos.")
         if r.status_code != 200:
             logger.warning("apis.net.pe respondió %s: %s", r.status_code, r.text[:200])
             raise HTTPException(status_code=502, detail=f"SUNAT respondió con {r.status_code}")
+        
         data = r.json() or {}
     except HTTPException:
         raise
     except Exception as ex:
         logger.warning("RUC lookup failed: %s", ex)
-        raise HTTPException(status_code=502, detail="No pudimos consultar SUNAT en este momento")
+        raise HTTPException(status_code=206, detail="No pudimos consultar SUNAT. Ingresa la razón social manualmente.")
 
     razon_social = (
         data.get("razonSocial")
