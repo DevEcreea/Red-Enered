@@ -217,6 +217,30 @@ function ExpedienteDetalle({ userId, onBack }) {
     return (documents || []).filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.category));
   }, [documents]);
 
+  const deleteDoc = async (docId) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este documento?")) return;
+    try {
+      await api.delete(`/admin/subsidio/documents/${docId}`);
+      // Refresh the page data
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+      setData(res);
+    } catch (err) {
+      alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const deleteInvoice = async (invoiceId) => {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar esta factura? Esto la borrará del historial de combustible y descontará los galones.")) return;
+    try {
+      await api.delete(`/admin/subsidio/invoices/${invoiceId}`);
+      // Refresh the page data
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+      setData(res);
+    } catch (err) {
+      alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
   const tabs = [
     { id: "general", label: "Datos generales", icon: Building2 },
     { id: "banco", label: "Cuenta bancaria", icon: Banknote },
@@ -280,9 +304,9 @@ function ExpedienteDetalle({ userId, onBack }) {
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         {tab === "general" && <TabGeneral user={user} calculation={calculation} />}
         {tab === "banco" && <TabBanco bank={bank_account} />}
-        {tab === "documentos" && <TabDocumentos docs={companyDocs} />}
-        {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} />}
-        {tab === "facturas" && <TabFacturas invoices={invoices} />}
+        {tab === "documentos" && <TabDocumentos docs={companyDocs} onDelete={deleteDoc} />}
+        {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
+        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} />}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
       </div>
     </div>
@@ -354,7 +378,7 @@ function TabBanco({ bank }) {
   );
 }
 
-function TabDocumentos({ docs }) {
+function TabDocumentos({ docs, onDelete }) {
   if (!docs?.length) return <Empty msg="Sin documentos subidos." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
   const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
@@ -377,11 +401,21 @@ function TabDocumentos({ docs }) {
             <td className="px-4 py-2 font-mono text-xs">{d.placa || "—"}</td>
             <td className="px-4 py-2 text-xs">{fmtDate(d.created_at)}</td>
             <td className="px-2 py-2 text-right">
-              <a href={downloadHref(d.id)} target="_blank" rel="noreferrer"
-                 className="text-brand hover:text-brand-hover text-xs font-bold inline-flex items-center gap-1"
-                 data-testid={`doc-download-${d.id}`}>
-                <Download className="w-3.5 h-3.5" /> Descargar
-              </a>
+              <div className="flex items-center justify-end gap-3">
+                <a href={downloadHref(d.id)} target="_blank" rel="noreferrer"
+                   className="text-brand hover:text-brand-hover text-xs font-bold inline-flex items-center gap-1"
+                   data-testid={`doc-download-${d.id}`}>
+                  <Download className="w-3.5 h-3.5" /> Descargar
+                </a>
+                {onDelete && (
+                  <button
+                    onClick={() => onDelete(d.id)}
+                    className="text-red-600 hover:text-red-700 text-xs font-bold inline-flex items-center gap-1 border border-red-200 hover:border-red-300 rounded px-2.5 py-1 bg-red-50 hover:bg-red-100/50 transition-colors"
+                  >
+                    Eliminar
+                  </button>
+                )}
+              </div>
             </td>
           </tr>
         ))}
@@ -390,7 +424,7 @@ function TabDocumentos({ docs }) {
   );
 }
 
-function TabFlota({ vehicles, docs = [] }) {
+function TabFlota({ vehicles, docs = [], onDelete }) {
   if (!vehicles?.length) return <Empty msg="Sin unidades registradas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
   const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
@@ -424,30 +458,50 @@ function TabFlota({ vehicles, docs = [] }) {
               <td className="px-4 py-2 text-xs">{fmtDate(v.created_at)}</td>
               <td className="px-4 py-2 text-xs">
                 {docHabil ? (
-                  <a
-                    href={downloadHref(docHabil.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
-                    data-testid={`vehicle-habil-${v.placa}`}
-                  >
-                    <Download className="w-3.5 h-3.5" /> Descargar
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={downloadHref(docHabil.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
+                      data-testid={`vehicle-habil-${v.placa}`}
+                    >
+                      <Download className="w-3.5 h-3.5" /> Descargar
+                    </a>
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(docHabil.id)}
+                        className="text-red-600 hover:text-red-700 font-bold border border-red-200 hover:border-red-300 rounded px-1.5 py-0.5 bg-red-50 hover:bg-red-100/50 transition-colors text-[10px]"
+                      >
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-neutral-400">—</span>
                 )}
               </td>
               <td className="px-4 py-2 text-xs">
                 {docProp ? (
-                  <a
-                    href={downloadHref(docProp.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
-                    data-testid={`vehicle-prop-${v.placa}`}
-                  >
-                    <Download className="w-3.5 h-3.5" /> Descargar
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={downloadHref(docProp.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-1"
+                      data-testid={`vehicle-prop-${v.placa}`}
+                    >
+                      <Download className="w-3.5 h-3.5" /> Descargar
+                    </a>
+                    {onDelete && (
+                      <button
+                        onClick={() => onDelete(docProp.id)}
+                        className="text-red-600 hover:text-red-700 font-bold border border-red-200 hover:border-red-300 rounded px-1.5 py-0.5 bg-red-50 hover:bg-red-100/50 transition-colors text-[10px]"
+                      >
+                        Eliminar
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <span className="text-neutral-400">—</span>
                 )}
@@ -460,8 +514,11 @@ function TabFlota({ vehicles, docs = [] }) {
   );
 }
 
-function TabFacturas({ invoices }) {
+function TabFacturas({ invoices, onDelete }) {
   if (!invoices?.length) return <Empty msg="Sin facturas cargadas." />;
+  const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download`;
+
   return (
     <div className="overflow-auto">
       <table className="w-full text-xs">
@@ -478,6 +535,7 @@ function TabFacturas({ invoices }) {
             <th className="text-left px-3 py-2">N° Doc</th>
             <th className="text-center px-3 py-2">OCR</th>
             <th className="text-left px-3 py-2">Archivo</th>
+            <th className="text-center px-3 py-2">Acciones</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-neutral-100">
@@ -500,6 +558,30 @@ function TabFacturas({ invoices }) {
                 {i.ocr_ok ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 inline" /> : <AlertCircle className="w-3.5 h-3.5 text-red-500 inline" />}
               </td>
               <td className="px-3 py-1.5 truncate max-w-[140px] text-neutral-500" title={i.factura_filename}>{i.factura_filename || "—"}</td>
+              <td className="px-3 py-1.5 text-center whitespace-nowrap">
+                <div className="flex items-center justify-center gap-2">
+                  {i.factura_filename ? (
+                    <a
+                      href={downloadHref(i.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-brand hover:text-brand-hover font-bold inline-flex items-center gap-0.5 text-[11px]"
+                    >
+                      <Download className="w-3 h-3" /> Descargar
+                    </a>
+                  ) : (
+                    <span className="text-neutral-400 text-[11px]">—</span>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={() => onDelete(i.id)}
+                      className="text-red-600 hover:text-red-700 font-bold border border-red-200 hover:border-red-300 rounded px-1.5 py-0.5 bg-red-50 hover:bg-red-100/50 transition-colors text-[10px]"
+                    >
+                      Eliminar
+                    </button>
+                  )}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>

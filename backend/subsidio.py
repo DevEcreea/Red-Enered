@@ -1313,3 +1313,40 @@ async def admin_update_stage(
         }},
     )
     return {"ok": True, "expediente_stage": payload.stage, "updated_at": now}
+
+
+@subsidio_router.get("/admin/subsidio/invoices/{invoice_id}/download")
+async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
+    """Admin descarga el archivo PDF/imagen de una factura de consumo."""
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
+    if not inv or not inv.get("factura_storage_key"):
+        raise HTTPException(status_code=404, detail="Archivo de factura no encontrado")
+    return storage.download_response(
+        inv["factura_storage_key"],
+        inv["factura_filename"],
+        inv.get("factura_content_type", "application/octet-stream")
+    )
+
+
+@subsidio_router.delete("/admin/subsidio/documents/{doc_id}")
+async def admin_delete_document(doc_id: str, _: dict = Depends(_require_admin_enered)):
+    """Admin elimina un documento (empresa o flota) del expediente."""
+    d = await db.subsidio_documents.find_one({"id": doc_id})
+    if not d:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    if d.get("storage_key"):
+        storage.delete_object(d["storage_key"])
+    await db.subsidio_documents.delete_one({"id": doc_id})
+    return {"status": "ok"}
+
+
+@subsidio_router.delete("/admin/subsidio/invoices/{invoice_id}")
+async def admin_delete_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
+    """Admin elimina una factura de consumo. Se descuenta del historial del cliente."""
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    if inv.get("factura_storage_key"):
+        storage.delete_object(inv["factura_storage_key"])
+    await db.consumos_subsidio.delete_one({"id": invoice_id})
+    return {"status": "ok"}
