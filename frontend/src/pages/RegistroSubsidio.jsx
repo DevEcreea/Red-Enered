@@ -78,7 +78,6 @@ export default function RegistroSubsidio() {
   const errors = {};
   if (!form.ruc) errors.ruc = "Ingresa el RUC.";
   else if (form.ruc.length !== 11) errors.ruc = "El RUC debe tener exactamente 11 dígitos.";
-  else if (rucLookup.error) errors.ruc = rucLookup.error;
 
   if (!form.razon_social.trim()) errors.razon_social = "La razón social es obligatoria.";
   else if (form.razon_social.trim().length < 3) errors.razon_social = "Razón social demasiado corta.";
@@ -212,7 +211,7 @@ export default function RegistroSubsidio() {
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                   {rucLookup.loading && <Loader2 className="w-5 h-5 animate-spin text-brand" data-testid="reg-ruc-loading" />}
                   {!rucLookup.loading && rucLookup.ok && <CheckCircle2 className="w-5 h-5 text-emerald-500" data-testid="reg-ruc-ok" />}
-                  {!rucLookup.loading && rucLookup.error && form.ruc.length === 11 && <XCircle className="w-5 h-5 text-red-500" />}
+                  {!rucLookup.loading && rucLookup.error && form.ruc.length === 11 && <AlertCircle className="w-5 h-5 text-amber-500" />}
                 </div>
               </div>
               {rucLookup.ok && rucLookup.estado && (
@@ -220,6 +219,12 @@ export default function RegistroSubsidio() {
                   <ShieldCheck className="w-3.5 h-3.5" />
                   SUNAT: <strong className="font-bold">{rucLookup.estado}</strong>
                   {rucLookup.condicion && <span className="text-neutral-500">· {rucLookup.condicion}</span>}
+                </div>
+              )}
+              {!rucLookup.loading && rucLookup.error && form.ruc.length === 11 && (
+                <div className="text-xs text-amber-600 mt-1.5 flex items-start gap-1" data-testid="reg-ruc-warning">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>No se pudo verificar: {rucLookup.error}. Ingresa la razón social manualmente.</span>
                 </div>
               )}
               <FieldError msg={showErr("ruc")} testid="reg-ruc-error" />
