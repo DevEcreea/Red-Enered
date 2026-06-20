@@ -106,6 +106,22 @@ async def _require_subsidio(request: Request) -> dict:
     return user
 
 
+def _normalize_doc(d: dict) -> dict:
+    if not d:
+        return d
+    if "categoria" in d and "category" not in d:
+        d["category"] = d["categoria"]
+    elif "category" in d and "categoria" not in d:
+        d["categoria"] = d["category"]
+    
+    if "uploaded_at" in d and "created_at" not in d:
+        d["created_at"] = d["uploaded_at"]
+    elif "created_at" in d and "uploaded_at" not in d:
+        d["uploaded_at"] = d["created_at"]
+    return d
+
+
+
 # ============================================================================
 # MODELS
 # ============================================================================
@@ -397,6 +413,7 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     docs = await db.subsidio_documents.find(
         {"user_id": user["id"]}, {"_id": 0}
     ).to_list(1000)
+    docs = [_normalize_doc(d) for d in docs]
 
     # Cuenta bancaria
     bank = await db.subsidio_bank_accounts.find_one(
@@ -500,6 +517,7 @@ async def aceptar_declaracion(
 
     # Verificar docs empresa + flota subidos
     docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    docs = [_normalize_doc(d) for d in docs]
     vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
     missing = []
@@ -594,12 +612,14 @@ async def upload_document(
         "user_id": user["id"],
         "empresa": user.get("empresa"),
         "categoria": categoria,
+        "category": categoria,
         "placa": placa_norm,
         "filename": file.filename,
         "storage_key": key,
         "content_type": content_type,
         "size": len(content),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "pendiente_validacion",
     }
     await db.subsidio_documents.insert_one(doc)
@@ -681,6 +701,7 @@ async def finalize(user: dict = Depends(_require_subsidio)):
     # Re-construir el dashboard para verificar can_finalize
     vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
     docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    docs = [_normalize_doc(d) for d in docs]
     bank = await db.subsidio_bank_accounts.find_one({"user_id": user["id"]}, {"_id": 0})
 
     missing = []
@@ -1252,7 +1273,7 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
     bank = await db.subsidio_bank_accounts.find_one({"user_id": user_id}, {"_id": 0})
-    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 0}).sort("created_at", -1).to_list(500)
+    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
     vehicles = await db.subsidio_vehicles.find({"user_id": user_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
     invoices = await db.consumos_subsidio.find(
         {"user_id": user_id},
@@ -1262,6 +1283,7 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
 
     # Etiquetas legibles
     for d in docs:
+        d = _normalize_doc(d)
         d["label"] = DOCUMENT_LABELS.get(d.get("categoria"), d.get("categoria"))
 
     return {

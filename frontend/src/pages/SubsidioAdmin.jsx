@@ -192,7 +192,7 @@ function ExpedienteDetalle({ userId, onBack }) {
 
   const companyDocs = useMemo(() => {
     const docs = data?.documents || [];
-    return docs.filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.category));
+    return docs.filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.categoria || d.category));
   }, [data]);
 
   const updateStage = async (newStage) => {
@@ -217,7 +217,6 @@ function ExpedienteDetalle({ userId, onBack }) {
 
   const { user, calculation, bank_account, documents, vehicles, invoices, declaracion, stats } = data;
   const badge = ESTADO_BADGE[user.expediente_status] || ESTADO_BADGE.uploading;
-
   const deleteDoc = async (docId) => {
     if (!window.confirm("¿Estás seguro de que deseas eliminar este documento?")) return;
     try {
@@ -400,7 +399,7 @@ function TabDocumentos({ docs, onDelete }) {
             <td className="px-4 py-2 font-bold">{d.label}</td>
             <td className="px-4 py-2 text-xs"><FileText className="w-3.5 h-3.5 inline mr-1 text-neutral-400" />{d.filename}</td>
             <td className="px-4 py-2 font-mono text-xs">{d.placa || "—"}</td>
-            <td className="px-4 py-2 text-xs">{fmtDate(d.created_at)}</td>
+            <td className="px-4 py-2 text-xs">{fmtDate(d.uploaded_at || d.created_at)}</td>
             <td className="px-2 py-2 text-right">
               <div className="flex items-center justify-end gap-3">
                 <a href={downloadHref(d.id)} target="_blank" rel="noreferrer"
@@ -444,10 +443,10 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
       <tbody className="divide-y divide-neutral-100">
         {vehicles.map((v) => {
           const docHabil = docs.find(
-            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && d.category === "tarjeta_habilitacion"
+            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && (d.categoria || d.category) === "tarjeta_habilitacion"
           );
           const docProp = docs.find(
-            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && d.category === "tarjeta_propiedad"
+            (d) => d.placa?.toUpperCase() === v.placa?.toUpperCase() && (d.categoria || d.category) === "tarjeta_propiedad"
           );
 
           return (
