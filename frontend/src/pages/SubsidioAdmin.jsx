@@ -190,6 +190,11 @@ function ExpedienteDetalle({ userId, onBack }) {
     })();
   }, [userId]);
 
+  const companyDocs = useMemo(() => {
+    const docs = data?.documents || [];
+    return docs.filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.category));
+  }, [data]);
+
   const updateStage = async (newStage) => {
     if (!data) return;
     if (!window.confirm(`¿Confirmas cambiar la etapa a "${STAGE_LABEL[newStage]}"?`)) return;
@@ -212,10 +217,6 @@ function ExpedienteDetalle({ userId, onBack }) {
 
   const { user, calculation, bank_account, documents, vehicles, invoices, declaracion, stats } = data;
   const badge = ESTADO_BADGE[user.expediente_status] || ESTADO_BADGE.uploading;
-
-  const companyDocs = useMemo(() => {
-    return (documents || []).filter(d => ["ficha_ruc", "resolucion_autorizacion", "dni_representante"].includes(d.category));
-  }, [documents]);
 
   const deleteDoc = async (docId) => {
     if (!window.confirm("¿Estás seguro de que deseas eliminar este documento?")) return;
