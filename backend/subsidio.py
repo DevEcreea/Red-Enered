@@ -990,6 +990,87 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     placas_activas = {(r.get("placa") or "").upper().strip() for r in rows if (r.get("placa") or "").strip()}
     unidades_activas = len({v["placa"] for v in vehicles if v["placa"].upper() in placas_activas})
 
+    cfg = await db.empresas_config.find_one({"empresa": user.get("empresa")})
+    unidades_contratadas = cfg.get("unidades_contratadas", 0) if cfg else 0
+
+    cat_counts = {}
+    for v in vehicles:
+        cat = v.get("categoria", "N2")
+        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+    detail_parts = [f"{count} {cat}" for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1])]
+    unidades_detalle = " - ".join(detail_parts) if detail_parts else "0 unidades"
+
+    today_date = datetime.now(timezone.utc).date()
+    valid_vehicles = 0
+    for v in vehicles:
+        hasta = v.get("vigente_hasta")
+        if not hasta:
+            valid_vehicles += 1
+            continue
+        try:
+            exp_date = datetime.strptime(hasta[:10], "%Y-%m-%d").date()
+            if exp_date >= today_date:
+                valid_vehicles += 1
+        except Exception:
+            valid_vehicles += 1
+
+    # === Documentos en regla percentage and detail ===
+    uploaded_docs_map = {}
+    docs_list = await db.subsidio_documents.find({"user_id": user["id"]}).to_list(1000)
+    for d in docs_list:
+        cat = d.get("categoria") or d.get("category")
+        placa = d.get("placa")
+        uploaded_docs_map[(cat, placa)] = d
+
+    total_req_docs = 3 + 2 * len(vehicles)
+    valid_docs_count = 0
+    expiring_soon_count = 0
+    expired_count = 0
+    missing_count = 0
+
+    def eval_doc(cat, placa):
+        nonlocal valid_docs_count, expiring_soon_count, expired_count, missing_count
+        doc_match = uploaded_docs_map.get((cat, placa))
+        if not doc_match:
+            missing_count += 1
+            return
+        
+        uploaded_at_str = doc_match.get("uploaded_at") or doc_match.get("created_at")
+        if not uploaded_at_str:
+            valid_docs_count += 1
+            return
+        
+        try:
+            up_date = datetime.fromisoformat(uploaded_at_str.replace("Z", "+00:00")).date()
+            expires_at = up_date + timedelta(days=365)
+            days_rem = (expires_at - today_date).days
+            if days_rem < 0:
+                expired_count += 1
+            elif days_rem <= 30:
+                expiring_soon_count += 1
+                valid_docs_count += 1
+            else:
+                valid_docs_count += 1
+        except Exception:
+            valid_docs_count += 1
+
+    for cat in ["ficha_ruc", "resolucion_autorizacion", "dni_representante"]:
+        eval_doc(cat, None)
+    for v in vehicles:
+        for cat in ["tarjeta_habilitacion", "tarjeta_propiedad"]:
+            eval_doc(cat, v["placa"])
+
+    pct_docs = round((valid_docs_count / total_req_docs) * 100) if total_req_docs > 0 else 100
+
+    if expiring_soon_count > 0:
+        docs_detalle = f"{expiring_soon_count} por vencer pronto"
+    elif expired_count > 0:
+        docs_detalle = f"{expired_count} vencidos"
+    elif missing_count > 0:
+        docs_detalle = f"{missing_count} pendientes"
+    else:
+        docs_detalle = "Todos al día"
+
     precio_promedio_gl = (total_importe / total_gal) if total_gal > 0 else 0
     costo_promedio_unidad = (total_importe / unidades_activas) if unidades_activas > 0 else 0
 
@@ -1181,17 +1262,25 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         # Fila 2 (6 KPIs)
         "kpis": {
             "unidades_incluidas": unidades_incluidas,
-            "unidades_activas": unidades_activas,
+            "unidades_contratadas": unidades_contratadas,
+            "unidades_detalle": unidades_detalle,
+            "unidades_validas": valid_vehicles,
+            "unidades_validas_pct": round((valid_vehicles / unidades_incluidas * 100) if unidades_incluidas > 0 else 0),
             "galones_reconocidos": round(total_gal, 2),
+            "invoices_confirmed": len(rows),
+            "invoices_total": len(rows) + pending_drafts,
             "gasto_total": round(total_importe, 2),
             "precio_promedio_galon": round(precio_promedio_gl, 2),
             "costo_promedio_unidad": round(costo_promedio_unidad, 2),
+            "pct_docs": pct_docs,
+            "docs_detalle": docs_detalle,
             # Legacy (no romper UI antigua/admin)
+            "unidades_activas": unidades_activas,
             "facturas_confirmadas": len(rows),
             "galones_confirmados": round(total_gal, 2),
             "importe_total": round(total_importe, 2),
             "subsidio_estimado": round(subsidio_estimado, 2),
-            "subsidio_reconocido": round(total_gal * 1.5, 2),
+            "subsidio_reconocido": round(total_gal * 4, 2),
             "precio_promedio": round(precio_promedio_gl, 2),
         },
         # Fila 3

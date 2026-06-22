@@ -156,16 +156,44 @@ export default function DashboardSubsidioView() {
       )}
 
       {/* FILA 1 — Stages */}
-      <StagesRow stages={stages} />
+      <StagesRow stages={stages} user={data.user} kpis={kpis} />
 
-      {/* FILA 2 — 6 KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        <Kpi icon={Truck}   label="Unidades incluidas"          value={kpis.unidades_incluidas}                                  accent="brand"   testid="kpi-unidades-incluidas" />
-        <Kpi icon={Users}   label="Unidades habilitadas activas" value={kpis.unidades_activas}                                   accent="cyan"    testid="kpi-unidades-activas" />
-        <Kpi icon={Fuel}    label="Galones reconocidos"          value={fmt(kpis.galones_reconocidos)} suffix=" gl"               accent="emerald" testid="kpi-galones-reconocidos" />
-        <Kpi icon={Banknote} label="Gasto total"                 value={`S/ ${fmt(kpis.gasto_total)}`}                            accent="amber"   testid="kpi-gasto-total" />
-        <Kpi icon={Gauge}   label="Precio promedio x galón"      value={`S/ ${fmt(kpis.precio_promedio_galon)}`}                  accent="brand"   testid="kpi-precio-promedio" />
-        <Kpi icon={BarChart3} label="Costo promedio x unidad"    value={`S/ ${fmt(kpis.costo_promedio_unidad)}`}                  accent="neutral" testid="kpi-costo-unidad" />
+      {/* FILA 2 — 4 KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi
+          icon={Truck}
+          label="Unidades incluidas"
+          value={`${kpis.unidades_incluidas || 0} / ${kpis.unidades_contratadas || 0}`}
+          subValue={kpis.unidades_detalle || "Sin vehículos"}
+          iconColor="text-brand"
+          testid="kpi-unidades-incluidas"
+        />
+        <Kpi
+          icon={CheckCircle2}
+          label="Habilitadas y activas"
+          value={`${kpis.unidades_validas || 0} / ${kpis.unidades_incluidas || 0}`}
+          subValue={`${kpis.unidades_validas_pct || 0}% operativas`}
+          subValueColor="text-emerald-600"
+          iconColor="text-emerald-500"
+          testid="kpi-unidades-activas"
+        />
+        <Kpi
+          icon={Fuel}
+          label="Galones reconocidos"
+          value={fmt(kpis.galones_reconocidos)}
+          subValue={`${kpis.invoices_confirmed || 0} de ${kpis.invoices_total || 0} comprobantes`}
+          iconColor="text-red-500"
+          testid="kpi-galones-reconocidos"
+        />
+        <Kpi
+          icon={FileText}
+          label="Documentos en regla"
+          value={`${kpis.pct_docs || 0}%`}
+          subValue={kpis.docs_detalle || "Todos al día"}
+          subValueColor={kpis.docs_detalle?.includes("vencer") || kpis.docs_detalle?.includes("vencidos") ? "text-amber-600" : "text-emerald-600"}
+          iconColor="text-violet-500"
+          testid="kpi-docs-en-regla"
+        />
       </div>
 
       {/* FILA 3 — Evolución semanal */}
@@ -261,42 +289,117 @@ export default function DashboardSubsidioView() {
 /* ============================================================ */
 /* Stages — Fila 1                                              */
 /* ============================================================ */
-function StagesRow({ stages }) {
+const fmtStageDate = (isoStr, formatType) => {
+  if (!isoStr) return "—";
+  try {
+    const d = new Date(isoStr);
+    const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = months[d.getMonth()];
+    const year = d.getFullYear();
+    if (formatType === "desde") {
+      return `desde ${day} ${month}`;
+    }
+    return `${day} ${month} ${year}`;
+  } catch {
+    return "—";
+  }
+};
+
+/* ============================================================ */
+/* Stages — Fila 1                                              */
+/* ============================================================ */
+function StagesRow({ stages, user, kpis }) {
   if (!stages?.length) return null;
+
+  const subsidioReconocido = (kpis.galones_reconocidos || 0) * 4;
+  const gastoTotal = kpis.gasto_total || 0;
+  const pctAhorro = gastoTotal > 0 ? ((subsidioReconocido / gastoTotal) * 100).toFixed(1) : "0.0";
+
+  const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
+
+  const ruc = user?.ruc || "20000000000";
+  const numENR = `ENR-2026-${ruc.slice(-5)}`;
+  const numATU = `ATU-2026-${ruc.slice(-6)}`;
+
+  const getStageSubtitle = (s, idx) => {
+    const currentStage = user?.expediente_stage;
+    const submittedAt = user?.expediente_submitted_at || user?.created_at;
+    const stageUpdatedAt = user?.expediente_stage_updated_at;
+
+    if (idx === 0) {
+      return submittedAt ? fmtStageDate(submittedAt) : "—";
+    }
+
+    if (currentStage === s.key) {
+      return stageUpdatedAt ? fmtStageDate(stageUpdatedAt, "desde") : "—";
+    }
+
+    const currentIdx = stages.findIndex(st => st.key === currentStage);
+    if (currentIdx > idx) {
+      return "Completado";
+    }
+
+    return "—";
+  };
+
   return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-stages">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
-        <div>
-          <h3 className="font-cabinet text-lg font-bold">Estado de tu expediente</h3>
-          <p className="text-xs text-neutral-500">Solo el equipo Enered puede avanzar estas etapas.</p>
+    <div className="bg-brand text-white border border-brand/20 rounded-2xl p-6 shadow-sm relative overflow-hidden" data-testid="card-stages">
+      {/* Upper Section: Info & Ahorro */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center mb-8">
+        <div className="lg:col-span-2 space-y-2">
+          <div className="text-xs lg:text-sm font-bold opacity-90 flex items-center gap-1">
+            💰 Tu subsidio reconocido · N.º {numENR}
+          </div>
+          <div className="text-4xl lg:text-5xl font-cabinet font-black tracking-tight">
+            S/ {num(subsidioReconocido)}
+          </div>
+          <div className="text-xs opacity-75">
+            Validado de tus comprobantes · expediente {numATU}
+          </div>
+        </div>
+
+        <div className="bg-white/10 border border-white/20 rounded-xl p-4 space-y-1">
+          <div className="text-[10px] tracking-wider font-bold opacity-75">% DE AHORRO DEL TOTAL CONSUMIDO</div>
+          <div className="text-3xl font-cabinet font-black">{pctAhorro}%</div>
+          <div className="text-xs opacity-80 leading-normal">
+            De los S/ {num(gastoTotal)} que gastaste en diésel, el Estado te devuelve S/ {num(subsidioReconocido)}.
+          </div>
         </div>
       </div>
-      <div className="relative">
-        {/* línea base */}
-        <div className="absolute top-5 left-0 right-0 h-0.5 bg-neutral-200" />
-        <div className="grid grid-cols-4 gap-3 relative">
+
+      {/* Progress Timeline */}
+      <div className="relative pt-4">
+        {/* line track */}
+        <div className="absolute top-[27px] left-[12%] right-[12%] h-[2px] bg-white/20" />
+        
+        <div className="grid grid-cols-4 gap-2 relative">
           {stages.map((s, idx) => {
-            const Icon = STAGE_ICONS[s.key] || Circle;
             const isDone = s.status === "done";
             const isCurrent = s.status === "current";
-            const colors = isDone
-              ? "bg-emerald-500 text-white border-emerald-500"
-              : isCurrent
-              ? "bg-brand text-white border-brand ring-4 ring-brand/20 animate-pulse"
-              : "bg-white text-neutral-300 border-neutral-200";
-            const labelColor = isDone
-              ? "text-emerald-700"
-              : isCurrent
-              ? "text-brand"
-              : "text-neutral-400";
+            
+            let dotCls = "bg-white/20 border-white/30 text-white/50";
+            if (isDone) {
+              dotCls = "bg-white text-brand border-white";
+            } else if (isCurrent) {
+              dotCls = "bg-white text-brand border-white ring-4 ring-white/30";
+            }
+
             return (
               <div key={s.key} className="flex flex-col items-center text-center relative" data-testid={`stage-${s.key}`}>
-                <div className={`w-10 h-10 rounded-full border-2 flex items-center justify-center z-10 ${colors}`}>
-                  <Icon className="w-5 h-5" strokeWidth={2.5} />
+                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center z-10 transition-all ${dotCls}`}>
+                  {isDone ? (
+                    <span className="text-[10px] font-bold text-brand">✓</span>
+                  ) : isCurrent ? (
+                    <span className="w-2.5 h-2.5 rounded-full bg-brand" />
+                  ) : (
+                    <span className="w-2 h-2 rounded-full bg-white/40" />
+                  )}
                 </div>
-                <div className={`text-xs font-bold mt-2 ${labelColor}`}>{s.label}</div>
-                <div className="text-[10px] uppercase tracking-widest mt-0.5 text-neutral-400">
-                  Etapa {idx + 1}
+                
+                <div className="text-xs font-bold mt-2 text-white">{s.label}</div>
+                <div className="text-[10px] opacity-75 mt-0.5 font-medium">
+                  {getStageSubtitle(s, idx)}
                 </div>
               </div>
             );
@@ -400,21 +503,15 @@ function SemanaTooltip({ active, payload, fmt }) {
   );
 }
 
-function Kpi({ icon: Icon, label, value, suffix = "", accent = "brand", testid }) {
-  const colors = {
-    brand:   "bg-brand text-white",
-    cyan:    "bg-cyan-100 text-cyan-700",
-    emerald: "bg-emerald-100 text-emerald-700",
-    amber:   "bg-amber-100 text-amber-700",
-    neutral: "bg-neutral-100 text-neutral-700",
-  };
+function Kpi({ icon: Icon, label, value, subValue, subValueColor = "text-neutral-500", testid, iconColor = "text-brand" }) {
   return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm" data-testid={testid}>
-      <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${colors[accent]}`}>
-        <Icon className="w-4 h-4" strokeWidth={2} />
+    <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all duration-200" data-testid={testid}>
+      <div className="flex items-center gap-2 mb-3">
+        <Icon className={`w-4 h-4 ${iconColor}`} strokeWidth={2.5} />
+        <span className="text-xs font-bold text-neutral-500">{label}</span>
       </div>
-      <div className="text-[10px] uppercase tracking-widest font-bold text-neutral-500">{label}</div>
-      <div className="font-cabinet text-xl font-bold mt-0.5">{value}{suffix}</div>
+      <div className="font-cabinet text-2xl font-black text-neutral-900 leading-none">{value}</div>
+      <div className={`text-xs font-bold mt-2 ${subValueColor}`}>{subValue}</div>
     </div>
   );
 }
