@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import {
   Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText,
   Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
+  Pencil, Plus, Trash2, PlusCircle, X,
 } from "lucide-react";
 import { api } from "../lib/api";
 
@@ -248,6 +249,7 @@ function ExpedienteDetalle({ userId, onBack }) {
     { id: "flota", label: `Flota (${stats.vehicles_count})`, icon: Truck },
     { id: "facturas", label: `Facturas (${stats.invoices_confirmed}/${stats.invoices_confirmed + stats.invoices_draft})`, icon: Fuel },
     { id: "declaracion", label: "Declaración jurada", icon: ShieldCheck },
+    { id: "editar", label: "Editar", icon: Pencil },
   ];
 
   return (
@@ -308,6 +310,17 @@ function ExpedienteDetalle({ userId, onBack }) {
         {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
         {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} />}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
+        {tab === "editar" && (
+          <TabEditar
+            user={user}
+            vehicles={vehicles}
+            invoices={invoices}
+            onRefresh={async () => {
+              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+              setData(res);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -715,3 +728,628 @@ const fmtDate = (s, withTime) => {
     return withTime ? d.toLocaleString("es-PE") : d.toLocaleDateString("es-PE");
   } catch { return s; }
 };
+
+
+/* ============================================================ */
+/* TAB EDITAR (EDICIÓN MANUAL)                                   */
+/* ============================================================ */
+function TabEditar({ user, vehicles, invoices, onRefresh }) {
+  const [subTab, setSubTab] = useState("empresa");
+
+  // REPRESENTANTE STATE
+  const [representante, setRepresentante] = useState(user.contacto || user.name || "");
+  const [savingRep, setSavingRep] = useState(false);
+
+  // VEHICLES STATE
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  const [showVehicleForm, setShowVehicleForm] = useState(false);
+  const [vehPlaca, setVehPlaca] = useState("");
+  const [vehCategoria, setVehCategoria] = useState("M2");
+  const [vehAnio, setVehAnio] = useState("");
+  const [vehDesde, setVehDesde] = useState("");
+  const [vehHasta, setVehHasta] = useState("");
+  const [savingVeh, setSavingVeh] = useState(false);
+
+  // INVOICES STATE
+  const [editingInvoice, setEditingInvoice] = useState(null);
+  const [showInvoiceForm, setShowInvoiceForm] = useState(false);
+  const [invNumero, setInvNumero] = useState("");
+  const [invFecha, setInvFecha] = useState("");
+  const [invEstacion, setInvEstacion] = useState("");
+  const [invRuc, setInvRuc] = useState("");
+  const [invCiudad, setInvCiudad] = useState("");
+  const [invPlaca, setInvPlaca] = useState("");
+  const [invGalones, setInvGalones] = useState("");
+  const [invPrecio, setInvPrecio] = useState("");
+  const [invImporte, setInvImporte] = useState("");
+  const [invProducto, setInvProducto] = useState("DIESEL B5");
+  const [savingInv, setSavingInv] = useState(false);
+
+  const saveRepresentante = async (e) => {
+    e.preventDefault();
+    if (!representante.trim()) return alert("El nombre del representante no puede estar vacío.");
+    setSavingRep(true);
+    try {
+      await api.put(`/admin/subsidio/expedientes/${user.id}/representante`, { representante: representante.trim() });
+      alert("Representante legal actualizado con éxito.");
+      onRefresh();
+    } catch (err) {
+      alert(`Error al guardar: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setSavingRep(false);
+    }
+  };
+
+  const startAddVehicle = () => {
+    setEditingVehicle(null);
+    setVehPlaca("");
+    setVehCategoria("M2");
+    setVehAnio("");
+    setVehDesde("");
+    setVehHasta("");
+    setShowVehicleForm(true);
+  };
+
+  const startEditVehicle = (v) => {
+    setEditingVehicle(v);
+    setVehPlaca(v.placa || "");
+    setVehCategoria(v.categoria || "M2");
+    setVehAnio(v.anio_fabricacion || "");
+    setVehDesde(v.vigente_desde || "");
+    setVehHasta(v.vigente_hasta || "");
+    setShowVehicleForm(true);
+  };
+
+  const saveVehicle = async (e) => {
+    e.preventDefault();
+    if (!vehPlaca.trim()) return alert("La placa es obligatoria.");
+    setSavingVeh(true);
+    try {
+      const payload = {
+        placa: vehPlaca.trim().toUpperCase(),
+        categoria: vehCategoria,
+        anio_fabricacion: vehAnio ? Number(vehAnio) : null,
+        vigente_desde: vehDesde || null,
+        vigente_hasta: vehHasta || null,
+      };
+
+      if (editingVehicle) {
+        await api.put(`/admin/subsidio/expedientes/${user.id}/vehicles/${editingVehicle.id}`, payload);
+      } else {
+        await api.post(`/admin/subsidio/expedientes/${user.id}/vehicles`, payload);
+      }
+      alert("Vehículo guardado correctamente.");
+      setShowVehicleForm(false);
+      onRefresh();
+    } catch (err) {
+      alert(`Error al guardar vehículo: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setSavingVeh(false);
+    }
+  };
+
+  const deleteVehicle = async (id) => {
+    if (!window.confirm("¿Seguro de que deseas eliminar esta placa? Se borrarán también los documentos asociados.")) return;
+    try {
+      await api.delete(`/admin/subsidio/expedientes/${user.id}/vehicles/${id}`);
+      alert("Vehículo eliminado.");
+      onRefresh();
+    } catch (err) {
+      alert(`Error al eliminar vehículo: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  const startAddInvoice = () => {
+    setEditingInvoice(null);
+    setInvNumero("");
+    setInvFecha("");
+    setInvEstacion("");
+    setInvRuc("");
+    setInvCiudad("");
+    setInvPlaca(vehicles[0]?.placa || "");
+    setInvGalones("");
+    setInvPrecio("");
+    setInvImporte("");
+    setInvProducto("DIESEL B5");
+    setShowInvoiceForm(true);
+  };
+
+  const startEditInvoice = (inv) => {
+    setEditingInvoice(inv);
+    setInvNumero(inv.numero_documento || "");
+    setInvFecha(inv.fecha || "");
+    setInvEstacion(inv.estacion || "");
+    setInvRuc(inv.ruc_emisor || "");
+    setInvCiudad(inv.ciudad || "");
+    setInvPlaca(inv.placa || "");
+    setInvGalones(inv.galones || "");
+    setInvPrecio(inv.precio_unitario || "");
+    setInvImporte(inv.importe_total || "");
+    setInvProducto(inv.producto || "DIESEL B5");
+    setShowInvoiceForm(true);
+  };
+
+  const saveInvoice = async (e) => {
+    e.preventDefault();
+    if (!invNumero.trim() || !invFecha || !invPlaca) return alert("Número, fecha y placa son campos obligatorios.");
+    setSavingInv(true);
+    try {
+      const payload = {
+        numero_documento: invNumero.trim(),
+        fecha: invFecha,
+        estacion: invEstacion.trim(),
+        ruc_emisor: invRuc.trim(),
+        ciudad: invCiudad.trim(),
+        placa: invPlaca.trim().toUpperCase(),
+        galones: Number(invGalones || 0),
+        precio_unitario: Number(invPrecio || 0),
+        importe_total: Number(invImporte || 0),
+        producto: invProducto,
+      };
+
+      if (editingInvoice) {
+        await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${editingInvoice.id}`, payload);
+      } else {
+        await api.post(`/admin/subsidio/expedientes/${user.id}/invoices`, payload);
+      }
+      alert("Factura guardada correctamente.");
+      setShowInvoiceForm(false);
+      onRefresh();
+    } catch (err) {
+      alert(`Error al guardar factura: ${err.response?.data?.detail || err.message}`);
+    } finally {
+      setSavingInv(false);
+    }
+  };
+
+  const deleteInvoice = async (id) => {
+    if (!window.confirm("¿Seguro de que deseas eliminar esta factura?")) return;
+    try {
+      await api.delete(`/admin/subsidio/invoices/${id}`);
+      alert("Factura eliminada.");
+      onRefresh();
+    } catch (err) {
+      alert(`Error al eliminar factura: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
+  return (
+    <div className="space-y-6" data-testid="tab-editar-panel">
+      {/* Sub-tabs header */}
+      <div className="flex gap-2 border-b border-neutral-100 pb-3">
+        <button
+          onClick={() => { setSubTab("empresa"); setShowVehicleForm(false); setShowInvoiceForm(false); }}
+          className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all ${
+            subTab === "empresa" ? "bg-brand text-white border-brand shadow-sm" : "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100"
+          }`}
+        >
+          Empresa
+        </button>
+        <button
+          onClick={() => { setSubTab("placas"); setShowVehicleForm(false); setShowInvoiceForm(false); }}
+          className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all ${
+            subTab === "placas" ? "bg-brand text-white border-brand shadow-sm" : "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100"
+          }`}
+        >
+          Placas (Flota)
+        </button>
+        <button
+          onClick={() => { setSubTab("facturas"); setShowVehicleForm(false); setShowInvoiceForm(false); }}
+          className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all ${
+            subTab === "facturas" ? "bg-brand text-white border-brand shadow-sm" : "bg-neutral-50 border-neutral-200 text-neutral-600 hover:bg-neutral-100"
+          }`}
+        >
+          Facturas
+        </button>
+      </div>
+
+      {/* Sub-tab content */}
+      <div className="mt-4">
+        {/* SUBTAB EMPRESA */}
+        {subTab === "empresa" && (
+          <div className="max-w-xl space-y-4">
+            <div>
+              <h4 className="font-cabinet text-lg font-bold text-neutral-900">Representante Legal</h4>
+              <p className="text-xs text-neutral-500 mt-1">Escribe o edita manualmente el nombre del representante legal asociado a este expediente.</p>
+            </div>
+            <form onSubmit={saveRepresentante} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-neutral-600">Nombre del Representante</label>
+                <input
+                  type="text"
+                  value={representante}
+                  onChange={(e) => setRepresentante(e.target.value)}
+                  className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                  placeholder="Ej. Juan Pérez"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={savingRep}
+                className="h-10 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-sm"
+              >
+                {savingRep ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                Guardar Representante
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* SUBTAB PLACAS */}
+        {subTab === "placas" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h4 className="font-cabinet text-lg font-bold text-neutral-900">Control de Placas (Flota)</h4>
+                <p className="text-xs text-neutral-500 mt-1">Administra las unidades autorizadas de la empresa.</p>
+              </div>
+              {!showVehicleForm && (
+                <button
+                  onClick={startAddVehicle}
+                  className="h-9 px-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Agregar Placa
+                </button>
+              )}
+            </div>
+
+            {showVehicleForm && (
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 max-w-2xl space-y-4">
+                <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                  <h5 className="font-bold text-sm text-neutral-950">{editingVehicle ? "Editar Placa" : "Agregar Nueva Placa"}</h5>
+                  <button onClick={() => setShowVehicleForm(false)} className="text-neutral-400 hover:text-neutral-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <form onSubmit={saveVehicle} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Placa *</label>
+                    <input
+                      type="text"
+                      required
+                      value={vehPlaca}
+                      onChange={(e) => setVehPlaca(e.target.value)}
+                      placeholder="Ej. ABC-123"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm uppercase"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Categoría *</label>
+                    <select
+                      value={vehCategoria}
+                      onChange={(e) => setVehCategoria(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
+                    >
+                      <option value="M2">M2</option>
+                      <option value="M3">M3</option>
+                      <option value="N1">N1</option>
+                      <option value="N2">N2</option>
+                      <option value="N3">N3</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Año de Fabricación</label>
+                    <input
+                      type="number"
+                      value={vehAnio}
+                      onChange={(e) => setVehAnio(e.target.value)}
+                      placeholder="Ej. 2020"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Vigente Desde</label>
+                    <input
+                      type="date"
+                      value={vehDesde}
+                      onChange={(e) => setVehDesde(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-bold text-neutral-600">Vigente Hasta</label>
+                    <input
+                      type="date"
+                      value={vehHasta}
+                      onChange={(e) => setVehHasta(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowVehicleForm(false)}
+                      className="h-10 px-4 bg-white border border-neutral-300 hover:bg-neutral-50 font-bold rounded-lg text-xs"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingVeh}
+                      className="h-10 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      {savingVeh ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Guardar Placa
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            <div className="border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
+              <table className="w-full text-xs">
+                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-widest font-bold">
+                  <tr>
+                    <th className="text-left px-4 py-3">Placa</th>
+                    <th className="text-left px-4 py-3">Categoría</th>
+                    <th className="text-left px-4 py-3">Año Fab.</th>
+                    <th className="text-left px-4 py-3">Vigente Desde</th>
+                    <th className="text-left px-4 py-3">Vigente Hasta</th>
+                    <th className="text-center px-4 py-3">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100 bg-white">
+                  {vehicles.length === 0 ? (
+                    <tr><td colSpan="6" className="py-8 text-center text-neutral-500">No hay vehículos registrados.</td></tr>
+                  ) : (
+                    vehicles.map((v) => (
+                      <tr key={v.id || v.placa} className="hover:bg-neutral-50/50">
+                        <td className="px-4 py-3 font-mono font-bold text-neutral-900">{v.placa}</td>
+                        <td className="px-4 py-3 font-bold text-neutral-800">{v.categoria}</td>
+                        <td className="px-4 py-3 text-neutral-700">{v.anio_fabricacion || "—"}</td>
+                        <td className="px-4 py-3 text-neutral-700">{v.vigente_desde ? fmtDate(v.vigente_desde) : "—"}</td>
+                        <td className="px-4 py-3 text-neutral-700">{v.vigente_hasta ? fmtDate(v.vigente_hasta) : "—"}</td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex justify-center gap-2">
+                            <button
+                              onClick={() => startEditVehicle(v)}
+                              className="px-2.5 py-1 text-xs border border-neutral-200 hover:border-neutral-300 bg-neutral-50 text-neutral-700 font-bold rounded flex items-center gap-1 transition-colors"
+                            >
+                              <Pencil className="w-3 h-3 text-neutral-500" /> Editar
+                            </button>
+                            <button
+                              onClick={() => deleteVehicle(v.id)}
+                              className="px-2.5 py-1 text-xs border border-red-200 hover:border-red-300 bg-red-50 text-red-700 font-bold rounded flex items-center gap-1 transition-colors"
+                            >
+                              <Trash2 className="w-3 h-3" /> Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* SUBTAB FACTURAS */}
+        {subTab === "facturas" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h4 className="font-cabinet text-lg font-bold text-neutral-900">Control de Facturas de Combustible</h4>
+                <p className="text-xs text-neutral-500 mt-1">Registra o edita consumos de combustible manualmente.</p>
+              </div>
+              {!showInvoiceForm && (
+                <button
+                  onClick={startAddInvoice}
+                  className="h-9 px-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Agregar Factura Manual
+                </button>
+              )}
+            </div>
+
+            {showInvoiceForm && (
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 max-w-3xl space-y-4">
+                <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
+                  <h5 className="font-bold text-sm text-neutral-950">{editingInvoice ? "Editar Factura" : "Agregar Nueva Factura Manual"}</h5>
+                  <button onClick={() => setShowInvoiceForm(false)} className="text-neutral-400 hover:text-neutral-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Número de Factura *</label>
+                    <input
+                      type="text"
+                      required
+                      value={invNumero}
+                      onChange={(e) => setInvNumero(e.target.value)}
+                      placeholder="Ej. F001-12345"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-mono uppercase"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Fecha de Emisión *</label>
+                    <input
+                      type="date"
+                      required
+                      value={invFecha}
+                      onChange={(e) => setInvFecha(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Placa Vehículo *</label>
+                    <select
+                      value={invPlaca}
+                      required
+                      onChange={(e) => setInvPlaca(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white font-mono"
+                    >
+                      <option value="">Selecciona placa...</option>
+                      {vehicles.map((v) => (
+                        <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
+                    <input
+                      type="text"
+                      value={invEstacion}
+                      onChange={(e) => setInvEstacion(e.target.value)}
+                      placeholder="Ej. GRIFO PRIMAX S.A."
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
+                    <input
+                      type="text"
+                      value={invRuc}
+                      onChange={(e) => setInvRuc(e.target.value)}
+                      placeholder="Ej. 20601234567"
+                      maxLength="11"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Ciudad</label>
+                    <input
+                      type="text"
+                      value={invCiudad}
+                      onChange={(e) => setInvCiudad(e.target.value)}
+                      placeholder="Ej. Lima"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Combustible</label>
+                    <select
+                      value={invProducto}
+                      onChange={(e) => setInvProducto(e.target.value)}
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
+                    >
+                      <option value="DIESEL B5">DIESEL B5</option>
+                      <option value="DIESEL B20">DIESEL B20</option>
+                      <option value="GASOHOL 90">GASOHOL 90</option>
+                      <option value="GASOHOL 95">GASOHOL 95</option>
+                      <option value="GASOHOL 97">GASOHOL 97</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Cantidad (Galones)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={invGalones}
+                      onChange={(e) => setInvGalones(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-neutral-600">Precio Unitario (S/)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={invPrecio}
+                      onChange={(e) => setInvPrecio(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1 md:col-span-3">
+                    <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={invImporte}
+                      onChange={(e) => setInvImporte(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
+                    />
+                  </div>
+                  <div className="md:col-span-3 flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInvoiceForm(false)}
+                      className="h-10 px-4 bg-white border border-neutral-300 hover:bg-neutral-50 font-bold rounded-lg text-xs"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingInv}
+                      className="h-10 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      {savingInv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                      Guardar Factura
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            <div className="border border-neutral-200 rounded-xl overflow-x-auto shadow-sm">
+              <table className="w-full text-xs">
+                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-widest font-bold">
+                  <tr>
+                    <th className="text-left px-3 py-3">Estado</th>
+                    <th className="text-left px-3 py-3">N° Factura</th>
+                    <th className="text-left px-3 py-3">Fecha</th>
+                    <th className="text-left px-3 py-3">Proveedor / RUC</th>
+                    <th className="text-left px-3 py-3">Ciudad</th>
+                    <th className="text-left px-3 py-3 font-mono">Placa</th>
+                    <th className="text-left px-3 py-3">Combustible</th>
+                    <th className="text-right px-3 py-3">Galones</th>
+                    <th className="text-right px-3 py-3">P. Unitario</th>
+                    <th className="text-right px-3 py-3">Importe</th>
+                    <th className="text-center px-3 py-3">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100 bg-white">
+                  {invoices.length === 0 ? (
+                    <tr><td colSpan="11" className="py-8 text-center text-neutral-500">No hay facturas registradas.</td></tr>
+                  ) : (
+                    invoices.map((i) => (
+                      <tr key={i.id} className="hover:bg-neutral-50/50" data-testid={`manual-invoice-row-${i.id}`}>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                            {i.status === "confirmed" ? "CONF" : "DRAFT"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-mono font-bold text-neutral-900">{i.numero_documento || "—"}</td>
+                        <td className="px-3 py-2 text-neutral-700">{i.fecha ? fmtDate(i.fecha) : "—"}</td>
+                        <td className="px-3 py-2">
+                          <div className="font-bold text-neutral-800">{i.estacion || "—"}</div>
+                          <div className="text-[10px] text-neutral-500 font-mono">{i.ruc_emisor}</div>
+                        </td>
+                        <td className="px-3 py-2 text-neutral-700">{i.ciudad || "—"}</td>
+                        <td className="px-3 py-2 font-mono font-bold text-neutral-900">{i.placa || "—"}</td>
+                        <td className="px-3 py-2 text-neutral-600">{i.producto || "—"}</td>
+                        <td className="px-3 py-2 text-right font-bold text-neutral-800">{i.galones ?? "—"} GL</td>
+                        <td className="px-3 py-2 text-right text-neutral-700">S/ {num(i.precio_unitario)}</td>
+                        <td className="px-3 py-2 text-right font-bold text-brand">S/ {num(i.importe_total)}</td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex justify-center gap-1 whitespace-nowrap">
+                            <button
+                              onClick={() => startEditInvoice(i)}
+                              className="px-2 py-1 text-[11px] border border-neutral-200 hover:border-neutral-300 bg-neutral-50 text-neutral-700 font-bold rounded flex items-center gap-0.5 transition-colors"
+                            >
+                              <Pencil className="w-2.5 h-2.5 text-neutral-500" /> Editar
+                            </button>
+                            <button
+                              onClick={() => deleteInvoice(i.id)}
+                              className="px-2 py-1 text-[11px] border border-red-200 hover:border-red-300 bg-red-50 text-red-700 font-bold rounded flex items-center gap-0.5 transition-colors"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" /> Borrar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

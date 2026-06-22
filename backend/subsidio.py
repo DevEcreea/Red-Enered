@@ -164,6 +164,31 @@ class VehicleIn(BaseModel):
     categoria: Literal["M2", "M3", "N1", "N2", "N3"]
 
 
+class VehicleAdminIn(BaseModel):
+    placa: str
+    categoria: Literal["M2", "M3", "N1", "N2", "N3"]
+    anio_fabricacion: Optional[int] = None
+    vigente_desde: Optional[str] = None
+    vigente_hasta: Optional[str] = None
+
+
+class InvoiceAdminCreateIn(BaseModel):
+    numero_documento: str
+    fecha: str
+    estacion: str
+    ruc_emisor: str
+    ciudad: str
+    placa: str
+    galones: float
+    precio_unitario: float
+    importe_total: float
+    producto: Optional[str] = "DIESEL B5"
+
+
+class RepresentanteUpdateIn(BaseModel):
+    representante: str
+
+
 # Etapas del trámite (controladas por admin_enered)
 SUBSIDIO_STAGES = ["solicitud_enviada", "evaluacion_atu", "aprobada", "abonado_en_cuenta"]
 
@@ -1372,3 +1397,187 @@ async def admin_delete_invoice(invoice_id: str, _: dict = Depends(_require_admin
         storage.delete_object(inv["factura_storage_key"])
     await db.consumos_subsidio.delete_one({"id": invoice_id})
     return {"status": "ok"}
+
+
+@subsidio_router.put("/admin/subsidio/expedientes/{user_id}/representante")
+async def admin_update_representante(
+    user_id: str,
+    payload: RepresentanteUpdateIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "contacto": payload.representante,
+            "representante": payload.representante
+        }}
+    )
+    return {"ok": True, "representante": payload.representante}
+
+
+@subsidio_router.post("/admin/subsidio/expedientes/{user_id}/vehicles")
+async def admin_add_vehicle(
+    user_id: str,
+    payload: VehicleAdminIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    placa = payload.placa.upper().strip()
+    if await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa}):
+        raise HTTPException(status_code=409, detail="La placa ya está registrada")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "empresa": u.get("empresa"),
+        "placa": placa,
+        "categoria": payload.categoria,
+        "anio_fabricacion": payload.anio_fabricacion,
+        "vigente_desde": payload.vigente_desde,
+        "vigente_hasta": payload.vigente_hasta,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.subsidio_vehicles.insert_one(doc)
+    doc.pop("_id", None)
+    return {"ok": True, "vehicle": doc}
+
+
+@subsidio_router.put("/admin/subsidio/expedientes/{user_id}/vehicles/{vehicle_id}")
+async def admin_update_vehicle(
+    user_id: str,
+    vehicle_id: str,
+    payload: VehicleAdminIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    v = await db.subsidio_vehicles.find_one({"id": vehicle_id, "user_id": user_id})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+    placa_new = payload.placa.upper().strip()
+    if placa_new != v["placa"]:
+        if await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa_new}):
+            raise HTTPException(status_code=409, detail="La nueva placa ya está registrada")
+    
+    if placa_new != v["placa"]:
+        await db.subsidio_documents.update_many(
+            {"user_id": user_id, "placa": v["placa"]},
+            {"$set": {"placa": placa_new}}
+        )
+        await db.consumos_subsidio.update_many(
+            {"user_id": user_id, "placa": v["placa"]},
+            {"$set": {"placa": placa_new}}
+        )
+
+    await db.subsidio_vehicles.update_one(
+        {"id": vehicle_id},
+        {"$set": {
+            "placa": placa_new,
+            "categoria": payload.categoria,
+            "anio_fabricacion": payload.anio_fabricacion,
+            "vigente_desde": payload.vigente_desde,
+            "vigente_hasta": payload.vigente_hasta,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }}
+    )
+    return {"ok": True}
+
+
+@subsidio_router.delete("/admin/subsidio/expedientes/{user_id}/vehicles/{vehicle_id}")
+async def admin_delete_vehicle(
+    user_id: str,
+    vehicle_id: str,
+    _: dict = Depends(_require_admin_enered),
+):
+    v = await db.subsidio_vehicles.find_one({"id": vehicle_id, "user_id": user_id})
+    if not v:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+    
+    placa = v["placa"]
+    await db.subsidio_vehicles.delete_one({"id": vehicle_id})
+    
+    docs = await db.subsidio_documents.find(
+        {"user_id": user_id, "placa": placa}, {"_id": 0}
+    ).to_list(100)
+    for d in docs:
+        try:
+            storage.delete_object(d["storage_key"])
+        except Exception:
+            pass
+    await db.subsidio_documents.delete_many({"user_id": user_id, "placa": placa})
+    return {"ok": True}
+
+
+@subsidio_router.post("/admin/subsidio/expedientes/{user_id}/invoices")
+async def admin_add_invoice(
+    user_id: str,
+    payload: InvoiceAdminCreateIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    placa = payload.placa.upper().strip()
+    own = await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa})
+    placa_match = placa if own else None
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "empresa": u.get("empresa"),
+        "empresa_id": u.get("empresa"),
+        "calc_id": u.get("calc_id"),
+        "factura_filename": "manual_entry.pdf",
+        "factura_storage_key": None,
+        "factura_content_type": "application/pdf",
+        "factura_size": 0,
+        "raw_ocr_response": "Manual Entry by Admin",
+        "ocr_ok": True,
+        "ocr_error": None,
+        "placa_match": placa_match,
+        "status": "confirmed",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "fecha": payload.fecha,
+        "hora": "12:00",
+        "estacion": payload.estacion,
+        "ciudad": payload.ciudad,
+        "ruc_emisor": payload.ruc_emisor,
+        "placa": placa,
+        "producto": payload.producto or "DIESEL B5",
+        "galones": payload.galones,
+        "precio_unitario": payload.precio_unitario,
+        "importe_total": payload.importe_total,
+        "numero_documento": payload.numero_documento,
+        "confianza": 1.0,
+    }
+    await db.consumos_subsidio.insert_one(doc)
+    doc.pop("_id", None)
+    return {"ok": True, "invoice": doc}
+
+
+@subsidio_router.put("/admin/subsidio/expedientes/{user_id}/invoices/{invoice_id}")
+async def admin_update_invoice(
+    user_id: str,
+    invoice_id: str,
+    payload: InvoiceUpdateIn,
+    _: dict = Depends(_require_admin_enered),
+):
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    
+    patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if "placa" in patch and patch["placa"]:
+        placa = patch["placa"].upper().strip()
+        patch["placa"] = placa
+        own = await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa})
+        patch["placa_match"] = placa if own else None
+
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": patch})
+    return {"ok": True}
+
