@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Loader2, Fuel, Banknote, Truck, Building2, FileCheck2,
   CheckCircle2, Circle, AlertTriangle, ShieldCheck, BarChart3, Gauge, Users,
-  MapPin, FileText, Clock, RefreshCw,
+  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
@@ -192,11 +192,57 @@ export default function DashboardSubsidioView() {
           subValue={kpis.docs_detalle || "Todos al día"}
           subValueColor={kpis.docs_detalle?.includes("vencer") || kpis.docs_detalle?.includes("vencidos") ? "text-amber-600" : "text-emerald-600"}
           iconColor="text-violet-500"
-          testid="kpi-docs-en-regla"
         />
       </div>
 
-      {/* FILA 3 — Evolución semanal */}
+      {/* FILA 3 — 4 KPIs de Consumo y Flota */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Kpi
+          icon={Banknote}
+          label="Gasto total en diésel"
+          value={`S/ ${fmt(kpis.gasto_total)}`}
+          subValue={`${kpis.num_meses || 1} ${kpis.num_meses === 1 ? "mes" : "meses"} - ${fmt(kpis.galones_reconocidos)} gal`}
+          iconColor="text-emerald-500"
+          testid="kpi-gasto-total"
+        />
+        <Kpi
+          icon={TrendingDown}
+          label="Precio promedio por galón"
+          value={`S/ ${fmt(kpis.precio_promedio_galon)}`}
+          subValue={
+            (kpis.precio_promedio_diff || 0) === 0
+              ? "vs. mes anterior"
+              : `${(kpis.precio_promedio_diff || 0) > 0 ? "+" : "-"}S/ ${fmt(Math.abs(kpis.precio_promedio_diff))} vs. mes anterior`
+          }
+          subValueColor={(kpis.precio_promedio_diff || 0) <= 0 ? "text-emerald-600" : "text-rose-600"}
+          iconColor="text-amber-500"
+          testid="kpi-precio-promedio"
+        />
+        <Kpi
+          icon={BarChart3}
+          label="Costo promedio por unidad"
+          value={`S/ ${fmt(kpis.costo_promedio_unidad)}`}
+          subValue={`por unidad - ${kpis.num_meses || 1} ${kpis.num_meses === 1 ? "mes" : "meses"}`}
+          iconColor="text-blue-500"
+          testid="kpi-costo-promedio-unidad"
+        />
+        <Kpi
+          icon={Wrench}
+          label="Antigüedad de flota"
+          value={
+            <span className="flex items-baseline gap-1">
+              {fmt(kpis.avg_age)}
+              <span className="text-xs font-normal text-neutral-500 font-sans tracking-normal"> años prom.</span>
+            </span>
+          }
+          subValue={`${kpis.older_than_10 || 0} ${kpis.older_than_10 === 1 ? "unidad" : "unidades"} +10 años`}
+          subValueColor={(kpis.older_than_10 || 0) > 0 ? "text-rose-600" : "text-emerald-600"}
+          iconColor="text-violet-500"
+          testid="kpi-antiguedad-flota"
+        />
+      </div>
+
+      {/* FILA 4 — Evolución semanal */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-evolucion-semanal">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
@@ -220,7 +266,7 @@ export default function DashboardSubsidioView() {
         )}
       </div>
 
-      {/* FILA 4 — Top unidades + Top estaciones */}
+      {/* FILA 5 — Top unidades + Top estaciones */}
       <div className="grid md:grid-cols-2 gap-4">
         {/* Top unidades */}
         <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-top-unidades">
@@ -280,7 +326,7 @@ export default function DashboardSubsidioView() {
         </div>
       </div>
 
-      {/* FILA 5 — Semáforo de vencimiento */}
+      {/* FILA 6 — Semáforo de vencimiento */}
       <DocsSemaforoCard semaforo={documentos_semaforo} navigate={navigate} />
     </div>
   );

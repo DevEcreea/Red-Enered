@@ -1071,8 +1071,49 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     else:
         docs_detalle = "Todos al día"
 
+    distinct_months = {r.get("fecha")[:7] for r in rows if r.get("fecha") and len(r.get("fecha")) >= 7}
+    num_meses = len(distinct_months) if distinct_months else 1
+
+    by_month_stats = {}
+    for r in rows:
+        f_date = _parse_date(r.get("fecha"))
+        if not f_date:
+            continue
+        ym = f_date.strftime("%Y-%m")
+        stats = by_month_stats.setdefault(ym, {"galones": 0.0, "importe": 0.0})
+        stats["galones"] += _f(r.get("galones"))
+        stats["importe"] += _f(r.get("importe_total"))
+
+    sorted_months = sorted(by_month_stats.keys())
+    precio_promedio_diff = 0.0
+    if len(sorted_months) >= 2:
+        m_curr = sorted_months[-1]
+        m_prev = sorted_months[-2]
+        s_curr = by_month_stats[m_curr]
+        s_prev = by_month_stats[m_prev]
+        avg_curr = s_curr["importe"] / s_curr["galones"] if s_curr["galones"] > 0 else 0.0
+        avg_prev = s_prev["importe"] / s_prev["galones"] if s_prev["galones"] > 0 else 0.0
+        precio_promedio_diff = avg_curr - avg_prev
+
+    current_year = datetime.now(timezone.utc).year
+    ages = []
+    older_than_10 = 0
+    for v in vehicles:
+        yr = v.get("anio_fabricacion")
+        if yr:
+            try:
+                yr_val = int(yr)
+                age = current_year - yr_val
+                ages.append(age)
+                if age >= 10:
+                    older_than_10 += 1
+            except Exception:
+                pass
+    avg_age = round(sum(ages) / len(ages), 1) if ages else 0.0
+
     precio_promedio_gl = (total_importe / total_gal) if total_gal > 0 else 0
-    costo_promedio_unidad = (total_importe / unidades_activas) if unidades_activas > 0 else 0
+    # Costo promedio por unidad dividiendo entre unidades_incluidas para coincidir con la maqueta
+    costo_promedio_unidad = (total_importe / unidades_incluidas) if unidades_incluidas > 0 else 0
 
     # === Etapas (Fila 1) ===
     current_stage = user.get("expediente_stage")
@@ -1274,6 +1315,10 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
             "costo_promedio_unidad": round(costo_promedio_unidad, 2),
             "pct_docs": pct_docs,
             "docs_detalle": docs_detalle,
+            "num_meses": num_meses,
+            "precio_promedio_diff": round(precio_promedio_diff, 2),
+            "avg_age": avg_age,
+            "older_than_10": older_than_10,
             # Legacy (no romper UI antigua/admin)
             "unidades_activas": unidades_activas,
             "facturas_confirmadas": len(rows),
