@@ -163,7 +163,7 @@ export default function DashboardSubsidioView() {
         <Kpi
           icon={Truck}
           label="Unidades incluidas"
-          value={`${kpis.unidades_incluidas || 0} / ${kpis.unidades_contratadas || 0}`}
+          value={`${kpis.unidades_incluidas || 0}`}
           subValue={kpis.unidades_detalle || "Sin vehículos"}
           iconColor="text-brand"
           testid="kpi-unidades-incluidas"
@@ -319,8 +319,8 @@ function StagesRow({ stages, user, kpis }) {
   const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
 
   const ruc = user?.ruc || "20000000000";
-  const numENR = `ENR-2026-${ruc.slice(-5)}`;
-  const numATU = `ATU-2026-${ruc.slice(-6)}`;
+  const numENR = `ENR-2026-${ruc}`;
+  const numATU = `ATU-2026-${ruc}`;
 
   const getStageSubtitle = (s, idx) => {
     const currentStage = user?.expediente_stage;
