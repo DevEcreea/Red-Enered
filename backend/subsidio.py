@@ -980,6 +980,26 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         except Exception:
             return 0.0
 
+    def _parse_date(s):
+        if not s:
+            return None
+        s = str(s).strip()
+        # ISO YYYY-MM-DD
+        try:
+            return datetime.strptime(s[:10], "%Y-%m-%d").date()
+        except Exception:
+            pass
+        # DD/MM/YYYY
+        try:
+            return datetime.strptime(s[:10], "%d/%m/%Y").date()
+        except Exception:
+            pass
+        # DD-MM-YYYY
+        try:
+            return datetime.strptime(s[:10], "%d-%m-%Y").date()
+        except Exception:
+            return None
+
     # === KPIs base (galones, importe) ===
     total_gal = sum(_f(r.get("galones")) for r in rows)
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
@@ -1134,25 +1154,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     WEEK_START = date(2026, 6, 1)
     weeks_map = {}
 
-    def _parse_date(s):
-        if not s:
-            return None
-        s = str(s).strip()
-        # ISO YYYY-MM-DD
-        try:
-            return datetime.strptime(s[:10], "%Y-%m-%d").date()
-        except Exception:
-            pass
-        # DD/MM/YYYY
-        try:
-            return datetime.strptime(s[:10], "%d/%m/%Y").date()
-        except Exception:
-            pass
-        # DD-MM-YYYY
-        try:
-            return datetime.strptime(s[:10], "%d-%m-%Y").date()
-        except Exception:
-            return None
+
 
     for r in rows:
         d = _parse_date(r.get("fecha"))
