@@ -12,7 +12,7 @@ import { useAuth } from "../context/AuthContext";
 const ETAPAS = [
   { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
-  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF, PNG o JPG · OCR" },
+  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF · OCR" },
   { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
   { id: "envio",        n: 5, label: "Envío a la ATU",           icon: Send,       short: "Envío",        hint: "Confirmación" },
 ];
@@ -482,11 +482,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
 
   const enviarReporte = async () => {
     setError(null); setSuccess(null);
-    const incompletos = items.filter((it) => !it.placa || !it.galones || !it.importe_total || !it.fecha);
-    if (incompletos.length > 0) {
-      setError(`Te faltan datos en ${incompletos.length} factura(s). Completa fecha, placa, galones e importe.`);
-      return;
-    }
+
     const dirty = items.filter((it) => it._dirty);
     if (dirty.length > 0 && !window.confirm("Hay cambios sin guardar. ¿Confirmar de todos modos?")) return;
     setConfirming(true);
@@ -503,7 +499,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
 
   return (
     <div>
-      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · OCR Gemini Vision · PDF, PNG o JPG" />
+      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · OCR Gemini Vision · Solo PDF" />
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex gap-2">
         <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -527,7 +523,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           </div>
           <label className={`px-4 py-2.5 ${uploading ? "bg-neutral-300" : "bg-brand hover:bg-brand-hover"} text-white font-bold rounded-lg flex items-center gap-2 cursor-pointer text-sm`} data-testid="combustible-upload">
             {uploading ? (<><Loader2 className="w-4 h-4 animate-spin" /> Procesando {uploadProgress.done}/{uploadProgress.total}…</>) : (<><Upload className="w-4 h-4" /> {items.length === 0 ? "Subir facturas" : "Adjuntar más"}</>)}
-            <input ref={fileRef} type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
+            <input ref={fileRef} type="file" hidden multiple accept=".pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
           </label>
         </div>
         {uploading && uploadProgress.total > 0 && (
@@ -584,7 +580,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
       <div className="mt-4 flex items-center justify-end gap-3 flex-wrap">
         <label className="px-4 py-2 border border-neutral-300 bg-white rounded-lg text-sm font-bold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-50" data-testid="combustible-add-more">
           <Plus className="w-4 h-4" /> Adjuntar más
-          <input type="file" hidden multiple accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleUpload} disabled={uploading} />
+          <input type="file" hidden multiple accept=".pdf" onChange={handleUpload} disabled={uploading} />
         </label>
         <button onClick={enviarReporte} disabled={confirming || items.length === 0}
           className="px-5 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"

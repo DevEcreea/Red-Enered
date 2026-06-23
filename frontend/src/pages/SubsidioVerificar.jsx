@@ -95,13 +95,6 @@ export default function SubsidioVerificar() {
 
   const confirmAll = async () => {
     setError(null);
-    const incompletos = items.filter((it) =>
-      !it.placa || !it.galones || !it.importe_total || !it.fecha
-    );
-    if (incompletos.length > 0) {
-      setError(`Te faltan datos en ${incompletos.length} factura(s). Completa fecha, placa, galones e importe.`);
-      return;
-    }
     const dirty = items.filter((it) => it._dirty);
     if (dirty.length > 0 && !window.confirm("Hay cambios sin guardar. ¿Confirmar de todos modos? (se perderán los cambios sin guardar)")) {
       return;
@@ -147,7 +140,7 @@ export default function SubsidioVerificar() {
             </div>
             <div>
               <h3 className="font-cabinet font-bold text-lg">Subir facturas de combustible</h3>
-              <p className="text-sm text-neutral-500">Acepta imágenes (JPG/PNG/WEBP) y PDFs · máx 40 por carga</p>
+              <p className="text-sm text-neutral-500">Acepta archivos PDF · máx 40 por carga</p>
             </div>
           </div>
           <label className={`px-5 py-3 ${uploading ? "bg-neutral-300" : "bg-brand hover:bg-brand-hover"} text-white font-bold rounded-xl flex items-center gap-2 cursor-pointer`}>
@@ -167,7 +160,7 @@ export default function SubsidioVerificar() {
               type="file"
               hidden
               multiple
-              accept=".jpg,.jpeg,.png,.webp,.pdf"
+              accept=".pdf"
               onChange={handleUpload}
               disabled={uploading}
               data-testid="subsidio-upload-input"
