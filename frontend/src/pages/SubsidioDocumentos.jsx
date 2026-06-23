@@ -560,15 +560,30 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-900 flex gap-2 mb-3">
             <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
             <div>
-              <strong>{items.length} factura(s) en borrador.</strong> Si el OCR no leyó algún campo, completa <strong>fecha, placa, galones e importe</strong> manualmente. Las facturas no se confirman hasta que tú lo apruebes.
+              <strong>Tienes {items.length} factura(s) en borrador pendiente(s) de envío.</strong> Haz clic en "Enviar reporte" para registrarlas.
             </div>
           </div>
-          <div className="space-y-3">
-            {items.map((it) => (
-              <InvoiceRow key={it.id} item={it} vehicles={vehicles}
-                onChange={(field, value) => setField(it.id, field, value)}
-                onSave={() => saveRow(it)} onDelete={() => deleteRow(it.id)} saving={savingId === it.id} />
-            ))}
+          <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm space-y-2">
+            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Archivos cargados:</h4>
+            <div className="divide-y divide-neutral-100">
+              {items.map((it) => (
+                <div key={it.id} className="flex items-center justify-between py-2 text-sm">
+                  <div className="flex items-center gap-2 truncate">
+                    <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />
+                    <span className="truncate font-medium text-neutral-800" title={it.factura_filename}>
+                      {it.factura_filename}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => deleteRow(it.id)}
+                    className="text-neutral-400 hover:text-red-500 p-1 rounded hover:bg-neutral-100"
+                    title="Eliminar archivo"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}
@@ -589,68 +604,6 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           Enviar reporte ({items.length})
         </button>
       </div>
-    </div>
-  );
-}
-
-function InvoiceRow({ item, vehicles, onChange, onSave, onDelete, saving }) {
-  const placaMatch = item.placa_match;
-  const placaInFleet = item.placa && vehicles.some(v => v.placa === item.placa);
-  const lowConf = (item.confianza ?? 0) < 0.5;
-  return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm" data-testid={`invoice-row-${item.id}`}>
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />
-          <span className="truncate font-bold text-sm" title={item.factura_filename}>{item.factura_filename}</span>
-          {!item.ocr_ok && <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded-full">OCR FALLÓ · COMPLETAR MANUAL</span>}
-          {item.ocr_ok && lowConf && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded-full">REVISAR</span>}
-          {placaMatch && <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded-full">PLACA OK</span>}
-        </div>
-        <button onClick={onDelete} className="text-neutral-400 hover:text-red-500" data-testid={`invoice-delete-${item.id}`}><Trash2 className="w-4 h-4" /></button>
-      </div>
-      {item.ocr_error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded p-2 text-xs mb-3 flex gap-1.5">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {item.ocr_error}
-        </div>
-      )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Field label="Fecha"><input type="date" className="ocr-input" value={item.fecha || ""} onChange={(e) => onChange("fecha", e.target.value)} data-testid={`field-fecha-${item.id}`} /></Field>
-        <Field label="Placa">
-          {vehicles.length > 0 ? (
-            <select className="ocr-input" value={item.placa || ""} onChange={(e) => onChange("placa", e.target.value)} data-testid={`field-placa-${item.id}`}>
-              <option value="">— Seleccionar —</option>
-              {vehicles.map(v => <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>)}
-              {item.placa && !placaInFleet && <option value={item.placa}>{item.placa} (fuera de flota)</option>}
-            </select>
-          ) : (
-            <input className="ocr-input" value={item.placa || ""} onChange={(e) => onChange("placa", e.target.value.toUpperCase())} />
-          )}
-        </Field>
-        <Field label="N° Documento"><input className="ocr-input" value={item.numero_documento || ""} onChange={(e) => onChange("numero_documento", e.target.value)} /></Field>
-        <Field label="Estación"><input className="ocr-input" value={item.estacion || ""} onChange={(e) => onChange("estacion", e.target.value)} /></Field>
-        <Field label="Ciudad"><input className="ocr-input" value={item.ciudad || ""} onChange={(e) => onChange("ciudad", e.target.value)} /></Field>
-        <Field label="RUC emisor"><input className="ocr-input" value={item.ruc_emisor || ""} onChange={(e) => onChange("ruc_emisor", e.target.value)} /></Field>
-        <Field label="Producto">
-          <select className="ocr-input" value={item.producto || ""} onChange={(e) => onChange("producto", e.target.value)}>
-            <option value="">—</option>
-            {PRODUCTOS.map(p => <option key={p} value={p}>{p}</option>)}
-            {item.producto && !PRODUCTOS.includes(item.producto) && <option value={item.producto}>{item.producto}</option>}
-          </select>
-        </Field>
-        <Field label="Galones"><input type="number" step="0.01" className="ocr-input" value={item.galones ?? ""} onChange={(e) => onChange("galones", e.target.value)} data-testid={`field-galones-${item.id}`} /></Field>
-        <Field label="Precio S/ por gl"><input type="number" step="0.01" className="ocr-input" value={item.precio_unitario ?? ""} onChange={(e) => onChange("precio_unitario", e.target.value)} /></Field>
-        <Field label="Importe total S/" full><input type="number" step="0.01" className="ocr-input" value={item.importe_total ?? ""} onChange={(e) => onChange("importe_total", e.target.value)} data-testid={`field-importe-${item.id}`} /></Field>
-      </div>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        {item._dirty && <span className="text-xs text-amber-600 font-bold">Sin guardar</span>}
-        <button onClick={onSave} disabled={saving || !item._dirty}
-          className="px-3 py-1.5 bg-brand text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"
-          data-testid={`invoice-save-${item.id}`}>
-          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Guardar
-        </button>
-      </div>
-      <style>{`.ocr-input{width:100%;height:38px;padding:0 10px;border:1px solid #d4d4d4;border-radius:8px;background:#fff;font-size:13px;}.ocr-input:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.1);}`}</style>
     </div>
   );
 }
