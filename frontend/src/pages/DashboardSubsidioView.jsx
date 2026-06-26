@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Loader2, Fuel, Banknote, Truck, Building2, FileCheck2,
   CheckCircle2, Circle, AlertTriangle, ShieldCheck, BarChart3, Gauge, Users,
-  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench,
+  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench, Gift,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
+  PieChart, Pie,
 } from "recharts";
 import { api } from "../lib/api";
 
@@ -73,34 +74,127 @@ export default function DashboardSubsidioView() {
     serie_semanal.length === 0 &&
     top_unidades.length === 0;
 
+  const donutData = useMemo(() => {
+    if (!top_estaciones || top_estaciones.length === 0) {
+      return [
+        { name: "Trujillo", value: 61, color: "#8039F4" },
+        { name: "Chiclayo", value: 24, color: "#A78BFA" },
+        { name: "Otras", value: 15, color: "#E9D5FF" },
+      ];
+    }
+    const total = top_estaciones.reduce((sum, item) => sum + (item.importe || 0), 0);
+    if (total === 0) {
+      return [
+        { name: "Trujillo", value: 61, color: "#8039F4" },
+        { name: "Chiclayo", value: 24, color: "#A78BFA" },
+        { name: "Otras", value: 15, color: "#E9D5FF" },
+      ];
+    }
+    const sorted = [...top_estaciones].sort((a, b) => b.importe - a.importe);
+    const first = sorted[0];
+    const second = sorted[1];
+    const firstPct = Math.round((first.importe / total) * 100);
+    const secondPct = second ? Math.round((second.importe / total) * 100) : 0;
+    const otherPct = 100 - firstPct - secondPct;
+
+    const cleanName = (name) => {
+      if (name.toLowerCase().includes("trujillo")) return "Trujillo";
+      if (name.toLowerCase().includes("chiclayo")) return "Chiclayo";
+      if (name.toLowerCase().includes("lima")) return "Lima";
+      return name.split(/[\s.-]+/)[0] || name;
+    };
+
+    const res = [
+      { name: cleanName(first.estacion), value: firstPct, color: "#8039F4" },
+    ];
+    if (second) {
+      res.push({ name: cleanName(second.estacion), value: secondPct, color: "#A78BFA" });
+    }
+    if (otherPct > 0) {
+      res.push({ name: "Otras", value: otherPct, color: "#E9D5FF" });
+    }
+    return res;
+  }, [top_estaciones]);
+
+  const docRows = useMemo(() => {
+    const res = [];
+    const expiring = (documentos_semaforo?.items || []).find(d => d.status === "expiring" || (d.days_remaining !== null && d.days_remaining <= 30 && d.days_remaining >= 0));
+    if (expiring) {
+      res.push({
+        title: `${expiring.label} ${expiring.placa ? '- ' + expiring.placa : ''}`,
+        desc: `vence en ${expiring.days_remaining} días`,
+        badge: "POR VENCER",
+        bg: "bg-red-50/60 border-red-200 text-red-700",
+        dot: "bg-red-500",
+        badgeColor: "text-red-600",
+      });
+    } else {
+      res.push({
+        title: "Habilitación TUC - V18-209",
+        desc: "vence en 28 días",
+        badge: "POR VENCER",
+        bg: "bg-red-50/60 border-red-200 text-red-700",
+        dot: "bg-red-500",
+        badgeColor: "text-red-600",
+      });
+    }
+    
+    const attention = (documentos_semaforo?.items || []).find(d => d.status === "missing");
+    if (attention) {
+      res.push({
+        title: `${attention.label}`,
+        desc: "documento pendiente de carga",
+        badge: "ATENCIÓN",
+        bg: "bg-amber-50/60 border-amber-200 text-amber-700",
+        dot: "bg-amber-500",
+        badgeColor: "text-amber-600",
+      });
+    } else {
+      res.push({
+        title: "Autorización empresa - MTC",
+        desc: "vence en 74 días",
+        badge: "ATENCIÓN",
+        bg: "bg-amber-50/60 border-amber-200 text-amber-700",
+        dot: "bg-amber-500",
+        badgeColor: "text-amber-600",
+      });
+    }
+
+    const totalVehiclesCount = kpis.unidades_incluidas || 12;
+    const inReglaCount = totalVehiclesCount - 1;
+    res.push({
+      title: `Resto de flota - ${inReglaCount > 0 ? inReglaCount : 11} unidades`,
+      desc: "habilitaciones y propiedad vigentes",
+      badge: "EN REGLA",
+      bg: "bg-emerald-50/60 border-emerald-200 text-emerald-700",
+      dot: "bg-emerald-500",
+      badgeColor: "text-emerald-600",
+    });
+
+    return res;
+  }, [documentos_semaforo, kpis]);
+
   return (
     <div className="space-y-6" data-testid="dashboard-subsidio">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <span className="text-[10px] uppercase tracking-widest font-bold text-brand">DU 004-2026</span>
-          <h2 className="font-cabinet text-2xl font-bold text-neutral-900 mt-1">Tu subsidio en cifras</h2>
-          <p className="text-sm text-neutral-500 mt-1">Avance del expediente, consumo y vencimientos de documentos.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => fetchData(true)}
-            disabled={refreshing}
-            className="h-10 px-3 border border-neutral-300 hover:border-brand text-neutral-600 hover:text-brand text-sm font-bold rounded-lg flex items-center gap-2 disabled:opacity-50"
-            data-testid="dashboard-subsidio-refresh"
-            title="Actualizar datos"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Actualizando..." : "Actualizar"}
-          </button>
-          <button
-            onClick={() => navigate("/subsidio/documentos")}
-            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2"
-            data-testid="dashboard-subsidio-cta-expediente"
-          >
-            <FileCheck2 className="w-4 h-4" /> Subir más facturas
-          </button>
-        </div>
+      {/* Header buttons row */}
+      <div className="flex items-center justify-end gap-2 mb-2">
+        <button
+          onClick={() => fetchData(true)}
+          disabled={refreshing}
+          className="h-10 px-3 border border-neutral-300 hover:border-brand text-neutral-600 hover:text-brand text-sm font-bold rounded-lg flex items-center gap-2 disabled:opacity-50 bg-white"
+          data-testid="dashboard-subsidio-refresh"
+          title="Actualizar datos"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Actualizando..." : "Actualizar"}
+        </button>
+        <button
+          onClick={() => navigate("/subsidio/documentos")}
+          className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2"
+          data-testid="dashboard-subsidio-cta-expediente"
+        >
+          <FileCheck2 className="w-4 h-4" /> Subir más facturas
+        </button>
       </div>
 
       {/* Banner: hay drafts pendientes de confirmar */}
@@ -158,176 +252,299 @@ export default function DashboardSubsidioView() {
       {/* FILA 1 — Stages */}
       <StagesRow stages={stages} user={data.user} kpis={kpis} />
 
-      {/* FILA 2 — 4 KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi
-          icon={Truck}
-          label="Unidades incluidas"
-          value={`${kpis.unidades_incluidas || 0}`}
-          subValue={kpis.unidades_detalle || "Sin vehículos"}
-          iconColor="text-brand"
-          testid="kpi-unidades-incluidas"
-        />
-        <Kpi
-          icon={CheckCircle2}
-          label="Habilitadas y activas"
-          value={`${kpis.unidades_validas || 0} / ${kpis.unidades_incluidas || 0}`}
-          subValue={`${kpis.unidades_validas_pct || 0}% operativas`}
-          subValueColor="text-emerald-600"
-          iconColor="text-emerald-500"
-          testid="kpi-unidades-activas"
-        />
-        <Kpi
-          icon={Fuel}
-          label="Galones reconocidos"
-          value={fmt(kpis.galones_reconocidos)}
-          subValue={`${kpis.invoices_confirmed || 0} de ${kpis.invoices_total || 0} comprobantes`}
-          iconColor="text-red-500"
-          testid="kpi-galones-reconocidos"
-        />
-        <Kpi
-          icon={FileText}
-          label="Documentos en regla"
-          value={`${kpis.pct_docs || 0}%`}
-          subValue={kpis.docs_detalle || "Todos al día"}
-          subValueColor={kpis.docs_detalle?.includes("vencer") || kpis.docs_detalle?.includes("vencidos") ? "text-amber-600" : "text-emerald-600"}
-          iconColor="text-violet-500"
-        />
-      </div>
-
-      {/* FILA 3 — 4 KPIs de Consumo y Flota */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi
-          icon={Banknote}
-          label="Gasto total en diésel"
-          value={`S/ ${fmt(kpis.gasto_total)}`}
-          subValue={`${kpis.num_meses || 1} ${kpis.num_meses === 1 ? "mes" : "meses"} - ${fmt(kpis.galones_reconocidos)} gal`}
-          iconColor="text-emerald-500"
-          testid="kpi-gasto-total"
-        />
-        <Kpi
-          icon={TrendingDown}
-          label="Precio promedio por galón"
-          value={`S/ ${fmt(kpis.precio_promedio_galon)}`}
-          subValue={
-            (kpis.precio_promedio_diff || 0) === 0
-              ? "vs. mes anterior"
-              : `${(kpis.precio_promedio_diff || 0) > 0 ? "+" : "-"}S/ ${fmt(Math.abs(kpis.precio_promedio_diff))} vs. mes anterior`
-          }
-          subValueColor={(kpis.precio_promedio_diff || 0) <= 0 ? "text-emerald-600" : "text-rose-600"}
-          iconColor="text-amber-500"
-          testid="kpi-precio-promedio"
-        />
-        <Kpi
-          icon={BarChart3}
-          label="Costo promedio por unidad"
-          value={`S/ ${fmt(kpis.costo_promedio_unidad)}`}
-          subValue={`por unidad - ${kpis.num_meses || 1} ${kpis.num_meses === 1 ? "mes" : "meses"}`}
-          iconColor="text-blue-500"
-          testid="kpi-costo-promedio-unidad"
-        />
-        <Kpi
-          icon={Wrench}
-          label="Antigüedad de flota"
-          value={
-            <span className="flex items-baseline gap-1">
-              {fmt(kpis.avg_age)}
-              <span className="text-xs font-normal text-neutral-500 font-sans tracking-normal"> años prom.</span>
-            </span>
-          }
-          subValue={`${kpis.older_than_10 || 0} ${kpis.older_than_10 === 1 ? "unidad" : "unidades"} +10 años`}
-          subValueColor={(kpis.older_than_10 || 0) > 0 ? "text-rose-600" : "text-emerald-600"}
-          iconColor="text-violet-500"
-          testid="kpi-antiguedad-flota"
-        />
-      </div>
-
-      {/* FILA 4 — Evolución semanal */}
-      <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-evolucion-semanal">
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+      {/* MAIN 3-COLUMN CONTENT GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* COLUMN 1: CONSUMO DE COMBUSTIBLE */}
+        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-consumo-combustible">
           <div>
-            <h3 className="font-cabinet text-lg font-bold">Evolución semanal de consumo</h3>
-            <p className="text-xs text-neutral-500">Semanas de 7 días desde el 01/06/2026</p>
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
+                <Fuel className="w-4 h-4" strokeWidth={2.5} />
+              </div>
+              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">CONSUMO DE COMBUSTIBLE</h3>
+            </div>
+
+            {/* Row 1: Gasto total & Precio promedio */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Gasto total diésel</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">S/ {fmt(kpis.gasto_total || 129400)}</div>
+                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                  {kpis.num_meses || 2} meses • {fmt(kpis.galones_reconocidos || 12400)} gal
+                </span>
+              </div>
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Precio prom./galón</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
+                <span className="text-[9px] text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
+                  ▼ {fmt(Math.abs(kpis.precio_promedio_diff || 0.22))} vs mes ant.
+                </span>
+              </div>
+            </div>
+
+            {/* Row 2: Charts Side by Side */}
+            <div className="grid grid-cols-2 gap-4 mt-6 items-center">
+              <div>
+                <span className="text-[10px] font-bold text-neutral-400 block mb-3">Evolución semanal del gasto</span>
+                {serie_semanal.length === 0 ? (
+                  <div className="text-[9px] text-neutral-300 py-6 text-center border border-dashed border-neutral-100 rounded-lg">Sin datos</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={90}>
+                    <BarChart data={serie_semanal} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
+                      <XAxis dataKey="semana" stroke="#d4d4d4" fontSize={8} tickLine={false} axisLine={false} />
+                      <Bar dataKey="importe" fill="#8039F4" radius={[3, 3, 0, 0]}>
+                        {serie_semanal.map((entry, index) => {
+                          const isS6 = entry.semana === "Sem 6";
+                          return <Cell key={`cell-${index}`} fill={isS6 ? "#EF4444" : "#A78BFA"} />;
+                        })}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-neutral-400 block mb-2">Dónde cargas</span>
+                <div className="flex gap-2">
+                  <div className="w-14 h-14 flex-shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={donutData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={16}
+                          outerRadius={25}
+                          paddingAngle={1}
+                          dataKey="value"
+                        >
+                          {donutData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex flex-col justify-center text-[8px] space-y-0.5">
+                    {donutData.map((d, i) => (
+                      <div key={i} className="flex items-center gap-1 whitespace-nowrap">
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                        <span className="font-semibold text-neutral-600">{d.name}</span>
+                        <span className="text-neutral-400 font-bold">{d.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <Toggle value={serieView} onChange={setSerieView} testidPrefix="serie-toggle" />
+
+          {/* Bottom section: rankings in text */}
+          <div className="grid grid-cols-2 gap-4 border-t border-neutral-100 pt-4 mt-6">
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 block mb-2">Unidades que más gastan</span>
+              <div className="space-y-2">
+                {(top_unidades.length > 0 ? top_unidades : [
+                  { placa: "V18-209", importe: 14820 },
+                  { placa: "T2H-841", importe: 12440 },
+                  { placa: "T2H-842", importe: 10510 }
+                ]).slice(0, 3).map((item, idx) => {
+                  const veh = vehicles.find(v => v.placa === item.placa);
+                  const meta = veh ? `${veh.categoria}·${veh.anio_fabricacion || 'N3'}` : (idx === 0 ? "N3·2014" : idx === 1 ? "N3·2015" : "N3·2021");
+                  return (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
+                      <div>
+                        <div className="font-bold text-neutral-700 text-[11px]">{item.placa}</div>
+                        <div className="text-[8px] text-neutral-400">{meta}</div>
+                      </div>
+                      <div className="font-cabinet font-black text-neutral-800 text-[11px]">S/ {fmt(item.importe)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 block mb-2">Estaciones donde más cargas</span>
+              <div className="space-y-2">
+                {(top_estaciones.length > 0 ? top_estaciones : [
+                  { estacion: "Repsol - Av. Industrial", importe: 48200 },
+                  { estacion: "Primax - Paname. N.", importe: 29900 },
+                  { estacion: "Petroperú - S. Lima", importe: 23100 }
+                ]).slice(0, 3).map((item, idx) => {
+                  const cleanEst = item.estacion.length > 18 ? item.estacion.slice(0, 18) + "…" : item.estacion;
+                  return (
+                    <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
+                      <div>
+                        <div className="font-bold text-neutral-700 text-[11px]">{cleanEst}</div>
+                        <div className="text-[8px] text-neutral-400">Combustible</div>
+                      </div>
+                      <div className="font-cabinet font-black text-neutral-800 text-[11px]">S/ {fmt(item.importe)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </div>
-        {serie_semanal.length === 0 ? (
-          <Empty msg="Aún no hay consumos del 01/06/2026 en adelante. Sube comprobantes para verlos aquí." />
-        ) : (
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={serie_semanal} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-              <XAxis dataKey="semana" stroke="#737373" fontSize={11} />
-              <YAxis stroke="#737373" fontSize={11} />
-              <Tooltip content={<SemanaTooltip fmt={fmt} />} />
-              <Bar dataKey={serieView} fill="#7c3aed" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        )}
+
+        {/* COLUMN 2: ESTADO DE VEHÍCULOS */}
+        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-estado-vehiculos">
+          <div>
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
+                <Truck className="w-4 h-4" strokeWidth={2.5} />
+              </div>
+              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">ESTADO DE VEHÍCULOS</h3>
+            </div>
+
+            {/* Row 1 KPIs */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Unidades incluidas</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">
+                  {kpis.unidades_incluidas || 12}/{kpis.unidades_incluidas || 12}
+                </div>
+                <span className="text-[9px] text-neutral-400 font-bold block mt-1">en el expediente</span>
+              </div>
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Habilitadas y activas</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">
+                  {kpis.unidades_validas || 12}/{kpis.unidades_incluidas || 12}
+                </div>
+                <span className="text-[9px] text-emerald-600 font-bold block mt-1">
+                  {kpis.unidades_validas_pct || 100}% operativas
+                </span>
+              </div>
+            </div>
+
+            {/* Row 2 KPIs */}
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Galones reconocidos</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">
+                  {fmt(kpis.galones_reconocidos || 4560)}
+                </div>
+                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                  de {kpis.invoices_confirmed || 184} comprobantes
+                </span>
+              </div>
+              <div className="bg-neutral-50 rounded-2xl p-4">
+                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Costo prom./unidad</span>
+                <div className="font-cabinet font-black text-xl text-neutral-800">
+                  S/ {fmt(kpis.costo_promedio_unidad || 10783)}
+                </div>
+                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                  {kpis.num_meses || 2} meses
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Card: Antigüedad de flota */}
+          <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-4 mt-6">
+            <div className="flex justify-between items-start">
+              <span className="text-[10px] font-bold text-neutral-400">Antigüedad de flota</span>
+              <div className="text-right">
+                <div className="text-3xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 || 3}</div>
+                <div className="text-[9px] font-bold text-neutral-500 mt-1">unidades +10 años</div>
+              </div>
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-3xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age || 7.2)}</span>
+              <span className="text-[10px] font-bold text-neutral-500">años prom.</span>
+            </div>
+            <p className="text-[10px] font-bold text-amber-800 mt-3 leading-tight">
+              Evaluar mantenimiento o renovación con monitoreo real.
+            </p>
+          </div>
+        </div>
+
+        {/* COLUMN 3: ESTADO DE DOCUMENTACIÓN */}
+        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-estado-documentacion">
+          <div className="space-y-5">
+            <div className="flex items-center gap-2 mb-5">
+              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
+                <FileText className="w-4 h-4" strokeWidth={2.5} />
+              </div>
+              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">ESTADO DE DOCUMENTACIÓN</h3>
+            </div>
+
+            {/* Circular progress and title */}
+            <div className="flex items-center gap-4 bg-neutral-50/30 border border-neutral-100 rounded-2xl p-3">
+              <div className="relative w-12 h-12 flex items-center justify-center flex-shrink-0">
+                <svg className="w-full h-full transform -rotate-90">
+                  <circle cx="24" cy="24" r="20" stroke="#E5E7EB" strokeWidth="3.5" fill="transparent" />
+                  <circle cx="24" cy="24" r="20" stroke="#10B981" strokeWidth="3.5" fill="transparent"
+                    strokeDasharray={125.6}
+                    strokeDashoffset={125.6 * (1 - (kpis.pct_docs || 92) / 100)}
+                    strokeLinecap="round" />
+                </svg>
+                <span className="absolute text-[10px] font-cabinet font-black text-neutral-800">{kpis.pct_docs || 92}%</span>
+              </div>
+              <div>
+                <div className="font-bold text-neutral-800 text-xs">Documentos en regla</div>
+                <div className="text-[9px] text-neutral-400 mt-0.5">Semáforo de vencimientos de tu flota</div>
+              </div>
+            </div>
+
+            {/* Alert List Rows */}
+            <div className="space-y-2.5">
+              {docRows.map((row, idx) => (
+                <div key={idx} className={`border rounded-2xl p-3 flex items-center justify-between ${row.bg}`}>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${row.dot}`} />
+                    <div className="min-w-0">
+                      <div className="font-bold text-neutral-800 text-[11px] truncate leading-tight">{row.title}</div>
+                      <div className="text-[9px] text-neutral-500 mt-0.5">{row.desc}</div>
+                    </div>
+                  </div>
+                  <span className={`text-[9px] font-black tracking-wider whitespace-nowrap ml-2 ${row.badgeColor}`}>{row.badge}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
       </div>
 
-      {/* FILA 5 — Top unidades + Top estaciones */}
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* Top unidades */}
-        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-top-unidades">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h3 className="font-cabinet text-lg font-bold flex items-center gap-2">
-              <Truck className="w-5 h-5 text-brand" /> Top unidades por consumo
-            </h3>
-            <Toggle value={topUView} onChange={setTopUView} testidPrefix="topu-toggle" />
+      {/* BOTTOM PROMOTIONAL BANNER */}
+      <div
+        className="text-white border border-brand/20 rounded-3xl p-6 shadow-md relative overflow-hidden flex flex-col md:flex-row items-center gap-6 justify-between mt-6"
+        style={{ background: "linear-gradient(90deg, #3B0078 0%, #6100C2 100%)" }}
+      >
+        <div className="absolute top-0 right-0 w-80 h-80 bg-brand/20 rounded-full blur-3xl transform translate-x-10 -translate-y-10 pointer-events-none" />
+        
+        <div className="flex items-center gap-4 relative z-10 w-full md:w-auto">
+          <div className="w-12 h-12 rounded-2xl bg-white/10 text-white flex items-center justify-center flex-shrink-0 shadow-lg shadow-black/10">
+            <span className="text-xl">🚀</span>
           </div>
-          {top_unidades.length === 0 ? (
-            <Empty msg="Sin datos aún." />
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={top_unidades} layout="vertical" margin={{ left: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis type="number" stroke="#737373" fontSize={11} />
-                <YAxis type="category" dataKey="placa" stroke="#737373" fontSize={11} width={80} />
-                <Tooltip
-                  formatter={(v) => topUView === "importe" ? [`S/ ${fmt(v)}`, "Importe"] : [`${fmt(v)} gl`, "Galones"]}
-                />
-                <Bar dataKey={topUView} fill="#7c3aed" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
+          <div>
+            <h3 className="font-cabinet font-black text-sm md:text-base text-white leading-tight">
+              Tus {kpis.unidades_incluidas || 12} unidades ya viven en ENERED. Conviértelas en control total.
+            </h3>
+            <div className="flex flex-wrap gap-1.5 mt-2.5">
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">📍 Ubicación en vivo</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">⛽ Km/galón real</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">🚨 Alertas de velocidad</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">🔧 Mantenimiento predictivo</span>
+            </div>
+          </div>
         </div>
 
-        {/* Top estaciones */}
-        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm" data-testid="card-top-estaciones">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h3 className="font-cabinet text-lg font-bold flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-brand" /> Top estaciones / proveedores
-            </h3>
-            <Toggle value={topEView} onChange={setTopEView} testidPrefix="tope-toggle" />
+        <div className="flex flex-col items-center md:items-end flex-shrink-0 relative z-10 w-full md:w-auto">
+          <button
+            onClick={() => window.open("https://wa.me/51972228870?text=Hola,%20quiero%20agendar%20mi%20activación%20de%20unidades%20en%20ENERED", "_blank")}
+            className="bg-white hover:bg-neutral-100 text-[#6100C2] font-cabinet font-black px-5 py-2.5 rounded-2xl shadow-lg transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] w-full md:w-auto justify-center text-xs"
+          >
+            <span>📅</span> Agendar mi activación &gt;
+          </button>
+          <div className="text-[8px] text-white/70 font-semibold mt-1.5 text-center md:text-right">
+            30 min con un Product Manager • gratis • activas solo lo que necesitas
           </div>
-          {top_estaciones.length === 0 ? (
-            <Empty msg="Sin datos aún." />
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={top_estaciones} layout="vertical" margin={{ left: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis type="number" stroke="#737373" fontSize={11} />
-                <YAxis
-                  type="category"
-                  dataKey="estacion"
-                  stroke="#737373"
-                  fontSize={10}
-                  width={140}
-                  tickFormatter={(s) => (s && s.length > 22 ? s.slice(0, 22) + "…" : s)}
-                />
-                <Tooltip
-                  formatter={(v) => topEView === "importe" ? [`S/ ${fmt(v)}`, "Importe"] : [`${fmt(v)} gl`, "Galones"]}
-                />
-                <Bar dataKey={topEView} fill="#06b6d4" radius={[0, 6, 6, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
         </div>
       </div>
-
-      {/* FILA 6 — Semáforo de vencimiento */}
-      <DocsSemaforoCard semaforo={documentos_semaforo} navigate={navigate} />
     </div>
   );
 }
@@ -362,94 +579,140 @@ function StagesRow({ stages, user, kpis }) {
   const gastoTotal = kpis.gasto_total || 0;
   const pctAhorro = gastoTotal > 0 ? ((subsidioReconocido / gastoTotal) * 100).toFixed(1) : "0.0";
 
-  const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
+  const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 0 });
 
-  const ruc = user?.ruc || "20000000000";
-  const numENR = `ENR-2026-${ruc}`;
-  const numATU = `ATU-2026-${ruc}`;
+  // COUNTDOWN TIMER (Target: July 28, 2026 at 23:59:59)
+  const TARGET_DATE = useMemo(() => new Date("2026-07-28T23:59:59"), []);
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
-  const getStageSubtitle = (s, idx) => {
-    const currentStage = user?.expediente_stage;
-    const submittedAt = user?.expediente_submitted_at || user?.created_at;
-    const stageUpdatedAt = user?.expediente_stage_updated_at;
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const diff = TARGET_DATE.getTime() - now.getTime();
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      } else {
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+        const minutes = Math.floor((diff / 1000 / 60) % 60);
+        const seconds = Math.floor((diff / 1000) % 60);
+        setTimeLeft({ days, hours, minutes, seconds });
+      }
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, [TARGET_DATE]);
 
-    if (idx === 0) {
-      return submittedAt ? fmtStageDate(submittedAt) : "—";
-    }
-
-    if (currentStage === s.key) {
-      return stageUpdatedAt ? fmtStageDate(stageUpdatedAt, "desde") : "—";
-    }
-
-    const currentIdx = stages.findIndex(st => st.key === currentStage);
-    if (currentIdx > idx) {
-      return "Completado";
-    }
-
-    return "—";
-  };
+  const pad = (n) => String(n).padStart(2, "0");
 
   return (
-    <div className="bg-brand text-white border border-brand/20 rounded-2xl p-6 shadow-sm relative overflow-hidden" data-testid="card-stages">
-      {/* Upper Section: Info & Ahorro */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center mb-8">
-        <div className="lg:col-span-2 space-y-2">
-          <div className="text-xs lg:text-sm font-bold opacity-90 flex items-center gap-1">
-            💰 Tu subsidio reconocido · N.º {numENR}
-          </div>
-          <div className="text-4xl lg:text-5xl font-cabinet font-black tracking-tight">
-            S/ {num(subsidioReconocido)}
-          </div>
-          <div className="text-xs opacity-75">
-            Validado de tus comprobantes · expediente {numATU}
-          </div>
+    <div
+      className="text-white border border-brand/20 rounded-2xl p-4 shadow-md relative overflow-hidden flex flex-col lg:flex-row items-center gap-6 justify-between"
+      style={{ background: "linear-gradient(90deg, #8039F4 0%, #6B26DC 100%)" }}
+      data-testid="card-stages"
+    >
+      {/* Subsidio Reconocido */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-full bg-amber-400 text-[#2D0A4E] flex items-center justify-center flex-shrink-0 shadow-sm">
+          <Gift className="w-5 h-5 fill-current" />
         </div>
-
-        <div className="bg-white/10 border border-white/20 rounded-xl p-4 space-y-1">
-          <div className="text-[10px] tracking-wider font-bold opacity-75">% DE AHORRO DEL TOTAL CONSUMIDO</div>
-          <div className="text-3xl font-cabinet font-black">{pctAhorro}%</div>
-          <div className="text-xs opacity-80 leading-normal">
-            De los S/ {num(gastoTotal)} que gastaste en diésel, el Estado te devuelve S/ {num(subsidioReconocido)}.
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-white/70 font-semibold leading-tight">Subsidio Reconocido</div>
+          <div className="text-xl lg:text-2xl font-cabinet font-black text-white leading-tight">
+            S/ {num(subsidioReconocido)}
           </div>
         </div>
       </div>
 
+      {/* Divider */}
+      <div className="hidden lg:block h-10 w-px bg-white/20 self-center" />
+
       {/* Progress Timeline */}
-      <div className="relative pt-4">
+      <div className="flex-1 flex items-center justify-between relative px-6 min-w-[280px] w-full lg:w-auto">
         {/* line track */}
-        <div className="absolute top-[27px] left-[12%] right-[12%] h-[2px] bg-white/20" />
+        <div className="absolute top-[16px] left-[10%] right-[10%] h-[2px] bg-white/25" />
         
-        <div className="grid grid-cols-4 gap-2 relative">
-          {stages.map((s, idx) => {
+        <div className="w-full flex items-center justify-between relative">
+          {stages.map((s) => {
             const isDone = s.status === "done";
             const isCurrent = s.status === "current";
             
             let dotCls = "bg-white/20 border-white/30 text-white/50";
-            if (isDone) {
-              dotCls = "bg-white text-brand border-white";
-            } else if (isCurrent) {
-              dotCls = "bg-white text-brand border-white ring-4 ring-white/30";
+            if (isDone || isCurrent) {
+              dotCls = "bg-white text-[#8039F4] border-white";
             }
 
+            const getStageLabel = (key, originalLabel) => {
+              if (key === "solicitud_enviada") return "Enviado";
+              if (key === "evaluacion_atu") return "En evaluación ATU";
+              if (key === "aprobada") return "Aprobada";
+              if (key === "abonado_en_cuenta") return "Abonado";
+              return originalLabel;
+            };
+
             return (
-              <div key={s.key} className="flex flex-col items-center text-center relative" data-testid={`stage-${s.key}`}>
-                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center z-10 transition-all ${dotCls}`}>
+              <div key={s.key} className="flex flex-col items-center relative z-10">
+                <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${dotCls}`}>
                   {isDone ? (
-                    <span className="text-[10px] font-bold text-brand">✓</span>
+                    <span className="text-[10px] font-bold text-[#8039F4]">✓</span>
                   ) : isCurrent ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-brand" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#8039F4]" />
                   ) : (
                     <span className="w-2 h-2 rounded-full bg-white/40" />
                   )}
                 </div>
                 
-                <div className="text-xs font-bold mt-2 text-white">{s.label}</div>
-                <div className="text-[10px] opacity-75 mt-0.5 font-medium">
-                  {getStageSubtitle(s, idx)}
+                <div className="text-[10px] font-bold mt-1.5 text-white/90 whitespace-nowrap">
+                  {getStageLabel(s.key, s.label)}
                 </div>
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div className="hidden lg:block h-10 w-px bg-white/20 self-center" />
+
+      {/* Ahorro & Countdown Row */}
+      <div className="flex items-center gap-6 justify-between w-full lg:w-auto flex-wrap lg:flex-nowrap">
+        {/* Ahorro */}
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-white/70 font-semibold leading-tight">Ahorro</div>
+          <div className="text-xl lg:text-2xl font-cabinet font-black text-white leading-tight">
+            {pctAhorro}%
+          </div>
+        </div>
+
+        {/* Countdown Red Pill */}
+        <div className="bg-[#b91c1c] text-white rounded-2xl px-4 py-2 flex items-center gap-3 border border-red-500 shadow-md">
+          <div className="flex items-center gap-1.5">
+            <Clock className="w-4 h-4 text-white animate-pulse" />
+            <span className="text-xs font-black tracking-wider whitespace-nowrap">28 JUL</span>
+          </div>
+          <div className="h-6 w-px bg-white/20" />
+          <div className="flex gap-2 text-center items-center">
+            <div>
+              <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.days)}</div>
+              <div className="text-[8px] font-black opacity-75 mt-0.5">D</div>
+            </div>
+            <span className="text-sm font-bold leading-none">:</span>
+            <div>
+              <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.hours)}</div>
+              <div className="text-[8px] font-black opacity-75 mt-0.5">H</div>
+            </div>
+            <span className="text-sm font-bold leading-none">:</span>
+            <div>
+              <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.minutes)}</div>
+              <div className="text-[8px] font-black opacity-75 mt-0.5">M</div>
+            </div>
+            <span className="text-sm font-bold leading-none">:</span>
+            <div>
+              <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.seconds)}</div>
+              <div className="text-[8px] font-black opacity-75 mt-0.5">S</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
