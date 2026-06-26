@@ -8,8 +8,8 @@ import React from "react";
  *                "Integraciones & Automatizaciones" since there's more space.
  */
 const EMAY_WEB = "https://www.emay.space";
-const EMAY_WA = "https://wa.me/51920485878";
-const EMAY_PHONE = "+51 920 485 878";
+const EMAY_WA = "https://wa.me/51973982417";
+const EMAY_PHONE = "+51 973 982 417";
 const YEAR = new Date().getFullYear();
 
 function BaseLine({ withTagline = false }) {
