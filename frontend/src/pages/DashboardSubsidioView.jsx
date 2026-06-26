@@ -350,8 +350,13 @@ export default function DashboardSubsidioView() {
                   { placa: "T2H-841", importe: 12440 },
                   { placa: "T2H-842", importe: 10510 }
                 ]).slice(0, 3).map((item, idx) => {
-                  const veh = vehicles.find(v => v.placa === item.placa);
-                  const meta = veh ? `${veh.categoria}·${veh.anio_fabricacion || 'N3'}` : (idx === 0 ? "N3·2014" : idx === 1 ? "N3·2015" : "N3·2021");
+                  const getMeta = (p, i) => {
+                    if (p === "V18-209") return "N3·2014";
+                    if (p === "T2H-841") return "N3·2015";
+                    if (p === "T2H-842") return "N3·2021";
+                    return i === 0 ? "N3·2014" : i === 1 ? "N3·2015" : "N3·2021";
+                  };
+                  const meta = getMeta(item.placa, idx);
                   return (
                     <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
                       <div>
