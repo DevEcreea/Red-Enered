@@ -14,7 +14,6 @@ const ETAPAS = [
   { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
   { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF · OCR" },
   { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
-  { id: "envio",        n: 5, label: "Envío a la ATU",           icon: Send,       short: "Envío",        hint: "Confirmación" },
 ];
 
 const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50"];
@@ -25,6 +24,8 @@ export default function SubsidioDocumentos() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeEtapa, setActiveEtapa] = useState("empresa");
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  const [createdDeclaracion, setCreatedDeclaracion] = useState(null);
 
   const load = async () => {
     try {
@@ -54,6 +55,33 @@ export default function SubsidioDocumentos() {
   const isComplete = (id) => totals.byEtapa[id]?.done >= totals.byEtapa[id]?.total && totals.byEtapa[id]?.total > 0;
   const enviado = !!declaracion;
 
+  if (showSuccessOverlay) {
+    const decl = createdDeclaracion || {};
+    const expedNo = decl.id ? `DU-2026-${decl.id.slice(0, 8).toUpperCase()}` : "";
+    return (
+      <div className="min-h-[500px] flex items-center justify-center bg-[#F6F7FB] p-4 animate-fade-in" data-testid="envio-success">
+        <div className="bg-white border border-neutral-200 rounded-2xl p-8 max-w-lg w-full text-center shadow-lg space-y-6">
+          <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center mb-4">
+            <CheckCircle2 className="w-10 h-10 animate-bounce" />
+          </div>
+          <h3 className="font-cabinet text-3xl font-bold text-neutral-900">¡Envío exitoso!</h3>
+          <p className="text-sm text-neutral-600 max-w-md mx-auto">
+            Tu expediente del subsidio DU 004-2026 quedó registrado y será presentado ante la ATU.
+          </p>
+          {expedNo && (
+            <div className="inline-flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2 text-sm font-semibold text-neutral-700">
+              N° de expediente: <span className="text-brand font-mono font-bold">{expedNo}</span>
+            </div>
+          )}
+          <div className="pt-2 text-xs text-neutral-400 flex items-center justify-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-brand" />
+            Redirigiendo a tu dashboard en unos segundos...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6" data-testid="subsidio-documentos">
       {/* HEADER */}
@@ -77,12 +105,12 @@ export default function SubsidioDocumentos() {
         </div>
 
         {/* Línea de etapas */}
-        <div className="grid grid-cols-5 gap-2 mb-3">
+        <div className="grid grid-cols-4 gap-2 mb-3">
           {ETAPAS.map((e) => {
             const Ic = e.icon;
             const active = activeEtapa === e.id;
-            const done = isComplete(e.id) || (e.id === "envio" && enviado) || (e.id === "declaracion" && enviado);
-            const canVisit = e.id === "envio" ? enviado : true;
+            const done = isComplete(e.id) || (e.id === "declaracion" && enviado);
+            const canVisit = true;
             return (
               <button
                 key={e.id}
@@ -143,16 +171,16 @@ export default function SubsidioDocumentos() {
           <DeclaracionEtapa
             data={data}
             totals={totals}
-            onAccepted={async () => {
-              await load();
-              setActiveEtapa("envio");
+            onAccepted={async (decl) => {
+              setCreatedDeclaracion(decl);
+              setShowSuccessOverlay(true);
               const me = await api.get("/auth/me").catch(() => null);
               if (me?.data?.user) setUser?.(me.data.user);
+              setTimeout(() => {
+                navigate("/dashboard");
+              }, 3500);
             }}
           />
-        )}
-        {activeEtapa === "envio" && (
-          <EnvioEtapa declaracion={declaracion} data={data} navigate={navigate} />
         )}
 
         {/* Navegación */}
@@ -168,14 +196,12 @@ export default function SubsidioDocumentos() {
           >
             ← Etapa anterior
           </button>
-          {activeEtapa !== "envio" && (
+          {activeEtapa !== "declaracion" && (
             <button
               onClick={() => {
                 const idx = ETAPAS.findIndex((c) => c.id === activeEtapa);
                 if (idx < ETAPAS.length - 1) {
-                  const next = ETAPAS[idx + 1].id;
-                  if (next === "envio" && !enviado) return;
-                  setActiveEtapa(next);
+                  setActiveEtapa(ETAPAS[idx + 1].id);
                 }
               }}
               className="px-4 py-2 text-sm font-bold text-brand hover:bg-brand/5 rounded-lg"
@@ -205,27 +231,26 @@ function calcTotals(data) {
   const combDone = confirmedCount > 0 ? 1 : 0;
   const combTot = 1;
   const declDone = data.declaracion ? 1 : 0;
-  const envDone = data.declaracion ? 1 : 0;
 
   const byEtapa = {
     empresa: { done: empresaDone, total: empresaTot, pct: pct(empresaDone, empresaTot) },
     flota: { done: flotaDone, total: flotaTot, pct: pct(flotaDone, flotaTot) },
     combustible: { done: combDone, total: combTot, pct: combDone * 100, confirmedCount },
     declaracion: { done: declDone, total: 1, pct: declDone * 100 },
-    envio: { done: envDone, total: 1, pct: envDone * 100 },
   };
-  const done = empresaDone + flotaDone + combDone + declDone + envDone;
-  const total = empresaTot + flotaTot + combTot + 1 + 1;
+  const done = empresaDone + flotaDone + combDone + declDone;
+  const total = empresaTot + flotaTot + combTot + 1;
   return { pct: pct(done, total), done, total, byEtapa };
 }
 function pct(d, t) { return Math.round((d / Math.max(t, 1)) * 100); }
 
 function pickNextEtapa(data) {
   const t = calcTotals(data);
-  if (data.declaracion) return "envio";
+  if (data.declaracion) return "declaracion";
   if (t.byEtapa.empresa.done < t.byEtapa.empresa.total) return "empresa";
   if (t.byEtapa.flota.done < t.byEtapa.flota.total) return "flota";
-  return "combustible";
+  if (t.byEtapa.combustible.done === 0) return "combustible";
+  return "declaracion";
 }
 
 /* ============================================================ */
@@ -633,8 +658,8 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      await api.post("/subsidio/declaracion", { accepted: true, representante: repre });
-      onAccepted?.();
+      const res = await api.post("/subsidio/declaracion", { accepted: true, representante: repre });
+      onAccepted?.(res.data?.declaracion);
     } catch (e) {
       const d = e?.response?.data?.detail;
       setError(typeof d === "string" ? d : (d?.message || "Error al firmar"));
@@ -715,51 +740,7 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   );
 }
 
-/* ============================================================ */
-/* Etapa 5 — Envío exitoso                                       */
-/* ============================================================ */
-function EnvioEtapa({ declaracion, data, navigate }) {
-  if (!declaracion) {
-    return (
-      <div className="text-center py-10">
-        <Lock className="w-10 h-10 text-neutral-300 mx-auto mb-3" />
-        <p className="text-sm text-neutral-500">Esta etapa se desbloquea al firmar la declaración jurada (Etapa 4).</p>
-      </div>
-    );
-  }
-  const expedNo = `DU-2026-${declaracion.id.slice(0, 8).toUpperCase()}`;
-  return (
-    <div data-testid="envio-success">
-      <EtapaHeader n={5} icon={Send} title="Envío de documentos exitoso a la ATU" subtitle="Tu expediente ya está en revisión" />
-
-      <div className="bg-gradient-to-br from-emerald-50 via-emerald-50 to-brand/10 border border-emerald-200 rounded-2xl p-8 text-center">
-        <div className="w-20 h-20 mx-auto rounded-full bg-emerald-500 text-white flex items-center justify-center mb-4">
-          <CheckCircle2 className="w-10 h-10" />
-        </div>
-        <h3 className="font-cabinet text-2xl font-bold mb-1">¡Envío exitoso!</h3>
-        <p className="text-sm text-neutral-600 mb-6 max-w-md mx-auto">
-          Tu expediente para el subsidio DU 004-2026 fue registrado correctamente y será presentado ante la ATU.
-        </p>
-        <div className="inline-flex flex-col items-start gap-2 bg-white border border-emerald-200 rounded-xl p-4 text-sm text-left">
-          <div className="flex items-center gap-2"><FileCheck2 className="w-4 h-4 text-emerald-600" /><strong>N° de expediente:</strong> <code className="font-mono">{expedNo}</code></div>
-          <div><strong>Empresa:</strong> {declaracion.empresa} (RUC {declaracion.ruc})</div>
-          <div><strong>Representante:</strong> {declaracion.representante}</div>
-          <div><strong>Fecha de envío:</strong> {new Date(declaracion.accepted_at).toLocaleString("es-PE")}</div>
-        </div>
-
-        <div className="mt-6 flex items-center justify-center">
-          <button onClick={() => navigate("/dashboard")} className="px-6 py-3 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg">
-            Gestiona el control de tu flota →
-          </button>
-        </div>
-      </div>
-
-      <p className="text-xs text-neutral-500 mt-4 text-center">
-        Te avisaremos por correo cuando la ATU procese tu solicitud. Mientras tanto, puedes seguir subiendo facturas para sumar al subsidio.
-      </p>
-    </div>
-  );
-}
+// Etapa 5 eliminada y reubicada en overlay dinámico al firmar
 
 /* ============================================================ */
 /* UI helpers compartidos                                        */
