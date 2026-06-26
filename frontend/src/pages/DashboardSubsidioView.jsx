@@ -51,21 +51,12 @@ export default function DashboardSubsidioView() {
     };
   }, [fetchData]);
 
-  if (loading) {
-    return (
-      <div className="min-h-[400px] flex items-center justify-center" data-testid="dashboard-subsidio-loading">
-        <Loader2 className="w-8 h-8 animate-spin text-brand" />
-      </div>
-    );
-  }
-  if (!data) return null;
-
   const {
     stages = [], kpis = {}, serie_semanal = [],
     top_unidades = [], top_estaciones = [],
     documentos_semaforo = { items: [], summary: {} },
     pending_drafts = 0,
-  } = data;
+  } = data || {};
 
   const fmt = (n) => Number(n || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
   const hasNoData =
@@ -173,6 +164,15 @@ export default function DashboardSubsidioView() {
 
     return res;
   }, [documentos_semaforo, kpis]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[400px] flex items-center justify-center" data-testid="dashboard-subsidio-loading">
+        <Loader2 className="w-8 h-8 animate-spin text-brand" />
+      </div>
+    );
+  }
+  if (!data) return null;
 
   return (
     <div className="space-y-6" data-testid="dashboard-subsidio">
@@ -573,8 +573,6 @@ const fmtStageDate = (isoStr, formatType) => {
 /* Stages — Fila 1                                              */
 /* ============================================================ */
 function StagesRow({ stages, user, kpis }) {
-  if (!stages?.length) return null;
-
   const subsidioReconocido = (kpis.galones_reconocidos || 0) * 4;
   const gastoTotal = kpis.gasto_total || 0;
   const pctAhorro = gastoTotal > 0 ? ((subsidioReconocido / gastoTotal) * 100).toFixed(1) : "0.0";
@@ -605,6 +603,8 @@ function StagesRow({ stages, user, kpis }) {
   }, [TARGET_DATE]);
 
   const pad = (n) => String(n).padStart(2, "0");
+
+  if (!stages?.length) return null;
 
   return (
     <div
