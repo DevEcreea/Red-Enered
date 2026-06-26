@@ -69,7 +69,7 @@ const ROUTE_TITLES = {
   "/admin/qr": "QR",
 };
 
-function SidebarLink({ item, onClick }) {
+function SidebarLink({ item, onClick, isCollapsed }) {
   const Ic = item.icon;
   const location = useLocation();
   const [expanded, setExpanded] = React.useState(false);
@@ -93,21 +93,29 @@ function SidebarLink({ item, onClick }) {
       ) : (
         <Ic className={`w-5 h-5 flex-shrink-0 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
       )}
-      <span className={`text-sm font-semibold flex-1 ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
+      <span className={`text-sm font-semibold flex-1 transition-all duration-300 whitespace-nowrap overflow-hidden ${
+        isCollapsed ? "opacity-0 w-0 pointer-events-none" : "opacity-100"
+      } ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
-        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 ${
+        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 transition-all duration-300 ${
+          isCollapsed ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
+        } ${
           item.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
         }`}>
           {item.badge}
         </span>
       )}
       {hasSubmenu && (
-        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${expanded ? "rotate-180" : ""} ${active || isSubmenuActive ? "text-cyan-300" : "text-white/70"}`} />
+        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-all duration-300 ${
+          isCollapsed ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
+        } ${expanded ? "rotate-180" : ""} ${active || isSubmenuActive ? "text-cyan-300" : "text-white/70"}`} />
       )}
     </>
   );
 
-  const baseCls = "relative flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all";
+  const baseCls = `relative flex items-center rounded-lg transition-all ${
+    isCollapsed ? "gap-0 justify-center px-2 py-2.5" : "gap-3 px-4 py-2.5"
+  }`;
 
   if (item.disabled) {
     return (
@@ -127,7 +135,7 @@ function SidebarLink({ item, onClick }) {
         >
           {content(isSubmenuActive)}
         </button>
-        {expanded && (
+        {!isCollapsed && expanded && (
           <div className="ml-6 mt-1 space-y-0.5 border-l border-white/20 pl-3">
             {item.submenu.map((sub) => (
               <NavLink
@@ -203,6 +211,7 @@ export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [overview, setOverview] = useState(null);
+  const [isHovered, setIsHovered] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -230,32 +239,41 @@ export default function Layout({ children }) {
     : (overview?.empresa || user.empresa || "ENERED PERÚ");
   const openWA = () => window.open(WA_LINK, "_blank");
 
-  const SidebarContent = () => (
+  const SidebarContent = ({ isCollapsed }) => (
     <>
       {/* Logo */}
-      <div className="px-5 pt-6 pb-5 flex-shrink-0">
+      <div className="px-5 pt-6 pb-5 flex-shrink-0 flex items-center justify-center min-h-[70px] relative">
         <img
           src={LOGO_IMG}
           alt="ENERED"
-          className="w-full max-w-[150px] mx-auto h-auto object-contain"
+          className={`w-full max-w-[150px] mx-auto h-auto object-contain transition-all duration-300 ${
+            isCollapsed ? "opacity-0 scale-75 w-0 pointer-events-none" : "opacity-100 scale-100"
+          }`}
         />
+        {isCollapsed && (
+          <span className="absolute text-white font-cabinet font-black text-2xl tracking-wider animate-fade-in">
+            E
+          </span>
+        )}
       </div>
 
       {/* Divider */}
-      <div className="mx-5 h-px bg-white/15 mb-2 flex-shrink-0" />
+      <div className={`mx-5 h-px bg-white/15 mb-2 flex-shrink-0 transition-all duration-300 ${isCollapsed ? "mx-3" : "mx-5"}`} />
 
-      <nav className="flex-1 px-3 py-2 flex flex-col space-y-1 overflow-y-auto" data-testid="sidebar-nav">
+      <nav className="flex-1 px-3 py-2 flex flex-col space-y-1 overflow-y-auto overflow-x-hidden" data-testid="sidebar-nav">
         {items.map((item) => (
-          <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
+          <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
         ))}
 
         {isAdmin && (
           <>
-            <div className="mx-3 mt-3 mb-1 pt-3 border-t border-white/15 text-[9px] font-bold uppercase tracking-widest text-white/60">
+            <div className={`mx-3 mt-3 mb-1 pt-3 border-t border-white/15 text-[9px] font-bold uppercase tracking-widest text-white/60 transition-all duration-300 whitespace-nowrap overflow-hidden ${
+              isCollapsed ? "opacity-0 h-0 mt-0 pt-0 border-t-0" : "opacity-100"
+            }`}>
               Admin
             </div>
             {ADMIN_ITEMS.map((item) => (
-              <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} />
+              <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
             ))}
           </>
         )}
@@ -265,11 +283,17 @@ export default function Layout({ children }) {
       <div className="px-3 py-3 border-t border-white/15 flex-shrink-0">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-lg hover:bg-white/10 transition-colors"
+          className={`w-full flex items-center rounded-lg hover:bg-white/10 transition-all duration-300 ${
+            isCollapsed ? "gap-0 justify-center px-2 py-2.5" : "gap-3 px-4 py-2.5"
+          }`}
           data-testid="logout-btn"
         >
-          <LogOut className="w-5 h-5 text-white/80" strokeWidth={1.75} />
-          <span className="text-sm font-semibold text-white/90">Salir</span>
+          <LogOut className="w-5 h-5 text-white/80 flex-shrink-0" strokeWidth={1.75} />
+          <span className={`text-sm font-semibold text-white/90 transition-all duration-300 whitespace-nowrap overflow-hidden ${
+            isCollapsed ? "opacity-0 w-0 pointer-events-none" : "opacity-100"
+          }`}>
+            Salir
+          </span>
         </button>
       </div>
     </>
@@ -279,10 +303,14 @@ export default function Layout({ children }) {
     <div className="min-h-screen bg-[#F6F7FB]">
       {/* Desktop sidebar */}
       <aside
-        className="hidden md:flex fixed inset-y-0 left-0 w-56 flex-col z-40"
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 transition-all duration-300 ease-in-out ${
+          isHovered ? "w-56 shadow-2xl" : "w-[72px]"
+        }`}
         style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
       >
-        <SidebarContent />
+        <SidebarContent isCollapsed={!isHovered} />
       </aside>
 
       {/* Mobile sidebar overlay */}
@@ -293,13 +321,13 @@ export default function Layout({ children }) {
             className="fixed inset-y-0 left-0 w-56 z-50 flex flex-col md:hidden animate-fade-in"
             style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
           >
-            <SidebarContent />
+            <SidebarContent isCollapsed={false} />
           </aside>
         </>
       )}
 
       {/* Header */}
-      <header className="md:ml-56 h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100">
+      <header className="md:ml-[72px] h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100 transition-all duration-300 ease-in-out">
         <div className="flex items-center gap-3 min-w-0">
           <button
             className="md:hidden p-2 rounded-md hover:bg-neutral-100"
@@ -351,7 +379,7 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      <main className="md:ml-56 p-4 md:p-8 space-y-8 page-enter">
+      <main className="md:ml-[72px] p-4 md:p-8 space-y-8 page-enter transition-all duration-300 ease-in-out">
         {children}
         <EmayFooter variant="compact" />
       </main>
