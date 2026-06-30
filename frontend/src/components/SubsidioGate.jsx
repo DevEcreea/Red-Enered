@@ -14,6 +14,8 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   const esSubsidio = user.role === "cliente_subsidio";
   const expedienteOk = user.expediente_status === "confirmed" || user.expediente_status === "submitted" || user.documentos_completos === true;
 
+  // Se desactivó temporalmente la protección de expediente para mostrar el contenido real de los módulos que lo tengan.
+  /*
   if (esSubsidio && !expedienteOk) {
     return (
       <ModuloBloqueado
@@ -25,6 +27,7 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
       />
     );
   }
+  */
 
   return children;
 }
