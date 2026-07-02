@@ -256,27 +256,27 @@ export default function DashboardSubsidioView() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* COLUMN 1: CONSUMO DE COMBUSTIBLE */}
-        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-consumo-combustible">
+        <div className="bg-white border border-neutral-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between" data-testid="card-consumo-combustible">
           <div>
-            <div className="flex items-center gap-2 mb-5">
-              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
-                <Fuel className="w-4 h-4" strokeWidth={2.5} />
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-10 h-10 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4] flex-shrink-0">
+                <Fuel className="w-5 h-5" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">CONSUMO DE COMBUSTIBLE</h3>
+              <h3 className="font-cabinet font-black text-lg text-[#8039F4] tracking-wider uppercase">CONSUMO DE COMBUSTIBLE</h3>
             </div>
 
             {/* Row 1: Gasto total & Precio promedio */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Gasto total diésel</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">S/ {fmt(kpis.gasto_total || 129400)}</div>
-                <span className="text-xs text-neutral-500 font-medium block mt-1">
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Gasto total diésel</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.gasto_total || 129400)}</div>
+                <span className="text-xs text-neutral-400 font-medium block mt-1">
                   {kpis.num_meses || 2} meses • {fmt(kpis.galones_reconocidos || 12400)} gal
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Precio prom./galón</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Precio prom./galón</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
                 <span className="text-xs text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
                   ▼ {fmt(Math.abs(kpis.precio_promedio_diff || 0.22))} vs mes ant.
                 </span>
@@ -286,13 +286,13 @@ export default function DashboardSubsidioView() {
             {/* Row 2: Charts Side by Side */}
             <div className="grid grid-cols-2 gap-4 mt-6 items-center">
               <div>
-                <span className="text-xs font-bold text-neutral-500 block mb-3">Evolución semanal del gasto</span>
+                <span className="text-sm font-bold text-neutral-600 block mb-3">Evolución semanal del gasto</span>
                 {serie_semanal.length === 0 ? (
-                  <div className="text-xs text-neutral-400 py-6 text-center border border-dashed border-neutral-100 rounded-lg">Sin datos</div>
+                  <div className="text-sm text-neutral-400 py-6 text-center border border-dashed border-neutral-100 rounded-lg">Sin datos</div>
                 ) : (
                   <ResponsiveContainer width="100%" height={90}>
                     <BarChart data={serie_semanal} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
-                      <XAxis dataKey="semana" stroke="#d4d4d4" fontSize={10} tickLine={false} axisLine={false} />
+                      <XAxis dataKey="semana" stroke="#d4d4d4" fontSize={11} tickLine={false} axisLine={false} />
                       <Bar dataKey="importe" fill="#8039F4" radius={[3, 3, 0, 0]}>
                         {serie_semanal.map((entry, index) => {
                           const isS6 = entry.semana === "Sem 6";
@@ -305,17 +305,17 @@ export default function DashboardSubsidioView() {
               </div>
 
               <div>
-                <span className="text-xs font-bold text-neutral-500 block mb-2">Dónde cargas</span>
-                <div className="flex gap-2">
-                  <div className="w-16 h-16 flex-shrink-0">
+                <span className="text-sm font-bold text-neutral-600 block mb-2">Dónde cargas</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-20 h-20 flex-shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={donutData}
                           cx="50%"
                           cy="50%"
-                          innerRadius={18}
-                          outerRadius={28}
+                          innerRadius={22}
+                          outerRadius={34}
                           paddingAngle={1}
                           dataKey="value"
                         >
@@ -326,10 +326,10 @@ export default function DashboardSubsidioView() {
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex flex-col justify-center text-[10px] space-y-1">
+                  <div className="flex flex-col justify-center text-xs space-y-1.5 text-neutral-500">
                     {donutData.map((d, i) => (
-                      <div key={i} className="flex items-center gap-1 whitespace-nowrap">
-                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
+                      <div key={i} className="flex items-center gap-1.5 whitespace-nowrap">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
                         <span className="font-semibold text-neutral-600">{d.name}</span>
                         <span className="text-neutral-400 font-bold">{d.value}%</span>
                       </div>
@@ -343,7 +343,7 @@ export default function DashboardSubsidioView() {
           {/* Bottom section: rankings in text */}
           <div className="grid grid-cols-2 gap-4 border-t border-neutral-100 pt-4 mt-6">
             <div>
-              <span className="text-xs font-bold text-neutral-500 block mb-2">Unidades que más gastan</span>
+              <span className="text-sm font-bold text-neutral-600 block mb-2">Unidades que más gastan</span>
               <div className="space-y-2">
                 {(top_unidades.length > 0 ? top_unidades : [
                   { placa: "V18-209", importe: 14820 },
@@ -358,12 +358,12 @@ export default function DashboardSubsidioView() {
                   };
                   const meta = getMeta(item.placa, idx);
                   return (
-                    <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
+                    <div key={idx} className="flex items-center justify-between py-1.5 border-b border-neutral-50/50">
                       <div>
-                        <div className="font-bold text-neutral-700 text-xs">{item.placa}</div>
-                        <div className="text-[10px] text-neutral-500">{meta}</div>
+                        <div className="font-bold text-neutral-700 text-sm">{item.placa}</div>
+                        <div className="text-xs text-neutral-400">{meta}</div>
                       </div>
-                      <div className="font-cabinet font-black text-neutral-800 text-xs">S/ {fmt(item.importe)}</div>
+                      <div className="font-cabinet font-black text-neutral-800 text-sm">S/ {fmt(item.importe)}</div>
                     </div>
                   );
                 })}
@@ -371,7 +371,7 @@ export default function DashboardSubsidioView() {
             </div>
 
             <div>
-              <span className="text-xs font-bold text-neutral-500 block mb-2">Estaciones donde más cargas</span>
+              <span className="text-sm font-bold text-neutral-600 block mb-2">Estaciones donde más cargas</span>
               <div className="space-y-2">
                 {(top_estaciones.length > 0 ? top_estaciones : [
                   { estacion: "Repsol - Av. Industrial", importe: 48200 },
@@ -380,12 +380,12 @@ export default function DashboardSubsidioView() {
                 ]).slice(0, 3).map((item, idx) => {
                   const cleanEst = item.estacion.length > 16 ? item.estacion.slice(0, 16) + "…" : item.estacion;
                   return (
-                    <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
+                    <div key={idx} className="flex items-center justify-between py-1.5 border-b border-neutral-50/50">
                       <div>
-                        <div className="font-bold text-neutral-700 text-xs">{cleanEst}</div>
-                        <div className="text-[10px] text-neutral-400">Combustible</div>
+                        <div className="font-bold text-neutral-700 text-sm">{cleanEst}</div>
+                        <div className="text-xs text-neutral-400">Combustible</div>
                       </div>
-                      <div className="font-cabinet font-black text-neutral-800 text-xs">S/ {fmt(item.importe)}</div>
+                      <div className="font-cabinet font-black text-neutral-800 text-sm">S/ {fmt(item.importe)}</div>
                     </div>
                   );
                 })}
@@ -395,27 +395,27 @@ export default function DashboardSubsidioView() {
         </div>
 
         {/* COLUMN 2: ESTADO DE VEHÍCULOS */}
-        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-estado-vehiculos">
+        <div className="bg-white border border-neutral-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between" data-testid="card-estado-vehiculos">
           <div>
-            <div className="flex items-center gap-2 mb-5">
-              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
-                <Truck className="w-4 h-4" strokeWidth={2.5} />
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-10 h-10 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4] flex-shrink-0">
+                <Truck className="w-5 h-5" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">ESTADO DE VEHÍCULOS</h3>
+              <h3 className="font-cabinet font-black text-lg text-[#8039F4] tracking-wider uppercase">ESTADO DE VEHÍCULOS</h3>
             </div>
 
             {/* Row 1 KPIs */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Unidades incluidas</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Unidades incluidas</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
                   {kpis.unidades_incluidas || 12}/{kpis.unidades_incluidas || 12}
                 </div>
-                <span className="text-xs text-neutral-500 font-medium block mt-1">en el expediente</span>
+                <span className="text-xs text-neutral-400 font-medium block mt-1">en el expediente</span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Habilitadas y activas</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Habilitadas y activas</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
                   {kpis.unidades_validas || 12}/{kpis.unidades_incluidas || 12}
                 </div>
                 <span className="text-xs text-emerald-600 font-bold block mt-1">
@@ -427,20 +427,20 @@ export default function DashboardSubsidioView() {
             {/* Row 2 KPIs */}
             <div className="grid grid-cols-2 gap-3 mt-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Galones reconocidos</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Galones reconocidos</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
                   {fmt(kpis.galones_reconocidos || 4560)}
                 </div>
-                <span className="text-xs text-neutral-500 font-medium block mt-1">
+                <span className="text-xs text-neutral-400 font-medium block mt-1">
                   de {kpis.invoices_confirmed || 184} comprobantes
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-xs font-semibold text-neutral-500 block mb-1">Costo prom./unidad</span>
-                <div className="font-cabinet font-black text-2xl text-neutral-900">
+                <span className="text-sm font-bold text-neutral-500 block mb-1">Costo prom./unidad</span>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
                   S/ {fmt(kpis.costo_promedio_unidad || 10783)}
                 </div>
-                <span className="text-xs text-neutral-500 font-medium block mt-1">
+                <span className="text-xs text-neutral-400 font-medium block mt-1">
                   {kpis.num_meses || 2} meses
                 </span>
               </div>
@@ -448,48 +448,48 @@ export default function DashboardSubsidioView() {
           </div>
 
           {/* Bottom Card: Antigüedad de flota */}
-          <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-4 mt-6">
+          <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-5 mt-6">
             <div className="flex justify-between items-start">
-              <span className="text-xs font-semibold text-neutral-500">Antigüedad de flota</span>
+              <span className="text-sm font-bold text-neutral-500">Antigüedad de flota</span>
               <div className="text-right">
-                <div className="text-3xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 || 3}</div>
+                <div className="text-4xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 || 3}</div>
                 <div className="text-xs font-bold text-neutral-500 mt-1">unidades +10 años</div>
               </div>
             </div>
             <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-3xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age || 7.2)}</span>
-              <span className="text-xs font-semibold text-neutral-500">años prom.</span>
+              <span className="text-4xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age || 7.2)}</span>
+              <span className="text-sm font-semibold text-neutral-500">años prom.</span>
             </div>
-            <p className="text-xs font-bold text-amber-900 mt-3 leading-tight">
+            <p className="text-sm font-bold text-amber-950 mt-3 leading-tight">
               Evaluar mantenimiento o renovación con monitoreo real.
             </p>
           </div>
         </div>
 
         {/* COLUMN 3: ESTADO DE DOCUMENTACIÓN */}
-        <div className="bg-white border border-neutral-200 rounded-3xl p-5 shadow-sm flex flex-col justify-between" data-testid="card-estado-documentacion">
+        <div className="bg-white border border-neutral-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between" data-testid="card-estado-documentacion">
           <div className="space-y-5">
-            <div className="flex items-center gap-2 mb-5">
-              <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
-                <FileText className="w-4 h-4" strokeWidth={2.5} />
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-10 h-10 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4] flex-shrink-0">
+                <FileText className="w-5 h-5" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">ESTADO DE DOCUMENTACIÓN</h3>
+              <h3 className="font-cabinet font-black text-lg text-[#8039F4] tracking-wider uppercase">ESTADO DE DOCUMENTACIÓN</h3>
             </div>
 
             {/* Circular progress and title */}
-            <div className="flex items-center gap-4 bg-neutral-50/30 border border-neutral-100 rounded-2xl p-3">
-              <div className="relative w-12 h-12 flex items-center justify-center flex-shrink-0">
+            <div className="flex items-center gap-4 bg-neutral-50/30 border border-neutral-100 rounded-2xl p-4">
+              <div className="relative w-14 h-14 flex items-center justify-center flex-shrink-0">
                 <svg className="w-full h-full transform -rotate-90">
-                  <circle cx="24" cy="24" r="20" stroke="#E5E7EB" strokeWidth="3.5" fill="transparent" />
-                  <circle cx="24" cy="24" r="20" stroke="#10B981" strokeWidth="3.5" fill="transparent"
-                    strokeDasharray={125.6}
-                    strokeDashoffset={125.6 * (1 - (kpis.pct_docs || 92) / 100)}
+                  <circle cx="28" cy="28" r="24" stroke="#E5E7EB" strokeWidth="4" fill="transparent" />
+                  <circle cx="28" cy="28" r="24" stroke="#10B981" strokeWidth="4" fill="transparent"
+                    strokeDasharray={150.8}
+                    strokeDashoffset={150.8 * (1 - (kpis.pct_docs || 92) / 100)}
                     strokeLinecap="round" />
                 </svg>
                 <span className="absolute text-xs font-cabinet font-black text-neutral-800">{kpis.pct_docs || 92}%</span>
               </div>
               <div>
-                <div className="font-bold text-neutral-800 text-sm">Documentos en regla</div>
+                <div className="font-bold text-neutral-800 text-sm md:text-base">Documentos en regla</div>
                 <div className="text-xs text-neutral-400 mt-0.5">Semáforo de vencimientos de tu flota</div>
               </div>
             </div>
@@ -497,12 +497,12 @@ export default function DashboardSubsidioView() {
             {/* Alert List Rows */}
             <div className="space-y-2.5">
               {docRows.map((row, idx) => (
-                <div key={idx} className={`border rounded-2xl p-3 flex items-center justify-between ${row.bg}`}>
+                <div key={idx} className={`border rounded-2xl p-4 flex items-center justify-between ${row.bg}`}>
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${row.dot}`} />
                     <div className="min-w-0">
-                      <div className="font-bold text-neutral-800 text-xs truncate leading-tight">{row.title}</div>
-                      <div className="text-xs text-neutral-500 mt-0.5">{row.desc}</div>
+                      <div className="font-bold text-neutral-800 text-sm truncate leading-tight">{row.title}</div>
+                      <div className="text-xs font-medium text-neutral-600 mt-0.5">{row.desc}</div>
                     </div>
                   </div>
                   <span className={`text-xs font-black tracking-wider whitespace-nowrap ml-2 ${row.badgeColor}`}>{row.badge}</span>
