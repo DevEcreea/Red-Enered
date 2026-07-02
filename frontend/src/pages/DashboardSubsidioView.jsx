@@ -262,22 +262,22 @@ export default function DashboardSubsidioView() {
               <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
                 <Fuel className="w-4 h-4" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">CONSUMO DE COMBUSTIBLE</h3>
+              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">CONSUMO DE COMBUSTIBLE</h3>
             </div>
 
             {/* Row 1: Gasto total & Precio promedio */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Gasto total diésel</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">S/ {fmt(kpis.gasto_total || 129400)}</div>
-                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Gasto total diésel</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">S/ {fmt(kpis.gasto_total || 129400)}</div>
+                <span className="text-xs text-neutral-500 font-medium block mt-1">
                   {kpis.num_meses || 2} meses • {fmt(kpis.galones_reconocidos || 12400)} gal
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Precio prom./galón</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
-                <span className="text-[9px] text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Precio prom./galón</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
+                <span className="text-xs text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
                   ▼ {fmt(Math.abs(kpis.precio_promedio_diff || 0.22))} vs mes ant.
                 </span>
               </div>
@@ -286,13 +286,13 @@ export default function DashboardSubsidioView() {
             {/* Row 2: Charts Side by Side */}
             <div className="grid grid-cols-2 gap-4 mt-6 items-center">
               <div>
-                <span className="text-[10px] font-bold text-neutral-400 block mb-3">Evolución semanal del gasto</span>
+                <span className="text-xs font-bold text-neutral-500 block mb-3">Evolución semanal del gasto</span>
                 {serie_semanal.length === 0 ? (
-                  <div className="text-[9px] text-neutral-300 py-6 text-center border border-dashed border-neutral-100 rounded-lg">Sin datos</div>
+                  <div className="text-xs text-neutral-400 py-6 text-center border border-dashed border-neutral-100 rounded-lg">Sin datos</div>
                 ) : (
                   <ResponsiveContainer width="100%" height={90}>
                     <BarChart data={serie_semanal} margin={{ top: 5, right: 0, left: -25, bottom: 0 }}>
-                      <XAxis dataKey="semana" stroke="#d4d4d4" fontSize={8} tickLine={false} axisLine={false} />
+                      <XAxis dataKey="semana" stroke="#d4d4d4" fontSize={10} tickLine={false} axisLine={false} />
                       <Bar dataKey="importe" fill="#8039F4" radius={[3, 3, 0, 0]}>
                         {serie_semanal.map((entry, index) => {
                           const isS6 = entry.semana === "Sem 6";
@@ -300,22 +300,22 @@ export default function DashboardSubsidioView() {
                         })}
                       </Bar>
                     </BarChart>
-                  </ResponsiveContainer>
+                  </</ResponsiveContainer>
                 )}
               </div>
 
               <div>
-                <span className="text-[10px] font-bold text-neutral-400 block mb-2">Dónde cargas</span>
+                <span className="text-xs font-bold text-neutral-500 block mb-2">Dónde cargas</span>
                 <div className="flex gap-2">
-                  <div className="w-14 h-14 flex-shrink-0">
+                  <div className="w-16 h-16 flex-shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={donutData}
                           cx="50%"
                           cy="50%"
-                          innerRadius={16}
-                          outerRadius={25}
+                          innerRadius={18}
+                          outerRadius={28}
                           paddingAngle={1}
                           dataKey="value"
                         >
@@ -326,7 +326,7 @@ export default function DashboardSubsidioView() {
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="flex flex-col justify-center text-[8px] space-y-0.5">
+                  <div className="flex flex-col justify-center text-[10px] space-y-1">
                     {donutData.map((d, i) => (
                       <div key={i} className="flex items-center gap-1 whitespace-nowrap">
                         <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
@@ -343,7 +343,7 @@ export default function DashboardSubsidioView() {
           {/* Bottom section: rankings in text */}
           <div className="grid grid-cols-2 gap-4 border-t border-neutral-100 pt-4 mt-6">
             <div>
-              <span className="text-[10px] font-bold text-neutral-400 block mb-2">Unidades que más gastan</span>
+              <span className="text-xs font-bold text-neutral-500 block mb-2">Unidades que más gastan</span>
               <div className="space-y-2">
                 {(top_unidades.length > 0 ? top_unidades : [
                   { placa: "V18-209", importe: 14820 },
@@ -360,10 +360,10 @@ export default function DashboardSubsidioView() {
                   return (
                     <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
                       <div>
-                        <div className="font-bold text-neutral-700 text-[11px]">{item.placa}</div>
-                        <div className="text-[8px] text-neutral-400">{meta}</div>
+                        <div className="font-bold text-neutral-700 text-xs">{item.placa}</div>
+                        <div className="text-[10px] text-neutral-500">{meta}</div>
                       </div>
-                      <div className="font-cabinet font-black text-neutral-800 text-[11px]">S/ {fmt(item.importe)}</div>
+                      <div className="font-cabinet font-black text-neutral-800 text-xs">S/ {fmt(item.importe)}</div>
                     </div>
                   );
                 })}
@@ -371,21 +371,21 @@ export default function DashboardSubsidioView() {
             </div>
 
             <div>
-              <span className="text-[10px] font-bold text-neutral-400 block mb-2">Estaciones donde más cargas</span>
+              <span className="text-xs font-bold text-neutral-500 block mb-2">Estaciones donde más cargas</span>
               <div className="space-y-2">
                 {(top_estaciones.length > 0 ? top_estaciones : [
                   { estacion: "Repsol - Av. Industrial", importe: 48200 },
                   { estacion: "Primax - Paname. N.", importe: 29900 },
                   { estacion: "Petroperú - S. Lima", importe: 23100 }
                 ]).slice(0, 3).map((item, idx) => {
-                  const cleanEst = item.estacion.length > 18 ? item.estacion.slice(0, 18) + "…" : item.estacion;
+                  const cleanEst = item.estacion.length > 16 ? item.estacion.slice(0, 16) + "…" : item.estacion;
                   return (
                     <div key={idx} className="flex items-center justify-between text-xs py-1 border-b border-neutral-50/50">
                       <div>
-                        <div className="font-bold text-neutral-700 text-[11px]">{cleanEst}</div>
-                        <div className="text-[8px] text-neutral-400">Combustible</div>
+                        <div className="font-bold text-neutral-700 text-xs">{cleanEst}</div>
+                        <div className="text-[10px] text-neutral-400">Combustible</div>
                       </div>
-                      <div className="font-cabinet font-black text-neutral-800 text-[11px]">S/ {fmt(item.importe)}</div>
+                      <div className="font-cabinet font-black text-neutral-800 text-xs">S/ {fmt(item.importe)}</div>
                     </div>
                   );
                 })}
@@ -401,24 +401,24 @@ export default function DashboardSubsidioView() {
               <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
                 <Truck className="w-4 h-4" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">ESTADO DE VEHÍCULOS</h3>
+              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">ESTADO DE VEHÍCULOS</h3>
             </div>
 
             {/* Row 1 KPIs */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Unidades incluidas</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Unidades incluidas</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">
                   {kpis.unidades_incluidas || 12}/{kpis.unidades_incluidas || 12}
                 </div>
-                <span className="text-[9px] text-neutral-400 font-bold block mt-1">en el expediente</span>
+                <span className="text-xs text-neutral-500 font-medium block mt-1">en el expediente</span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Habilitadas y activas</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Habilitadas y activas</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">
                   {kpis.unidades_validas || 12}/{kpis.unidades_incluidas || 12}
                 </div>
-                <span className="text-[9px] text-emerald-600 font-bold block mt-1">
+                <span className="text-xs text-emerald-600 font-bold block mt-1">
                   {kpis.unidades_validas_pct || 100}% operativas
                 </span>
               </div>
@@ -427,20 +427,20 @@ export default function DashboardSubsidioView() {
             {/* Row 2 KPIs */}
             <div className="grid grid-cols-2 gap-3 mt-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Galones reconocidos</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Galones reconocidos</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">
                   {fmt(kpis.galones_reconocidos || 4560)}
                 </div>
-                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                <span className="text-xs text-neutral-500 font-medium block mt-1">
                   de {kpis.invoices_confirmed || 184} comprobantes
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
-                <span className="text-[10px] font-bold text-neutral-400 block mb-1">Costo prom./unidad</span>
-                <div className="font-cabinet font-black text-xl text-neutral-800">
+                <span className="text-xs font-semibold text-neutral-500 block mb-1">Costo prom./unidad</span>
+                <div className="font-cabinet font-black text-2xl text-neutral-900">
                   S/ {fmt(kpis.costo_promedio_unidad || 10783)}
                 </div>
-                <span className="text-[9px] text-neutral-400 font-bold block mt-1">
+                <span className="text-xs text-neutral-500 font-medium block mt-1">
                   {kpis.num_meses || 2} meses
                 </span>
               </div>
@@ -450,17 +450,17 @@ export default function DashboardSubsidioView() {
           {/* Bottom Card: Antigüedad de flota */}
           <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-4 mt-6">
             <div className="flex justify-between items-start">
-              <span className="text-[10px] font-bold text-neutral-400">Antigüedad de flota</span>
+              <span className="text-xs font-semibold text-neutral-500">Antigüedad de flota</span>
               <div className="text-right">
                 <div className="text-3xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 || 3}</div>
-                <div className="text-[9px] font-bold text-neutral-500 mt-1">unidades +10 años</div>
+                <div className="text-xs font-bold text-neutral-500 mt-1">unidades +10 años</div>
               </div>
             </div>
             <div className="mt-1 flex items-baseline gap-1">
               <span className="text-3xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age || 7.2)}</span>
-              <span className="text-[10px] font-bold text-neutral-500">años prom.</span>
+              <span className="text-xs font-semibold text-neutral-500">años prom.</span>
             </div>
-            <p className="text-[10px] font-bold text-amber-800 mt-3 leading-tight">
+            <p className="text-xs font-bold text-amber-900 mt-3 leading-tight">
               Evaluar mantenimiento o renovación con monitoreo real.
             </p>
           </div>
@@ -473,7 +473,7 @@ export default function DashboardSubsidioView() {
               <div className="w-8 h-8 rounded-full bg-[#8039F4]/10 flex items-center justify-center text-[#8039F4]">
                 <FileText className="w-4 h-4" strokeWidth={2.5} />
               </div>
-              <h3 className="font-cabinet font-black text-sm text-[#8039F4] tracking-wide uppercase">ESTADO DE DOCUMENTACIÓN</h3>
+              <h3 className="font-cabinet font-black text-base text-[#8039F4] tracking-wider uppercase">ESTADO DE DOCUMENTACIÓN</h3>
             </div>
 
             {/* Circular progress and title */}
@@ -486,11 +486,11 @@ export default function DashboardSubsidioView() {
                     strokeDashoffset={125.6 * (1 - (kpis.pct_docs || 92) / 100)}
                     strokeLinecap="round" />
                 </svg>
-                <span className="absolute text-[10px] font-cabinet font-black text-neutral-800">{kpis.pct_docs || 92}%</span>
+                <span className="absolute text-xs font-cabinet font-black text-neutral-800">{kpis.pct_docs || 92}%</span>
               </div>
               <div>
-                <div className="font-bold text-neutral-800 text-xs">Documentos en regla</div>
-                <div className="text-[9px] text-neutral-400 mt-0.5">Semáforo de vencimientos de tu flota</div>
+                <div className="font-bold text-neutral-800 text-sm">Documentos en regla</div>
+                <div className="text-xs text-neutral-400 mt-0.5">Semáforo de vencimientos de tu flota</div>
               </div>
             </div>
 
@@ -501,11 +501,11 @@ export default function DashboardSubsidioView() {
                   <div className="flex items-center gap-2.5 min-w-0">
                     <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${row.dot}`} />
                     <div className="min-w-0">
-                      <div className="font-bold text-neutral-800 text-[11px] truncate leading-tight">{row.title}</div>
-                      <div className="text-[9px] text-neutral-500 mt-0.5">{row.desc}</div>
+                      <div className="font-bold text-neutral-800 text-xs truncate leading-tight">{row.title}</div>
+                      <div className="text-xs text-neutral-500 mt-0.5">{row.desc}</div>
                     </div>
                   </div>
-                  <span className={`text-[9px] font-black tracking-wider whitespace-nowrap ml-2 ${row.badgeColor}`}>{row.badge}</span>
+                  <span className={`text-xs font-black tracking-wider whitespace-nowrap ml-2 ${row.badgeColor}`}>{row.badge}</span>
                 </div>
               ))}
             </div>
@@ -530,10 +530,10 @@ export default function DashboardSubsidioView() {
               Tus {kpis.unidades_incluidas || 12} unidades ya viven en ENERED. Conviértelas en control total.
             </h3>
             <div className="flex flex-wrap gap-1.5 mt-2.5">
-              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">📍 Ubicación en vivo</span>
-              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">⛽ Km/galón real</span>
-              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">🚨 Alertas de velocidad</span>
-              <span className="px-2 py-0.5 rounded-full bg-white/10 text-[9px] font-bold whitespace-nowrap">🔧 Mantenimiento predictivo</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold whitespace-nowrap">📍 Ubicación en vivo</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold whitespace-nowrap">⛽ Km/galón real</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold whitespace-nowrap">🚨 Alertas de velocidad</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold whitespace-nowrap">🔧 Mantenimiento predictivo</span>
             </div>
           </div>
         </div>
@@ -541,11 +541,11 @@ export default function DashboardSubsidioView() {
         <div className="flex flex-col items-center md:items-end flex-shrink-0 relative z-10 w-full md:w-auto">
           <button
             onClick={() => window.open("https://wa.me/51972228870?text=Hola,%20quiero%20agendar%20mi%20activación%20de%20unidades%20en%20ENERED", "_blank")}
-            className="bg-white hover:bg-neutral-100 text-[#6100C2] font-cabinet font-black px-5 py-2.5 rounded-2xl shadow-lg transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] w-full md:w-auto justify-center text-xs"
+            className="bg-white hover:bg-neutral-100 text-[#6100C2] font-cabinet font-black px-5 py-2.5 rounded-2xl shadow-lg transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] w-full md:w-auto justify-center text-sm"
           >
             <span>📅</span> Agendar mi activación &gt;
           </button>
-          <div className="text-[8px] text-white/70 font-semibold mt-1.5 text-center md:text-right">
+          <div className="text-xs text-white/70 font-semibold mt-1.5 text-center md:text-right">
             30 min con un Product Manager • gratis • activas solo lo que necesitas
           </div>
         </div>
@@ -623,7 +623,7 @@ function StagesRow({ stages, user, kpis }) {
           <Gift className="w-5 h-5 fill-current" />
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-white/70 font-semibold leading-tight">Subsidio Reconocido</div>
+          <div className="text-xs uppercase tracking-wider text-white/70 font-semibold leading-tight">Subsidio Reconocido</div>
           <div className="text-xl lg:text-2xl font-cabinet font-black text-white leading-tight">
             S/ {num(subsidioReconocido)}
           </div>
@@ -660,7 +660,7 @@ function StagesRow({ stages, user, kpis }) {
               <div key={s.key} className="flex flex-col items-center relative z-10">
                 <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all ${dotCls}`}>
                   {isDone ? (
-                    <span className="text-[10px] font-bold text-[#8039F4]">✓</span>
+                    <span className="text-xs font-bold text-[#8039F4]">✓</span>
                   ) : isCurrent ? (
                     <span className="w-2.5 h-2.5 rounded-full bg-[#8039F4]" />
                   ) : (
@@ -668,7 +668,7 @@ function StagesRow({ stages, user, kpis }) {
                   )}
                 </div>
                 
-                <div className="text-[10px] font-bold mt-1.5 text-white/90 whitespace-nowrap">
+                <div className="text-xs font-bold mt-1.5 text-white/90 whitespace-nowrap">
                   {getStageLabel(s.key, s.label)}
                 </div>
               </div>
@@ -684,7 +684,7 @@ function StagesRow({ stages, user, kpis }) {
       <div className="flex items-center gap-6 justify-between w-full lg:w-auto flex-wrap lg:flex-nowrap">
         {/* Ahorro */}
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-white/70 font-semibold leading-tight">Ahorro</div>
+          <div className="text-xs uppercase tracking-wider text-white/70 font-semibold leading-tight">Ahorro</div>
           <div className="text-xl lg:text-2xl font-cabinet font-black text-white leading-tight">
             {pctAhorro}%
           </div>
@@ -700,22 +700,22 @@ function StagesRow({ stages, user, kpis }) {
           <div className="flex gap-2 text-center items-center">
             <div>
               <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.days)}</div>
-              <div className="text-[8px] font-black opacity-75 mt-0.5">D</div>
+              <div className="text-[10px] font-black opacity-75 mt-0.5">D</div>
             </div>
             <span className="text-sm font-bold leading-none">:</span>
             <div>
               <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.hours)}</div>
-              <div className="text-[8px] font-black opacity-75 mt-0.5">H</div>
+              <div className="text-[10px] font-black opacity-75 mt-0.5">H</div>
             </div>
             <span className="text-sm font-bold leading-none">:</span>
             <div>
               <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.minutes)}</div>
-              <div className="text-[8px] font-black opacity-75 mt-0.5">M</div>
+              <div className="text-[10px] font-black opacity-75 mt-0.5">M</div>
             </div>
             <span className="text-sm font-bold leading-none">:</span>
             <div>
               <div className="text-sm lg:text-base font-cabinet font-black leading-none">{pad(timeLeft.seconds)}</div>
-              <div className="text-[8px] font-black opacity-75 mt-0.5">S</div>
+              <div className="text-[10px] font-black opacity-75 mt-0.5">S</div>
             </div>
           </div>
         </div>
@@ -767,7 +767,7 @@ function DocsSemaforoCard({ semaforo, navigate }) {
                   <div className="text-sm font-bold text-neutral-900 leading-tight">{d.label}</div>
                   <span className={`w-3 h-3 rounded-full ${c.badge} flex-shrink-0 mt-1`} aria-label={c.label} />
                 </div>
-                <div className={`text-[10px] uppercase tracking-widest font-bold mt-2 ${c.text}`}>{c.label}</div>
+                <div className={`text-xs uppercase tracking-widest font-bold mt-2 ${c.text}`}>{c.label}</div>
                 <div className="mt-2 text-xs text-neutral-600">
                   {d.status === "missing" ? (
                     <button
