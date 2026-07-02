@@ -300,7 +300,7 @@ export default function DashboardSubsidioView() {
                         })}
                       </Bar>
                     </BarChart>
-                  </</ResponsiveContainer>
+                  </ResponsiveContainer>
                 )}
               </div>
 
