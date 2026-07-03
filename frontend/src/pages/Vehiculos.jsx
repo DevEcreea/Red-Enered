@@ -1,921 +1,752 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-import ModuloBloqueado from "./ModuloBloqueado";
 import { api } from "../lib/api";
 import {
-  Car, AlertTriangle, Plus, Search, Pencil, Trash2, X,
-  FileSpreadsheet, FileDown, Eye, Check, ChevronDown, ChevronUp,
-  Cpu, MapPin, Cog, Warehouse, FileText, UserCheck, Fuel,
-  Compass, Link2, Wifi, WifiOff, Unlink, Info
+  Car, Plus, ChevronDown, ChevronUp, Eye, Pencil, Copy,
+  Wrench, CalendarDays, Search, Upload, Download, X,
+  MapPin, Cog, Warehouse, FileText, UserCheck, Fuel,
+  Cpu, Wifi, WifiOff, Unlink, Tag, Shield, Layers,
+  Clock
 } from "lucide-react";
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 
-// ---------- helpers ----------
-const fmtS = (n) => `S/ ${Number(n || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("es-PE") : "");
+// ─── helpers ─────────────────────────────────────────────────────────────────
 const cls = (...a) => a.filter(Boolean).join(" ");
 
-function Kpi({ label, value, sub, tone = "brand", icon: Icon = Car }) {
-  const toneCls = {
-    brand: "bg-brand-50 text-brand",
-    amber: "bg-amber-50 text-amber-600",
-    emerald: "bg-emerald-50 text-emerald-600",
-    blue: "bg-blue-50 text-blue-600",
-    rose: "bg-rose-50 text-rose-600",
-    teal: "bg-teal-50 text-teal-600",
-  }[tone];
+const COSTO_COMP = [
+  { name: "Correctivo",   v: 78.1, c: "#7FB3D5" },
+  { name: "Infracciones", v: 10.8, c: "#BDC3C7" },
+  { name: "Aditivo",      v: 5.8,  c: "#34495E" },
+  { name: "Preventivo",   v: 3.2,  c: "#F5A623" },
+  { name: "Combustibles", v: 1.3,  c: "#F4D03F" },
+  { name: "Hospedaje",    v: 0.6,  c: "#E74C3C" },
+  { name: "Vencimiento",  v: 0.3,  c: "#26C6B0" },
+];
+
+const CONTROLES = [
+  { icon: MapPin,    color: "#14B8A6", label: "GPS" },
+  { icon: Cog,       color: "#7FB3D5", label: "Config" },
+  { icon: Warehouse, color: "#F26B6B", label: "Taller" },
+  { icon: FileText,  color: "#F26B6B", label: "Docs" },
+  { icon: UserCheck, color: "#F26B6B", label: "Conductor" },
+  { icon: Shield,    color: "#F26B6B", label: "Infracciones" },
+  { icon: Fuel,      color: "#F26B6B", label: "Combustible" },
+];
+
+const MOCK_VEHICULOS = [
+  { id:"1", marca:"Chevrolet", estado:"OEM",      ec:"#14B8A6", unidad:"chevrolet 16", chasis:"VF37H9HF3JJ519998", veh:"T-151116.1", modelo:"CORSA",        tipo:"SEDAN",    base:"ACOZAC",   titular:"Transp. Andes", cc:"100000 - SEDE CENTRAL", med:"1.910.101.001" },
+  { id:"2", marca:"Chevrolet", estado:"OPERATIVO", ec:"#059669", unidad:"567",          chasis:"8AC903552CE061670", veh:"BB265GT",    modelo:"CORSA",        tipo:"SEDAN",    base:"VECFLEET", titular:"Log. del Sur",  cc:"100000 - SEDE CENTRAL", med:"150.000.000"   },
+  { id:"3", marca:"Chevrolet", estado:"OPERATIVO", ec:"#059669", unidad:"AEQQQA",       chasis:"123_1",            veh:"AE456OK",    modelo:"CORSA",        tipo:"SEDAN",    base:"EPEC",     titular:"Log. del Sur",  cc:"100000 - SEDE CENTRAL", med:"1.500.030"     },
+  { id:"4", marca:"Ford",      estado:"OPERATIVO", ec:"#059669", unidad:"504",          chasis:"218497821478",     veh:"AA265GQ",    modelo:"F-150 XL 4X4", tipo:"PICK UP",  base:"EPEC",     titular:"APYMSA",        cc:"APYMSA -001",           med:"703.215"       },
+  { id:"5", marca:"Mercedes-Benz", estado:"OPERATIVO", ec:"#059669", unidad:"21",      chasis:"664545333333_2",   veh:"AE456OV",    modelo:"SPRINTER",     tipo:"FURGÓN",   base:"EPEC",     titular:"Distrib. Lima", cc:"100000 - SEDE CENTRAL", med:"21.345.234"    },
+];
+
+const MOCK_MARCAS   = [["Chevrolet",128],["Ford",96],["Mercedes-Benz",42],["Kenworth",30],["Volvo",24],["International",18]];
+const MOCK_MODELOS  = [["Corsa","Chevrolet","Sedán",64],["F-150 XL 4x4","Ford","Pick Up",40],["T800","Kenworth","Tractomula",30],["Sprinter","Mercedes-Benz","Furgón",22],["FH","Volvo","Tractomula",18]];
+const MOCK_TIPOS    = [["Sedán","2 ejes · 4 neumáticos",210],["Pick Up","2 ejes · 4 neumáticos",88],["Tractomula","3 ejes · 10 neumáticos",60],["Furgón","2 ejes · 6 neumáticos",34],["Autobús","2 ejes · 6 neumáticos",20]];
+const MOCK_DISPS    = [
+  ["356938035…801","Teltonika FMC150","900 123 456 · Claro","Reportando","chevrolet 16 · T-151116","hace 2 min"],
+  ["356938035…802","Teltonika FMC150","900 123 457 · Movistar","Reportando","567 · BB265GT","hace 5 min"],
+  ["356938035…803","Teltonika FMB920","900 123 458 · Claro","No reporta","123_1 · AE456OK","hace 3 días"],
+  ["356938035…804","Queclink GV75","900 123 459 · Entel","Reportando","504 · AA265GQ","hace 1 min"],
+  ["356938035…805","Teltonika FMC150","— sin SIM","Sin asignar","—","—"],
+];
+
+// ─── Donut (CSS conic-gradient, igual que el HTML) ───────────────────────────
+function Donut({ data, total = "$190276" }) {
+  let acc = 0;
+  const stops = data.map(s => {
+    const a = acc;
+    acc += s.v;
+    return `${s.c} ${a.toFixed(1)}% ${acc.toFixed(1)}%`;
+  });
+  const bg = `conic-gradient(${stops.join(",")})`;
   return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-5 hover:shadow-md transition-all duration-200">
-      <div className="flex items-center gap-3">
-        <div className={cls("w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0", toneCls)}>
-          <Icon className="w-5 h-5" strokeWidth={2.5} />
-        </div>
-        <div>
-          <p className="text-xs text-neutral-500 uppercase tracking-wide font-bold">{label}</p>
-          <p className="font-cabinet font-black text-2xl text-neutral-900 leading-tight">{value}</p>
-        </div>
+    <div style={{ width:150, height:150, borderRadius:"50%", background:bg, position:"relative", flexShrink:0 }}>
+      <div style={{
+        position:"absolute", inset:26, background:"#FAF7FF",
+        borderRadius:"50%", display:"flex", alignItems:"center",
+        justifyContent:"center", flexDirection:"column"
+      }}>
+        <span style={{ fontSize:14, fontWeight:700, color:"#1f2937" }}>{total}</span>
       </div>
-      {sub && <p className="text-xs text-neutral-400 mt-2 font-medium">{sub}</p>}
     </div>
   );
 }
 
-function Modal({ open, onClose, title, children, width = "max-w-lg" }) {
+// ─── KPI card (diseño HTML: top-label + icon, big number abajo) ──────────────
+function KpiCard({ label, value, valueSub, foot, icon: Icon, color, gps }) {
+  return (
+    <div style={{
+      background:"#fff", border:"1px solid #F0F0F3", borderRadius:16,
+      boxShadow:"0 1px 2px rgba(0,0,0,.04)", padding:16, minHeight:96,
+      display:"flex", flexDirection:"column", justifyContent:"space-between"
+    }}>
+      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between" }}>
+        <span style={{ fontSize:12, color:"#6B7280", lineHeight:1.2, maxWidth:"70%" }}>{label}</span>
+        <Icon style={{ width:22, height:22, color, flexShrink:0, marginLeft:4 }} />
+      </div>
+      <div>
+        {gps ? (
+          <div style={{ fontSize:22, fontWeight:700, color:"#111827" }}>
+            {value} <span style={{ fontSize:12, fontWeight:500, color:"#6B7280" }}>{valueSub}</span>
+          </div>
+        ) : (
+          <div style={{ fontSize:30, fontWeight:700, color:"#111827" }}>{value}</div>
+        )}
+        {foot && <div style={{ fontSize:12, color:"#6B7280", marginTop:4 }}>{foot}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Filter field (underline style) ─────────────────────────────────────────
+function FilterField({ label, dropdown, value, onChange, options }) {
+  if (dropdown && options) {
+    return (
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid #D5D8DE", paddingBottom:4 }}>
+        <select value={value} onChange={e => onChange(e.target.value)}
+          style={{ border:"none", outline:"none", background:"transparent", fontSize:13, color: value ? "#374151" : "#9ca3af", flex:1, cursor:"pointer" }}>
+          <option value="">{label}</option>
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        <ChevronDown style={{ width:15, height:15, color:"#9ca3af", flexShrink:0 }} />
+      </div>
+    );
+  }
+  return (
+    <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", borderBottom:"1px solid #D5D8DE", paddingBottom:4 }}>
+      <input
+        value={value} onChange={e => onChange(e.target.value)}
+        placeholder={label}
+        style={{ border:"none", outline:"none", background:"transparent", fontSize:13, color:"#374151", flex:1 }}
+      />
+    </div>
+  );
+}
+
+// ─── Toggle switch ───────────────────────────────────────────────────────────
+function Toggle({ label, checked, onChange }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+      <span style={{ fontSize:13, color:"#6B7280" }}>{label}</span>
+      <div
+        onClick={() => onChange(!checked)}
+        style={{
+          width:42, height:22, borderRadius:999,
+          background: checked ? "#14B8A6" : "#E5E7EB",
+          padding:2, display:"flex",
+          justifyContent: checked ? "flex-end" : "flex-start",
+          cursor:"pointer", transition:"background .2s"
+        }}
+      >
+        <div style={{
+          width:18, height:18, borderRadius:"50%", background:"#fff",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:11, fontWeight:700, color:"#DC2626"
+        }}>
+          {!checked && "✕"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal ───────────────────────────────────────────────────────────────────
+function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className={cls("bg-white rounded-2xl shadow-xl w-full", width)} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-5 border-b border-neutral-200">
-          <h3 className="font-cabinet font-black text-xl text-neutral-900">{title}</h3>
-          <button onClick={onClose} className="text-neutral-500 hover:text-neutral-900 transition-colors">
-            <X className="w-5 h-5" />
+    <div style={{ position:"fixed", inset:0, zIndex:50, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,0,0,.4)", padding:16 }}
+      onClick={onClose}>
+      <div style={{ background:"#fff", borderRadius:16, boxShadow:"0 20px 60px rgba(0,0,0,.2)", width:"100%", maxWidth:480 }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 20px", borderBottom:"1px solid #F0F0F3" }}>
+          <span style={{ fontWeight:700, fontSize:16, color:"#1f2937" }}>{title}</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:"#6B7280" }}>
+            <X style={{ width:20, height:20 }} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        <div style={{ padding:20 }}>{children}</div>
       </div>
     </div>
   );
 }
 
-function Field({ label, children, required }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-bold text-neutral-700 uppercase tracking-wide">
-        {label} {required && <span className="text-rose-500">*</span>}
-      </span>
-      <div className="mt-1">{children}</div>
-    </label>
-  );
-}
+const inputSt = {
+  width:"100%", border:"1px solid #D1D5DB", borderRadius:8,
+  padding:"8px 12px", fontSize:13, outline:"none", color:"#374151"
+};
 
-const inputCls = "w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand";
-
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Vehiculos() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin_enered" || user?.role === "administrador" || user?.role === "logistica";
+  const isAdmin = ["admin_enered","administrador","logistica"].includes(user?.role);
 
-  const [tab, setTab] = useState("vehiculos");
-  const [catTab, setCatTab] = useState("Marcas");
+  const [tab, setTab]             = useState("vehiculos");
+  const [catTab, setCatTab]       = useState("Marcas");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [expanded, setExpanded]   = useState(null);
+  const [modal, setModal]         = useState(null);
+  const [form, setForm]           = useState({});
+  const [saving, setSaving]       = useState(false);
+  const [errMsg, setErrMsg]       = useState("");
+  const [loading, setLoading]     = useState(false);
 
-  // API states
-  const [vehiculos, setVehiculos] = useState([]);
+  // API data
+  const [vehiculos, setVehiculos]     = useState([]);
   const [conductores, setConductores] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [errMsg, setErrMsg] = useState("");
 
-  // UI state
-  const [q, setQ] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
-  const [expandedRow, setExpandedRow] = useState(null);
-  const [selectedPlacas, setSelectedPlacas] = useState({});
-
-  // Filter fields
-  const [filterMarca, setFilterMarca] = useState("");
-  const [filterEstado, setFilterEstado] = useState("");
-  const [filterUnidad, setFilterUnidad] = useState("");
-  const [filterChasis, setFilterChasis] = useState("");
-  const [filterTipo, setFilterTipo] = useState("");
-  const [filterBase, setFilterBase] = useState("");
-  const [filterTitular, setFilterTitular] = useState("");
-  const [filterCC, setFilterCC] = useState("");
-  const [filterMedidorMin, setFilterMedidorMin] = useState("");
-  const [filterMedidorMax, setFilterMedidorMax] = useState("");
-  const [filterVerInactivos, setFilterVerInactivos] = useState(false);
-
-  // Modals state
-  const [modal, setModal] = useState(null); // { type: 'create' | 'edit', editing?: obj }
-  const [form, setForm] = useState({});
-
-  // Mock static data
-  const [costoComp] = useState([
-    { name: "Correctivo", value: 78.1, color: "#8039F4" },
-    { name: "Infracciones", value: 10.8, color: "#EF4444" },
-    { name: "Aditivo", value: 5.8, color: "#A78BFA" },
-    { name: "Preventivo", value: 3.2, color: "#3B82F6" },
-    { name: "Combustibles", value: 1.3, color: "#F59E0B" },
-    { name: "Hospedaje", value: 0.6, color: "#10B981" },
-    { name: "Vencimiento", value: 0.3, color: "#EC4899" },
-  ]);
-
-  const [marcas, setMarcas] = useState([
-    { marca: "Chevrolet", n: 128, estado: "Activo" },
-    { marca: "Ford", n: 96, estado: "Activo" },
-    { marca: "Mercedes-Benz", n: 42, estado: "Activo" },
-    { marca: "Kenworth", n: 30, estado: "Activo" },
-    { marca: "Volvo", n: 24, estado: "Activo" },
-    { marca: "International", n: 18, estado: "Activo" }
-  ]);
-
-  const [modelos, setModelos] = useState([
-    { modelo: "Corsa", marca: "Chevrolet", tipo: "Sedán", n: 64 },
-    { modelo: "F-150 XL 4x4", marca: "Ford", tipo: "Pick Up", n: 40 },
-    { modelo: "T800", marca: "Kenworth", tipo: "Tractomula", n: 30 },
-    { modelo: "Sprinter", marca: "Mercedes-Benz", tipo: "Furgón", n: 22 },
-    { modelo: "FH", marca: "Volvo", tipo: "Tractomula", n: 18 }
-  ]);
-
-  const [tiposVeh, setTiposVeh] = useState([
-    { tipo: "Sedán", configuracion: "2 ejes · 4 neumáticos", n: 210 },
-    { tipo: "Pick Up", configuracion: "2 ejes · 4 neumáticos", n: 88 },
-    { tipo: "Tractomula", configuracion: "3 ejes · 10 neumáticos", n: 60 },
-    { tipo: "Furgón", configuracion: "2 ejes · 6 neumáticos", n: 34 },
-    { tipo: "Autobús", configuracion: "2 ejes · 6 neumáticos", n: 20 }
-  ]);
-
-  const [dispositivos, setDispositivos] = useState([
-    { imei: "356938035201801", modelo: "Teltonika FMC150", sim: "900 123 456 · Claro", estado: "Reportando", asignado: "chevrolet 16 · T-151116", fecha: "hace 2 min" },
-    { imei: "356938035201802", modelo: "Teltonika FMC150", sim: "900 123 457 · Movistar", estado: "Reportando", asignado: "567 · BB265GT", fecha: "hace 5 min" },
-    { imei: "356938035201803", modelo: "Teltonika FMB920", sim: "900 123 458 · Claro", estado: "No reporta", asignado: "123_1 · AE456OK", fecha: "hace 3 días" },
-    { imei: "356938035201804", modelo: "Queclink GV75", sim: "900 123 459 · Entel", estado: "Reportando", asignado: "504 · AA265GQ", fecha: "hace 1 min" },
-    { imei: "356938035201805", modelo: "Teltonika FMC150", sim: "— sin SIM", estado: "Sin asignar", asignado: "—", fecha: "—" },
-  ]);
-
-  const [dispKpis] = useState([
-    { label: "Dispositivos", value: "199", tone: "brand", icon: Cpu },
-    { label: "Reportando", value: "191", tone: "emerald", icon: Wifi },
-    { label: "No reportan", value: "5", tone: "rose", icon: WifiOff },
-    { label: "Sin asignar", value: "3", tone: "amber", icon: Unlink }
-  ]);
+  // Filters
+  const [q, setQ]                       = useState("");
+  const [fMarca, setFMarca]             = useState("");
+  const [fEstado, setFEstado]           = useState("");
+  const [fUnidad, setFUnidad]           = useState("");
+  const [fChasis, setFChasis]           = useState("");
+  const [fModelo, setFModelo]           = useState("");
+  const [fTipo, setFTipo]               = useState("");
+  const [fBase, setFBase]               = useState("");
+  const [fTitular, setFTitular]         = useState("");
+  const [fFuncion, setFFuncion]         = useState("");
+  const [fCC, setFCC]                   = useState("");
+  const [fMedMin, setFMedMin]           = useState("");
+  const [fMedMax, setFMedMax]           = useState("");
+  const [fInactivos, setFInactivos]     = useState(false);
+  const [fPersistir, setFPersistir]     = useState(false);
 
   async function loadAll() {
     setLoading(true);
     try {
       const [v, c] = await Promise.all([
         api.get("/vehiculos"),
-        api.get("/conductores").catch(() => ({ data: [] }))
+        api.get("/conductores").catch(() => ({ data: [] })),
       ]);
-      setVehiculos(v.data || []);
+      // Merge mock + real; if real has data, use real only
+      const real = v.data || [];
+      setVehiculos(real.length > 0 ? real : MOCK_VEHICULOS);
       setConductores(c.data || []);
-    } catch (e) {
-      console.error("Error al cargar datos de vehículos", e);
+    } catch {
+      setVehiculos(MOCK_VEHICULOS);
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => {
-    loadAll();
-  }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  // Filtering vehicles
-  const vehFiltrados = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return vehiculos.filter((v) => {
-      // General search query
-      if (query) {
-        const text = `${v.placa || ""} ${v.marca || ""} ${v.modelo || ""} ${v.empresa || ""}`.toLowerCase();
-        if (!text.includes(query)) return false;
-      }
-      // Specific filters
-      if (filterMarca && (v.marca || "").toLowerCase() !== filterMarca.toLowerCase()) return false;
-      if (filterEstado) {
-        const est = (v.estado || "OPERATIVO").toLowerCase();
-        if (est !== filterEstado.toLowerCase()) return false;
-      }
-      if (filterUnidad && !(v.unidad || "").toLowerCase().includes(filterUnidad.toLowerCase())) return false;
-      if (filterChasis && !(v.chasis || "").toLowerCase().includes(filterChasis.toLowerCase())) return false;
-      if (filterTipo && !(v.tipo || "").toLowerCase().includes(filterTipo.toLowerCase())) return false;
-      if (filterBase && !(v.base || "").toLowerCase().includes(filterBase.toLowerCase())) return false;
-      if (filterTitular && !(v.titular || "").toLowerCase().includes(filterTitular.toLowerCase())) return false;
-      if (filterCC && !(v.cc || "").toLowerCase().includes(filterCC.toLowerCase())) return false;
-      if (filterMedidorMin && Number(v.medidor || 0) < Number(filterMedidorMin)) return false;
-      if (filterMedidorMax && Number(v.medidor || 0) > Number(filterMedidorMax)) return false;
-      if (!filterVerInactivos && (v.estado || "OPERATIVO").toLowerCase() === "inactivo") return false;
-
+  // filtered list
+  const lista = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    return vehiculos.filter(v => {
+      if (qq && !`${v.placa||""} ${v.marca||""} ${v.modelo||""} ${v.veh||""} ${v.unidad||""}`.toLowerCase().includes(qq)) return false;
+      if (fMarca   && (v.marca||"").toLowerCase() !== fMarca.toLowerCase()) return false;
+      if (fEstado  && (v.estado||"").toLowerCase() !== fEstado.toLowerCase()) return false;
+      if (fUnidad  && !(v.unidad||"").toLowerCase().includes(fUnidad.toLowerCase())) return false;
+      if (fChasis  && !(v.chasis||"").toLowerCase().includes(fChasis.toLowerCase())) return false;
+      if (fModelo  && !(v.modelo||"").toLowerCase().includes(fModelo.toLowerCase())) return false;
+      if (fTipo    && !(v.tipo||"").toLowerCase().includes(fTipo.toLowerCase())) return false;
+      if (fBase    && !(v.base||"").toLowerCase().includes(fBase.toLowerCase())) return false;
+      if (fTitular && !(v.titular||"").toLowerCase().includes(fTitular.toLowerCase())) return false;
+      if (fCC      && !(v.cc||"").toLowerCase().includes(fCC.toLowerCase())) return false;
+      if (!fInactivos && (v.estado||"").toUpperCase() === "INACTIVO") return false;
       return true;
     });
-  }, [
-    vehiculos, q, filterMarca, filterEstado, filterUnidad, filterChasis,
-    filterTipo, filterBase, filterTitular, filterCC, filterMedidorMin,
-    filterMedidorMax, filterVerInactivos
-  ]);
+  }, [vehiculos, q, fMarca, fEstado, fUnidad, fChasis, fModelo, fTipo, fBase, fTitular, fCC, fInactivos]);
+
+  function clearFilters() {
+    setFMarca(""); setFEstado(""); setFUnidad(""); setFChasis(""); setFModelo("");
+    setFTipo(""); setFBase(""); setFTitular(""); setFFuncion(""); setFCC("");
+    setFMedMin(""); setFMedMax(""); setFInactivos(false); setQ("");
+  }
+
+  // CRUD
+  function openCreate() { setErrMsg(""); setForm({ estado:"OPERATIVO" }); setModal("create"); }
+  function openEdit(v)  { setErrMsg(""); setForm({...v}); setModal("edit"); }
+
+  async function handleSave(e) {
+    e.preventDefault(); setSaving(true); setErrMsg("");
+    try {
+      const body = { ...form };
+      if (body.año) body.año = parseInt(body.año, 10);
+      if (modal === "edit") await api.put(`/vehiculos/${form.id}`, body);
+      else                  await api.post("/vehiculos", body);
+      setModal(null); setForm({});
+      await loadAll();
+    } catch (e2) { setErrMsg(e2?.response?.data?.detail || "Error al guardar"); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm("¿Eliminar este vehículo?")) return;
+    try { await api.delete(`/vehiculos/${id}`); await loadAll(); }
+    catch (e) { alert(e?.response?.data?.detail || "Error al eliminar"); }
+  }
 
   // Exports
   function exportExcel() {
-    let rows = [];
-    if (tab === "vehiculos") {
-      rows = vehFiltrados.map((v) => ({
-        Placa: v.placa,
-        Marca: v.marca || "",
-        Modelo: v.modelo || "",
-        Año: v.año || "",
-        Estado: v.estado || "OPERATIVO",
-        Empresa: v.empresa || "",
-        Unidad: v.unidad || "",
-        Chasis: v.chasis || "",
-        Tipo: v.tipo || "",
-        Base: v.base || "",
-        Titular: v.titular || "",
-        "Centro de Costos": v.cc || "",
-        Medidor: v.medidor || 0
-      }));
-    } else if (tab === "catalogos") {
-      rows = catTab === "Marcas" ? marcas : catTab === "Modelos" ? modelos : tiposVeh;
-    } else {
-      rows = dispositivos.map(d => ({
-        IMEI: d.imei, Modelo: d.modelo, SIM: d.sim, Estado: d.estado, Asignado: d.asignado, "Última comunicación": d.fecha
-      }));
-    }
-
+    const rows = lista.map(v => ({ Placa:v.veh||v.placa, Marca:v.marca||"", Modelo:v.modelo||"", Tipo:v.tipo||"", Estado:v.estado||"", Empresa:v.empresa||v.cc||"" }));
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, tab);
-    XLSX.writeFile(wb, `reporte_${tab}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Vehiculos");
+    XLSX.writeFile(wb, `vehiculos_${new Date().toISOString().slice(0,10)}.xlsx`);
   }
-
   function exportPDF() {
-    const doc = new jsPDF({ orientation: "landscape" });
-    doc.setFontSize(16);
-    doc.text(`ENERED — Administración de Vehículos`, 14, 16);
-    doc.setFontSize(9);
-    doc.text(new Date().toLocaleString("es-PE"), 14, 22);
-
-    let y = 32;
+    const doc = new jsPDF({ orientation:"landscape" });
+    doc.setFontSize(14); doc.text("ENERED — Administración de Vehículos", 14, 14);
+    let y = 24;
     const line = (cols, bold) => {
-      if (bold) doc.setFont(undefined, "bold");
-      else doc.setFont(undefined, "normal");
-      cols.forEach((c, idx) => doc.text(String(c ?? ""), 14 + idx * 38, y));
-      y += 6;
-      if (y > 195) { doc.addPage(); y = 16; }
+      doc.setFont(undefined, bold ? "bold" : "normal");
+      cols.forEach((c, i) => doc.text(String(c ?? ""), 14 + i * 48, y));
+      y += 6; if (y > 195) { doc.addPage(); y = 14; }
     };
-
-    if (tab === "vehiculos") {
-      line(["Placa", "Marca", "Modelo", "Año", "Estado", "Empresa"], true);
-      vehFiltrados.forEach((v) => line([v.placa, v.marca || "", v.modelo || "", v.año || "", v.estado || "OPERATIVO", v.empresa || ""]));
-    } else if (tab === "catalogos") {
-      if (catTab === "Marcas") {
-        line(["Marca", "Vehículos", "Estado"], true);
-        marcas.forEach(m => line([m.marca, m.n, m.estado]));
-      } else if (catTab === "Modelos") {
-        line(["Modelo", "Marca", "Tipo", "Vehículos"], true);
-        modelos.forEach(m => line([m.modelo, m.marca, m.tipo, m.n]));
-      } else {
-        line(["Tipo", "Configuración", "Vehículos"], true);
-        tiposVeh.forEach(t => line([t.tipo, t.configuracion, t.n]));
-      }
-    } else {
-      line(["IMEI", "Modelo", "SIM / Operador", "Estado", "Asignado"], true);
-      dispositivos.forEach(d => line([d.imei, d.modelo, d.sim.split("·")[0], d.estado, d.asignado.split("·")[0]]));
-    }
-    doc.save(`reporte_${tab}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    line(["Placa","Marca","Modelo","Tipo","Estado"], true);
+    lista.forEach(v => line([v.veh||v.placa||"", v.marca||"", v.modelo||"", v.tipo||"", v.estado||""]));
+    doc.save(`vehiculos_${new Date().toISOString().slice(0,10)}.pdf`);
   }
 
-  // Modals operations
-  function openCreate() {
-    setErrMsg("");
-    setForm({ estado: "OPERATIVO" });
-    setModal({ type: "create" });
-  }
-
-  function openEdit(obj) {
-    setErrMsg("");
-    setForm({ ...obj });
-    setModal({ type: "edit", editing: obj });
-  }
-
-  async function handleSave(e) {
-    e.preventDefault();
-    setSaving(true);
-    setErrMsg("");
-    try {
-      const isEdit = modal.type === "edit";
-      const id = modal.editing?.id;
-      const body = { ...form };
-      if (body.año) body.año = parseInt(body.año, 10);
-      if (body.medidor) body.medidor = parseFloat(body.medidor);
-
-      if (isEdit) {
-        await api.put(`/vehiculos/${id}`, body);
-      } else {
-        await api.post("/vehiculos", body);
-      }
-      setModal(null);
-      setForm({});
-      await loadAll();
-    } catch (e2) {
-      setErrMsg(e2?.response?.data?.detail || "Error al guardar el vehículo");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleRemove(id) {
-    if (!window.confirm("¿Estás seguro de que deseas eliminar este vehículo?")) return;
-    try {
-      await api.delete(`/vehiculos/${id}`);
-      await loadAll();
-    } catch (e) {
-      alert(e?.response?.data?.detail || "Error al eliminar el vehículo");
-    }
-  }
-
-  // Selection toggles
-  function toggleSelectAll() {
-    if (Object.keys(selectedPlacas).length === vehFiltrados.length) {
-      setSelectedPlacas({});
-    } else {
-      const nSel = {};
-      vehFiltrados.forEach((v) => { nSel[v.placa] = true; });
-      setSelectedPlacas(nSel);
-    }
-  }
-
-  function toggleSelect(placa) {
-    setSelectedPlacas((prev) => {
-      const copy = { ...prev };
-      if (copy[placa]) delete copy[placa];
-      else copy[placa] = true;
-      return copy;
-    });
-  }
-
-  // Clear filters
-  function clearFilters() {
-    setFilterMarca("");
-    setFilterEstado("");
-    setFilterUnidad("");
-    setFilterChasis("");
-    setFilterTipo("");
-    setFilterBase("");
-    setFilterTitular("");
-    setFilterCC("");
-    setFilterMedidorMin("");
-    setFilterMedidorMax("");
-    setFilterVerInactivos(false);
-    setQ("");
-  }
-
+  // ── RENDER ──────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6" data-testid="page-vehiculos">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="font-cabinet font-black text-3xl text-neutral-900 flex items-center gap-2.5">
-            <Car className="w-8 h-8 text-brand" /> Vehículos
-          </h1>
-          <p className="text-neutral-500 text-sm mt-1">
-            Administración completa de unidades, configuraciones de flotas y dispositivos GPS en tiempo real.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={exportExcel} className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-bold text-neutral-700 hover:bg-neutral-50 shadow-sm transition-colors">
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Excel
+    <div style={{ padding:"20px 24px", background:"#F3F4F6", minHeight:"100%" }} data-testid="page-vehiculos">
+
+      {/* ── TABS ── */}
+      <div style={{ display:"flex", alignItems:"center", gap:32, borderBottom:"1px solid #E5E7EB", marginBottom:20 }}>
+        {[["vehiculos","Vehículos"],["catalogos","Catálogos"],["dispositivos","Dispositivos GPS"]].map(([id,lbl]) => (
+          <button key={id} onClick={() => setTab(id)} style={{
+            position:"relative", paddingBottom:12, fontSize:15, fontWeight: tab===id ? 700 : 500,
+            color: tab===id ? "#8B3DFF" : "#6B7280", background:"none", border:"none", cursor:"pointer"
+          }}>
+            {lbl}
+            {tab===id && <span style={{ position:"absolute", left:0, right:0, bottom:-1, height:2.5, borderRadius:2, background:"#8B3DFF" }} />}
           </button>
-          <button onClick={exportPDF} className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm font-bold text-neutral-700 hover:bg-neutral-50 shadow-sm transition-colors">
-            <FileDown className="w-4 h-4 text-rose-600" /> PDF
-          </button>
-          {isAdmin && (
-            <button onClick={openCreate} className="inline-flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-bold hover:bg-brand-hover shadow-sm transition-all">
-              <Plus className="w-4 h-4" /> Agregar Unidad
-            </button>
-          )}
-        </div>
+        ))}
       </div>
 
-      {/* Main Tabs */}
-      <div className="flex border-b border-neutral-200 gap-6">
-        {[
-          { id: "vehiculos", label: "Vehículos", icon: Car },
-          { id: "catalogos", label: "Catálogos", icon: Compass },
-          { id: "dispositivos", label: "Dispositivos GPS", icon: Cpu }
-        ].map((t) => {
-          const Icon = t.icon;
-          const isActive = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={cls(
-                "pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all",
-                isActive ? "border-brand text-brand font-black" : "border-transparent text-neutral-500 hover:text-neutral-900"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* ════════════════════════ VEHICULOS ════════════════════════ */}
+      {tab === "vehiculos" && (<>
 
-      {/* Content for VEHICULOS */}
-      {tab === "vehiculos" && (
-        <div className="space-y-4">
-          {/* KPIs */}
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-            <Kpi label="GPS Activos" value={vehiculos.filter(v => v.gps !== false).length} tone="teal" icon={MapPin} sub={`${vehiculos.filter(v => v.gps === false).length} sin reportar`} />
-            <Kpi label="En Taller" value="40" tone="rose" icon={Warehouse} />
-            <Kpi label="Docs Vencidos" value="107" tone="rose" icon={FileText} />
-            <Kpi label="Docs Chofer Venc." value="39" tone="rose" icon={UserCheck} />
-            <Kpi label="Infracciones" value="33" tone="rose" icon={AlertTriangle} />
-            <Kpi label="Cargas Inválidas" value="2" tone="rose" icon={Fuel} />
-          </div>
+        {/* KPIs */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:16, marginBottom:16 }}>
+          <KpiCard gps label="GPS" value="0" valueSub="no reportan" foot="478 sin GPS" icon={MapPin} color="#14B8A6" />
+          <KpiCard label="En Taller"                icon={Warehouse}  color="#F26B6B" value="40" />
+          <KpiCard label="Doc. Vehículo Vencida"    icon={FileText}   color="#F26B6B" value="107" />
+          <KpiCard label="Doc. Chofer Vencida"      icon={UserCheck}  color="#F26B6B" value="39" />
+          <KpiCard label="Vh. con Infracciones"     icon={Shield}     color="#F26B6B" value="33" />
+          <KpiCard label="Vh. con Cargas Inválidas" icon={Fuel}       color="#F26B6B" value="2" />
+        </div>
 
-          {/* Filter Trigger / Quick Search Bar */}
-          <div className="bg-white border border-neutral-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="relative w-full max-w-md">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Buscar por placa, marca, modelo, empresa..."
-                className={cls(inputCls, "pl-9")}
-              />
+        {/* FABs + export */}
+        <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom: panelOpen ? 0 : 12 }}>
+          {/* + button (teal circle) */}
+          <button onClick={openCreate} style={{
+            width:52, height:52, borderRadius:"50%", background:"#14B8A6",
+            border:"none", color:"#fff", cursor:"pointer", display:"flex",
+            alignItems:"center", justifyContent:"center",
+            boxShadow:"0 4px 12px rgba(0,0,0,.18)"
+          }}>
+            <Plus style={{ width:26, height:26 }} />
+          </button>
+          {/* chevron (dark circle) — toggles filter panel */}
+          <button onClick={() => setPanelOpen(p => !p)} style={{
+            width:44, height:44, borderRadius:"50%", background:"#1F2937",
+            border:"none", color:"#fff", cursor:"pointer", display:"flex",
+            alignItems:"center", justifyContent:"center",
+            boxShadow:"0 4px 12px rgba(0,0,0,.18)"
+          }}>
+            <ChevronDown style={{ width:20, height:20, transform: panelOpen ? "rotate(180deg)" : "none", transition:"transform .2s" }} />
+          </button>
+        </div>
+
+        {/* Filter Panel */}
+        {panelOpen && (
+          <div style={{
+            background:"#fff", border:"1px solid #F0F0F3", borderRadius:16,
+            boxShadow:"0 1px 2px rgba(0,0,0,.04)", padding:22, marginBottom:16
+          }}>
+            {/* export icons row */}
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:12, marginBottom:14 }}>
+              <button onClick={exportExcel} style={{ width:34, height:34, border:"none", borderRadius:8, background:"#F3F4F6", color:"#6b7280", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <Upload style={{ width:16, height:16 }} />
+              </button>
+              <button onClick={exportPDF} style={{ width:34, height:34, border:"none", borderRadius:8, background:"#F3F4F6", color:"#6b7280", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <Download style={{ width:16, height:16 }} />
+              </button>
             </div>
-            <div className="flex gap-2 w-full md:w-auto justify-end">
+
+            {/* Row 1: 4 columns */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"22px 32px" }}>
+              <FilterField label="Marca"    dropdown value={fMarca}   onChange={setFMarca}   options={["Chevrolet","Ford","Mercedes-Benz","Kenworth","Volvo"]} />
+              <FilterField label="Estados"  dropdown value={fEstado}  onChange={setFEstado}  options={["OPERATIVO","OEM","TALLER","INACTIVO"]} />
+              <FilterField label="Unidad"           value={fUnidad}  onChange={setFUnidad} />
+              <FilterField label="Chasis"           value={fChasis}  onChange={setFChasis} />
+              <FilterField label="Vehículo"         value={q}        onChange={setQ} />
+              <FilterField label="Modelo"           value={fModelo}  onChange={setFModelo} />
+              <FilterField label="Tipo"    dropdown value={fTipo}    onChange={setFTipo}    options={["SEDAN","PICK UP","FURGÓN","TRACTOMULA","AUTOBÚS"]} />
+              <FilterField label="Base"    dropdown value={fBase}    onChange={setFBase}    options={["EPEC","VECFLEET","ACOZAC"]} />
+              <FilterField label="Titular" dropdown value={fTitular} onChange={setFTitular} options={["Transp. Andes","Log. del Sur","APYMSA","Distrib. Lima"]} />
+              <FilterField label="Función" dropdown value={fFuncion} onChange={setFFuncion} options={["Carga","Pasajeros","Servicio"]} />
+              <FilterField label="Centro de Costos" dropdown value={fCC} onChange={setFCC} options={["100000 - SEDE CENTRAL","APYMSA -001"]} />
+              {/* Medidor range */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+                <FilterField label="Medidor desde" value={fMedMin} onChange={setFMedMin} />
+                <FilterField label="Medidor hasta" value={fMedMax} onChange={setFMedMax} />
+              </div>
+            </div>
+
+            {/* bottom: toggles + buscar */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16, marginTop:22 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:32 }}>
+                <Toggle label="Ver Inactivos"     checked={fInactivos} onChange={setFInactivos} />
+                <Toggle label="Persistir Filtros" checked={fPersistir} onChange={setFPersistir} />
+              </div>
               <button
-                onClick={() => setShowFilters(!showFilters)}
-                className={cls(
-                  "px-4 py-2 border rounded-lg text-sm font-bold shadow-sm transition-all flex items-center gap-2",
-                  showFilters ? "bg-brand text-white border-brand" : "bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50"
-                )}
-              >
-                <Cog className="w-4 h-4" /> Filtros Avanzados {showFilters ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                onClick={() => setPanelOpen(false)}
+                style={{ display:"flex", alignItems:"center", gap:8, background:"#14B8A6", color:"#fff", border:"none", borderRadius:8, height:40, padding:"0 22px", fontSize:14, fontWeight:600, cursor:"pointer" }}>
+                <Search style={{ width:16, height:16 }} /> Buscar
               </button>
             </div>
           </div>
+        )}
 
-          {/* Collapsible Filters Panel */}
-          {showFilters && (
-            <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                <Field label="Marca">
-                  <input value={filterMarca} onChange={e => setFilterMarca(e.target.value)} className={inputCls} placeholder="Ej: Chevrolet" />
-                </Field>
-                <Field label="Estado">
-                  <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)} className={inputCls}>
-                    <option value="">Todos</option>
-                    <option value="OPERATIVO">OPERATIVO</option>
-                    <option value="OEM">OEM</option>
-                    <option value="TALLER">TALLER</option>
-                    <option value="INACTIVO">INACTIVO</option>
-                  </select>
-                </Field>
-                <Field label="Código Unidad">
-                  <input value={filterUnidad} onChange={e => setFilterUnidad(e.target.value)} className={inputCls} placeholder="Ej: 567" />
-                </Field>
-                <Field label="Chasis / VIN">
-                  <input value={filterChasis} onChange={e => setFilterChasis(e.target.value)} className={inputCls} placeholder="Ingrese Chasis" />
-                </Field>
-                <Field label="Tipo Carrocería">
-                  <input value={filterTipo} onChange={e => setFilterTipo(e.target.value)} className={inputCls} placeholder="Ej: Sedán, Pick Up" />
-                </Field>
-                <Field label="Base Operativa">
-                  <input value={filterBase} onChange={e => setFilterBase(e.target.value)} className={inputCls} placeholder="Ej: Central" />
-                </Field>
-                <Field label="Titular / Propietario">
-                  <input value={filterTitular} onChange={e => setFilterTitular(e.target.value)} className={inputCls} placeholder="Ej: APYMSA" />
-                </Field>
-                <Field label="Centro de Costos">
-                  <input value={filterCC} onChange={e => setFilterCC(e.target.value)} className={inputCls} placeholder="Ej: Sede Norte" />
-                </Field>
-                <div className="sm:col-span-2">
-                  <span className="text-xs font-bold text-neutral-700 uppercase tracking-wide">Rango Medidor (Kms)</span>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <input type="number" placeholder="Min Kms" value={filterMedidorMin} onChange={e => setFilterMedidorMin(e.target.value)} className={inputCls} />
-                    <input type="number" placeholder="Max Kms" value={filterMedidorMax} onChange={e => setFilterMedidorMax(e.target.value)} className={inputCls} />
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 sm:col-span-2 mt-5">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input type="checkbox" checked={filterVerInactivos} onChange={e => setFilterVerInactivos(e.target.checked)} className="rounded text-brand border-neutral-300 w-4 h-4 focus:ring-brand" />
-                    <span className="text-sm font-semibold text-neutral-700">Ver unidades inactivas</span>
-                  </label>
-                </div>
-              </div>
-              <div className="flex justify-between items-center border-t border-neutral-100 pt-4 mt-2">
-                <button onClick={clearFilters} className="text-sm font-bold text-neutral-500 hover:text-neutral-900 transition-colors">
-                  Limpiar todos los filtros
-                </button>
-                <button onClick={() => setShowFilters(false)} className="px-5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-sm font-bold shadow-sm transition-all">
-                  Aplicar filtros
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Table Container */}
-          <div className="bg-white border border-neutral-200 rounded-3xl overflow-hidden shadow-sm">
-            {loading ? (
-              <div className="p-16 text-center text-neutral-500">Cargando unidades...</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-neutral-900 text-white text-xs uppercase tracking-wider font-bold">
-                    <tr>
-                      <th className="px-4 py-3.5 text-left w-12">
-                        <input
-                          type="checkbox"
-                          checked={vehFiltrados.length > 0 && Object.keys(selectedPlacas).length === vehFiltrados.length}
-                          onChange={toggleSelectAll}
-                          className="rounded text-brand border-neutral-300 focus:ring-brand w-4 h-4"
-                        />
-                      </th>
-                      <th className="px-4 py-3.5 text-left">Marca</th>
-                      <th className="px-4 py-3.5 text-left">Estado</th>
-                      <th className="px-4 py-3.5 text-left">Unidad</th>
-                      <th className="px-4 py-3.5 text-left">Placa</th>
-                      <th className="px-4 py-3.5 text-left">Modelo</th>
-                      <th className="px-4 py-3.5 text-left">Año</th>
-                      <th className="px-4 py-3.5 text-left">Empresa</th>
-                      <th className="px-4 py-3.5 text-left">Medidor</th>
-                      <th className="px-4 py-3.5 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vehFiltrados.length === 0 ? (
-                      <tr>
-                        <td colSpan="10" className="p-12 text-center text-neutral-400 font-medium">
-                          Sin unidades registradas que coincidan con la búsqueda.
+        {/* TABLE */}
+        <div style={{ background:"#fff", border:"1px solid #F0F0F3", borderRadius:16, boxShadow:"0 1px 2px rgba(0,0,0,.04)", overflow:"hidden" }}>
+          <div style={{ overflowX:"auto" }}>
+            <table style={{ borderCollapse:"collapse", width:"100%", minWidth:1200 }}>
+              <thead>
+                <tr style={{ background:"#2A2A3C" }}>
+                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACTUALIZAR","ACCIONES"].map((h,i) => (
+                    <th key={i} style={{ textAlign:"left", color:"#fff", fontWeight:600, textTransform:"uppercase", fontSize:10.5, letterSpacing:".03em", padding:"12px 14px", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={15} style={{ textAlign:"center", padding:40, color:"#9ca3af", fontSize:14 }}>Cargando...</td></tr>
+                ) : lista.length === 0 ? (
+                  <tr><td colSpan={15} style={{ textAlign:"center", padding:40, color:"#9ca3af", fontSize:14 }}>Sin vehículos registrados</td></tr>
+                ) : lista.map((v, i) => {
+                  const open = expanded === v.id;
+                  return (
+                    <React.Fragment key={v.id}>
+                      <tr style={{ borderTop: i===0 ? "none" : "1px solid #F3F4F6", background: open ? "#FAF7FF" : "transparent", transition:"background .15s" }}
+                        onMouseEnter={e => { if(!open) e.currentTarget.style.background="#f9fafb"; }}
+                        onMouseLeave={e => { if(!open) e.currentTarget.style.background="transparent"; }}>
+                        {/* checkbox */}
+                        <td style={{ padding:"10px 14px" }}><input type="checkbox" /></td>
+                        {/* marca + expand btn */}
+                        <td style={{ padding:"10px 14px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, whiteSpace:"nowrap" }}>
+                            <button onClick={() => setExpanded(open ? null : v.id)} style={{
+                              background:"none", border:"none", cursor:"pointer", display:"flex",
+                              color: open ? "#8B3DFF" : "#9ca3af", padding:0
+                            }}>
+                              <ChevronDown style={{ width:15, height:15, transition:"transform .2s", transform: open ? "rotate(180deg)" : "none" }} />
+                            </button>
+                            <div style={{ width:24, height:24, borderRadius:6, background:"#F1EAFF", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              <Car style={{ width:12, height:12, color:"#8B3DFF" }} />
+                            </div>
+                            <span style={{ color:"#374151", fontSize:12.5 }}>{v.marca}</span>
+                          </div>
+                        </td>
+                        {/* estado pill */}
+                        <td style={{ padding:"10px 14px" }}>
+                          <span style={{ borderRadius:999, fontWeight:700, fontSize:9.5, padding:"3px 9px", color:"#fff", background: v.ec || "#6B7280", whiteSpace:"nowrap" }}>
+                            {v.estado}
+                          </span>
+                        </td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#374151", fontWeight:500, whiteSpace:"nowrap" }}>{v.unidad}</td>
+                        <td style={{ padding:"10px 14px", fontSize:12, color:"#6b7280", whiteSpace:"nowrap" }}>{v.chasis}</td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#374151", whiteSpace:"nowrap" }}>
+                          {v.veh || v.placa}<span style={{ color:"#DC2626" }}> ●</span>
+                        </td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#4b5563", whiteSpace:"nowrap" }}>{v.modelo}</td>
+                        {/* próx tarea */}
+                        <td style={{ padding:"10px 14px" }}>
+                          <div style={{ display:"flex", gap:4 }}>
+                            <b style={{ borderRadius:4, fontSize:9, fontWeight:700, padding:"1px 4px", color:"#fff", background:"#F26B6B" }}>P</b>
+                            <b style={{ borderRadius:4, fontSize:9, fontWeight:700, padding:"1px 4px", color:"#fff", background:"#8B3DFF" }}>V</b>
+                          </div>
+                        </td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#4b5563", whiteSpace:"nowrap" }}>{v.tipo}</td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#4b5563", whiteSpace:"nowrap" }}>{v.base}</td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#4b5563", whiteSpace:"nowrap" }}>{v.titular}</td>
+                        <td style={{ padding:"10px 14px", fontSize:12.5, color:"#4b5563", whiteSpace:"nowrap" }}>{v.cc}</td>
+                        {/* medidor */}
+                        <td style={{ padding:"10px 14px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:4, color:"#4b5563", whiteSpace:"nowrap" }}>
+                            <Clock style={{ width:13, height:13, color:"#9ca3af" }} />
+                            <span style={{ fontSize:12.5 }}>{v.med || "0"} Kms</span>
+                          </div>
+                        </td>
+                        {/* actualizar: underline teal */}
+                        <td style={{ padding:"10px 14px", minWidth:90 }}>
+                          <div style={{ borderBottom:"1.5px solid #14B8A6", height:20, minWidth:80 }} />
+                        </td>
+                        {/* actions */}
+                        <td style={{ padding:"10px 14px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                            {[Eye, Pencil, Copy, Wrench, CalendarDays].map((Ic, j) => (
+                              <button key={j}
+                                onClick={ j===1 ? () => openEdit(v) : j===4 ? () => handleDelete(v.id) : undefined }
+                                style={{ background:"none", border:"none", cursor:"pointer", color:"#9ca3af", display:"flex" }}>
+                                <Ic style={{ width:15, height:15 }} />
+                              </button>
+                            ))}
+                          </div>
                         </td>
                       </tr>
-                    ) : (
-                      vehFiltrados.map((v) => {
-                        const isExpanded = expandedRow === v.id;
-                        const isSelected = !!selectedPlacas[v.placa];
-                        const statusColors = {
-                          operativo: "bg-emerald-100 text-emerald-700 border-emerald-200",
-                          oem: "bg-teal-100 text-teal-700 border-teal-200",
-                          taller: "bg-rose-100 text-rose-700 border-rose-200",
-                          inactivo: "bg-neutral-100 text-neutral-600 border-neutral-200",
-                        }[String(v.estado || "OPERATIVO").toLowerCase()] || "bg-neutral-100 text-neutral-600 border-neutral-200";
 
-                        return (
-                          <React.Fragment key={v.id}>
-                            <tr className={cls("border-t border-neutral-100 transition-colors", isExpanded ? "bg-neutral-50/70" : "hover:bg-neutral-50/40")}>
-                              <td className="px-4 py-3">
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => toggleSelect(v.placa)}
-                                  className="rounded text-brand border-neutral-300 focus:ring-brand w-4 h-4"
-                                />
-                              </td>
-                              <td className="px-4 py-3 font-semibold text-neutral-800">
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => setExpandedRow(isExpanded ? null : v.id)}
-                                    className="p-1 text-neutral-400 hover:text-brand transition-colors"
-                                    title="Ver Detalles de Costos"
-                                  >
-                                    <ChevronDown className={cls("w-4 h-4 transform transition-transform", isExpanded && "rotate-180")} />
-                                  </button>
-                                  <div className="w-8 h-8 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0">
-                                    <Car className="w-4 h-4 text-brand" />
-                                  </div>
-                                  <span>{v.marca || "—"}</span>
+                      {/* EXPANDED ROW */}
+                      {open && (
+                        <tr style={{ background:"#FAF7FF" }}>
+                          <td colSpan={15} style={{ background:"#FAF7FF", borderTop:"1px solid #F1EAFF", padding:0 }}>
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24, padding:24 }}>
+                              {/* LEFT: costo total */}
+                              <div>
+                                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
+                                  <b style={{ fontSize:18, color:"#1f2937" }}>Costo Total</b>
+                                  <span style={{ fontSize:12, color:"#9ca3af" }}>· Período: Todo</span>
                                 </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={cls("inline-flex px-2 py-0.5 rounded-full text-xs font-bold ring-1", statusColors)}>
-                                  {v.estado || "OPERATIVO"}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 font-semibold text-neutral-700">{v.unidad || "—"}</td>
-                              <td className="px-4 py-3 font-bold text-neutral-900 tracking-wide font-mono uppercase">{v.placa}</td>
-                              <td className="px-4 py-3 text-neutral-600 font-medium">{v.modelo || "—"}</td>
-                              <td className="px-4 py-3 text-neutral-600">{v.año || "—"}</td>
-                              <td className="px-4 py-3 text-xs text-neutral-500 font-medium">{v.empresa || "—"}</td>
-                              <td className="px-4 py-3 text-neutral-600 font-mono text-xs">{v.medidor ? `${v.medidor.toLocaleString()} Kms` : "0 Kms"}</td>
-                              <td className="px-4 py-3 text-right space-x-1.5 whitespace-nowrap">
-                                {isAdmin && (
-                                  <>
-                                    <button onClick={() => openEdit(v)} className="p-1.5 text-neutral-400 hover:text-brand hover:bg-brand-50 rounded-lg transition-all" title="Editar">
-                                      <Pencil className="w-4.5 h-4.5" />
-                                    </button>
-                                    <button onClick={() => handleRemove(v.id)} className="p-1.5 text-neutral-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all" title="Eliminar">
-                                      <Trash2 className="w-4.5 h-4.5" />
-                                    </button>
-                                  </>
-                                )}
-                              </td>
-                            </tr>
-
-                            {/* Row Expansion */}
-                            {isExpanded && (
-                              <tr>
-                                <td colSpan="10" className="bg-neutral-50/50 p-0 border-t border-neutral-100">
-                                  <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                    {/* Cost Analysis Graph */}
-                                    <div>
-                                      <div className="flex items-center justify-between mb-4 border-b border-neutral-200/60 pb-2">
-                                        <h4 className="font-cabinet font-black text-base text-neutral-800">Costo Total del Vehículo</h4>
-                                        <span className="text-xs text-neutral-400 font-bold">Histórico Completo</span>
+                                <div style={{ display:"flex", alignItems:"center", gap:16 }}>
+                                  <Donut data={COSTO_COMP} total="$190276" />
+                                  {/* legend 2 cols */}
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 16px", flex:1 }}>
+                                    {COSTO_COMP.map((s,j) => (
+                                      <div key={j} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", fontSize:11 }}>
+                                        <span style={{ display:"flex", alignItems:"center", gap:6, color:"#4b5563" }}>
+                                          <span style={{ width:8, height:8, borderRadius:"50%", background:s.c, display:"inline-block" }} />
+                                          {s.name}
+                                        </span>
+                                        <span style={{ fontWeight:600, color:"#374151" }}>{s.v}%</span>
                                       </div>
-                                      <div className="flex flex-col sm:flex-row items-center gap-6">
-                                        {/* Recharts PieChart */}
-                                        <div className="w-36 h-36 relative flex-shrink-0">
-                                          <ResponsiveContainer width="100%" height="100%">
-                                            <PieChart>
-                                              <Pie
-                                                data={costoComp}
-                                                cx="50%"
-                                                cy="50%"
-                                                innerRadius={40}
-                                                outerRadius={56}
-                                                paddingAngle={2}
-                                                dataKey="value"
-                                              >
-                                                {costoComp.map((entry, index) => (
-                                                  <Cell key={`cell-${index}`} fill={entry.color} />
-                                                ))}
-                                              </Pie>
-                                              <Tooltip formatter={(value) => `${value}%`} />
-                                            </PieChart>
-                                          </ResponsiveContainer>
-                                          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                            <span className="text-[10px] text-neutral-400 font-bold uppercase leading-none">Total</span>
-                                            <span className="text-sm font-black text-neutral-800 mt-1 leading-none">S/ 190.2k</span>
-                                          </div>
-                                        </div>
-                                        {/* Legend Grid */}
-                                        <div className="grid grid-cols-2 gap-x-6 gap-y-2 flex-1 w-full">
-                                          {costoComp.map((c, i) => (
-                                            <div key={i} className="flex items-center justify-between text-xs border-b border-neutral-100 pb-1 w-full">
-                                              <span className="flex items-center gap-2 text-neutral-500 font-medium">
-                                                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                                                {c.name}
-                                              </span>
-                                              <span className="font-bold text-neutral-800">{c.value}%</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Stats and Controls */}
-                                    <div className="border-t lg:border-t-0 lg:border-l border-neutral-200/60 pt-6 lg:pt-0 lg:pl-8 flex flex-col justify-between">
-                                      <div className="grid grid-cols-3 gap-3 mb-6">
-                                        <div className="bg-white border border-neutral-200 rounded-xl p-3.5 text-center">
-                                          <p className="text-xl font-cabinet font-black text-neutral-800 leading-tight">S/ 0.85</p>
-                                          <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold mt-1">Costo / Km</p>
-                                        </div>
-                                        <div className="bg-white border border-neutral-200 rounded-xl p-3.5 text-center">
-                                          <p className="text-xl font-cabinet font-black text-neutral-800 leading-tight">145 Kms</p>
-                                          <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold mt-1">Promedio Km/Día</p>
-                                        </div>
-                                        <div className="bg-white border border-neutral-200 rounded-xl p-3.5 text-center">
-                                          <p className="text-xl font-cabinet font-black text-neutral-800 leading-tight">191,089</p>
-                                          <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-bold mt-1">Recorrido Total</p>
-                                        </div>
-                                      </div>
-
-                                      <div className="space-y-3">
-                                        <div className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Controles Rápidos del Vehículo</div>
-                                        <div className="flex flex-wrap gap-2.5">
-                                          {[
-                                            { icon: MapPin, label: "GPS Tracking", tone: "text-teal-600 hover:bg-teal-50" },
-                                            { icon: Cog, label: "Ajustes", tone: "text-blue-600 hover:bg-blue-50" },
-                                            { icon: Warehouse, label: "Taller / Mant.", tone: "text-rose-600 hover:bg-rose-50" },
-                                            { icon: FileText, label: "Documentos", tone: "text-emerald-600 hover:bg-emerald-50" },
-                                            { icon: UserCheck, label: "Asignar Conductor", tone: "text-violet-600 hover:bg-violet-50" },
-                                            { icon: Fuel, label: "Historial Comb.", tone: "text-amber-600 hover:bg-amber-50" },
-                                          ].map((ctrl, ci) => {
-                                            const CIcon = ctrl.icon;
-                                            return (
-                                              <button key={ci} className={cls("flex items-center gap-1.5 px-3 py-2 border border-neutral-200 bg-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95", ctrl.tone)}>
-                                                <CIcon className="w-4 h-4" /> {ctrl.label}
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    </div>
+                                    ))}
                                   </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="p-4 bg-neutral-50 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-500 font-medium">
-              <span>Fila por página: 10</span>
-              <span>Mostrando {vehFiltrados.length} de {vehiculos.length} vehículos</span>
-            </div>
+                                </div>
+                              </div>
+
+                              {/* RIGHT: stats + controles */}
+                              <div style={{ borderLeft:"1px solid #E5E7EB", paddingLeft:24 }}>
+                                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16 }}>
+                                  {[
+                                    { v:"$0",             s:"Costo/km",       big:true },
+                                    { v:"1.287.989,89",   s:"Promedio Km/Día" },
+                                    { v:"1.910.089.001",  s:"Recorrido Km" },
+                                  ].map((st, j) => (
+                                    <div key={j}>
+                                      <div style={{ fontWeight:700, color:"#1f2937", fontSize: st.big ? 22 : 18 }}>{st.v}</div>
+                                      <div style={{ fontSize:11, color:"#9ca3af" }}>{st.s}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                                {/* Controles bar */}
+                                <div style={{ borderRadius:999, background:"#E8ECEF", height:42, display:"flex", alignItems:"center", padding:"0 20px", marginBottom:12 }}>
+                                  <b style={{ fontSize:15, color:"#4b5563" }}>Controles</b>
+                                </div>
+                                <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
+                                  {CONTROLES.map((ctrl, j) => {
+                                    const CIcon = ctrl.icon;
+                                    return (
+                                      <button key={j} title={ctrl.label} style={{
+                                        width:48, height:48, borderRadius:"50%", background:"#fff",
+                                        border:"1px solid #EEF0F2", boxShadow:"0 1px 2px rgba(0,0,0,.05)",
+                                        display:"flex", alignItems:"center", justifyContent:"center",
+                                        cursor:"pointer"
+                                      }}>
+                                        <CIcon style={{ width:20, height:20, color: ctrl.color }} />
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {/* pager */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"flex-end", gap:16, height:48, padding:"0 16px", borderTop:"1px solid #F3F4F6", fontSize:12.5, color:"#6B7280" }}>
+            <span>Mostrar 10</span>
+            <span>Mostrando 1 a {lista.length} de {vehiculos.length}</span>
           </div>
         </div>
-      )}
+      </>)}
 
-      {/* Content for CATALOGOS */}
+      {/* ════════════════════════ CATÁLOGOS ════════════════════════ */}
       {tab === "catalogos" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-2">
-            <div className="flex bg-neutral-100 rounded-xl p-1 w-fit border border-neutral-200">
-              {["Marcas", "Modelos", "Tipos de vehículo"].map((x) => (
-                <button
-                  key={x}
-                  onClick={() => setCatTab(x)}
-                  className={cls(
-                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                    catTab === x ? "bg-white text-brand shadow-sm" : "text-neutral-600 hover:text-neutral-900"
-                  )}
-                >
-                  {x}
-                </button>
+        <div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12, marginBottom:16 }}>
+            {/* subtabs pill */}
+            <div style={{ display:"flex", alignItems:"center", gap:4, background:"#fff", border:"1px solid #F0F0F3", borderRadius:999, padding:4 }}>
+              {["Marcas","Modelos","Tipos de vehículo"].map(x => (
+                <button key={x} onClick={() => setCatTab(x)} style={{
+                  border:"none", borderRadius:999, fontSize:13, fontWeight:500,
+                  padding:"7px 16px", cursor:"pointer",
+                  background: catTab===x ? "#8B3DFF" : "none",
+                  color:       catTab===x ? "#fff"    : "#6B7280"
+                }}>{x}</button>
               ))}
             </div>
-            <button className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-bold hover:bg-brand-hover shadow-sm">
-              <Plus className="w-4 h-4 inline mr-1" /> Agregar {catTab.slice(0, -1).toLowerCase()}
+            <button style={{ display:"flex", alignItems:"center", gap:8, background:"#8B3DFF", color:"#fff", border:"none", borderRadius:8, height:38, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              <Plus style={{ width:16, height:16 }} />
+              Agregar {catTab === "Marcas" ? "marca" : catTab === "Modelos" ? "modelo" : "tipo"}
             </button>
           </div>
 
-          <div className="bg-white/60 border border-brand/20 bg-brand-50/10 rounded-xl p-4 flex items-start gap-3">
-            <Info className="w-5 h-5 text-brand mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-neutral-600 leading-normal">
-              Estos catálogos son tablas de autocompletado y referencia: al registrar una placa con su número VIN, la marca y el modelo se autocompletarán. También puedes agregarlos al vuelo.
-            </p>
+          {/* note */}
+          <div style={{ display:"flex", alignItems:"flex-start", gap:8, background:"#F1EAFF", borderRadius:8, padding:"10px 14px", marginBottom:16, fontSize:12.5, color:"#4b5563" }}>
+            <Tag style={{ width:15, height:15, color:"#8B3DFF", marginTop:1, flexShrink:0 }} />
+            <span>Estos catálogos son de baja frecuencia: al registrar un vehículo con su <b>VIN/Chasis</b>, la marca y el modelo se autocompletan. También puedes crearlos al vuelo desde la ficha del vehículo.</span>
           </div>
 
-          <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
-            {catTab === "Marcas" && (
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-900 text-white text-xs uppercase font-bold">
-                  <tr>
-                    <th className="px-6 py-3">Marca</th>
-                    <th className="px-6 py-3">N° de Vehículos</th>
-                    <th className="px-6 py-3">Estado</th>
-                    <th className="px-6 py-3 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {marcas.map((m, idx) => (
-                    <tr key={idx} className="border-t border-neutral-100 hover:bg-neutral-50">
-                      <td className="px-6 py-3 font-semibold text-neutral-800">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-7 h-7 rounded-lg bg-neutral-100 flex items-center justify-center"><Car className="w-4 h-4 text-brand" /></span>
-                          {m.marca}
+          <div style={{ background:"#fff", border:"1px solid #F0F0F3", borderRadius:16, overflow:"hidden", boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
+            <table style={{ borderCollapse:"collapse", width:"100%" }}>
+              <thead>
+                <tr style={{ background:"#2A2A3C" }}>
+                  {(catTab==="Marcas"
+                    ? ["Marca","N° de vehículos","Estado","Acciones"]
+                    : catTab==="Modelos"
+                    ? ["Modelo","Marca","Tipo de vehículo","N° vehículos","Acciones"]
+                    : ["Tipo de vehículo","Configuración","N° vehículos","Acciones"]
+                  ).map((h,i) => (
+                    <th key={i} style={{ textAlign:"left", color:"#fff", fontWeight:600, textTransform:"uppercase", fontSize:10.5, letterSpacing:".03em", padding:"12px 18px", whiteSpace:"nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {catTab==="Marcas" && MOCK_MARCAS.map(([m,n],i) => (
+                  <tr key={i} style={{ borderTop: i>0 ? "1px solid #F3F4F6" : "none" }}>
+                    <td style={{ padding:"12px 18px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ width:24, height:24, borderRadius:6, background:"#F1EAFF", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          <Car style={{ width:12, height:12, color:"#8B3DFF" }} />
                         </div>
-                      </td>
-                      <td className="px-6 py-3 text-neutral-600 font-bold">{m.n}</td>
-                      <td className="px-6 py-3">
-                        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                          {m.estado}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-right space-x-2">
-                        <button className="text-neutral-400 hover:text-brand p-1.5"><Pencil className="w-4 h-4" /></button>
-                        <button className="text-neutral-400 hover:text-rose-600 p-1.5"><Trash2 className="w-4 h-4" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-
-            {catTab === "Modelos" && (
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-900 text-white text-xs uppercase font-bold">
-                  <tr>
-                    <th className="px-6 py-3">Modelo</th>
-                    <th className="px-6 py-3">Marca</th>
-                    <th className="px-6 py-3">Tipo Carrocería</th>
-                    <th className="px-6 py-3">Vehículos</th>
-                    <th className="px-6 py-3 text-right">Acciones</th>
+                        <span style={{ fontWeight:600, color:"#374151", fontSize:13.5 }}>{m}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:"12px 18px", color:"#4b5563", fontSize:13.5 }}>{n}</td>
+                    <td style={{ padding:"12px 18px" }}>
+                      <span style={{ display:"inline-flex", alignItems:"center", gap:6, borderRadius:999, fontWeight:600, fontSize:11, padding:"3px 10px", color:"#059669", background:"#ECFDF5" }}>Activo</span>
+                    </td>
+                    <td style={{ padding:"12px 18px" }}>
+                      <div style={{ display:"flex", gap:10 }}>
+                        {[Eye,Pencil,Copy,Wrench,CalendarDays].map((Ic,j) => (
+                          <button key={j} style={{ background:"none", border:"none", cursor:"pointer", color:"#9ca3af" }}><Ic style={{ width:15, height:15 }} /></button>
+                        ))}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {modelos.map((m, idx) => (
-                    <tr key={idx} className="border-t border-neutral-100 hover:bg-neutral-50">
-                      <td className="px-6 py-3 font-semibold text-neutral-800">{m.modelo}</td>
-                      <td className="px-6 py-3 text-neutral-600">{m.marca}</td>
-                      <td className="px-6 py-3">
-                        <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-bold bg-brand-50 text-brand">
-                          {m.tipo}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-neutral-600 font-bold">{m.n}</td>
-                      <td className="px-6 py-3 text-right space-x-2">
-                        <button className="text-neutral-400 hover:text-brand p-1.5"><Pencil className="w-4 h-4" /></button>
-                        <button className="text-neutral-400 hover:text-rose-600 p-1.5"><Trash2 className="w-4 h-4" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-
-            {catTab === "Tipos de vehículo" && (
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-900 text-white text-xs uppercase font-bold">
-                  <tr>
-                    <th className="px-6 py-3">Tipo de Vehículo</th>
-                    <th className="px-6 py-3">Configuración de Flota</th>
-                    <th className="px-6 py-3">Vehículos</th>
-                    <th className="px-6 py-3 text-right">Acciones</th>
+                ))}
+                {catTab==="Modelos" && MOCK_MODELOS.map(([m,marca,tipo,n],i) => (
+                  <tr key={i} style={{ borderTop: i>0 ? "1px solid #F3F4F6" : "none" }}>
+                    <td style={{ padding:"12px 18px", fontWeight:600, color:"#374151", fontSize:13.5 }}>{m}</td>
+                    <td style={{ padding:"12px 18px", color:"#4b5563", fontSize:13.5 }}>{marca}</td>
+                    <td style={{ padding:"12px 18px" }}>
+                      <span style={{ borderRadius:999, fontSize:11.5, padding:"3px 10px", color:"#7A2FF0", background:"#F1EAFF" }}>{tipo}</span>
+                    </td>
+                    <td style={{ padding:"12px 18px", color:"#4b5563", fontSize:13.5 }}>{n}</td>
+                    <td style={{ padding:"12px 18px" }}>
+                      <div style={{ display:"flex", gap:10 }}>
+                        {[Eye,Pencil,Copy,Wrench,CalendarDays].map((Ic,j) => (
+                          <button key={j} style={{ background:"none", border:"none", cursor:"pointer", color:"#9ca3af" }}><Ic style={{ width:15, height:15 }} /></button>
+                        ))}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {tiposVeh.map((t, idx) => (
-                    <tr key={idx} className="border-t border-neutral-100 hover:bg-neutral-50">
-                      <td className="px-6 py-3 font-semibold text-neutral-800">{t.tipo}</td>
-                      <td className="px-6 py-3 text-neutral-500 font-medium">{t.configuracion}</td>
-                      <td className="px-6 py-3 text-neutral-600 font-bold">{t.n}</td>
-                      <td className="px-6 py-3 text-right space-x-2">
-                        <button className="text-neutral-400 hover:text-brand p-1.5"><Pencil className="w-4 h-4" /></button>
-                        <button className="text-neutral-400 hover:text-rose-600 p-1.5"><Trash2 className="w-4 h-4" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                ))}
+                {catTab==="Tipos de vehículo" && MOCK_TIPOS.map(([t,conf,n],i) => (
+                  <tr key={i} style={{ borderTop: i>0 ? "1px solid #F3F4F6" : "none" }}>
+                    <td style={{ padding:"12px 18px" }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <Layers style={{ width:15, height:15, color:"#8B3DFF" }} />
+                        <span style={{ fontWeight:600, color:"#374151", fontSize:13.5 }}>{t}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding:"12px 18px", color:"#4b5563", fontSize:13.5 }}>{conf}</td>
+                    <td style={{ padding:"12px 18px", color:"#4b5563", fontSize:13.5 }}>{n}</td>
+                    <td style={{ padding:"12px 18px" }}>
+                      <div style={{ display:"flex", gap:10 }}>
+                        {[Eye,Pencil,Copy,Wrench,CalendarDays].map((Ic,j) => (
+                          <button key={j} style={{ background:"none", border:"none", cursor:"pointer", color:"#9ca3af" }}><Ic style={{ width:15, height:15 }} /></button>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
-      {/* Content for GPS DEVICES */}
+      {/* ════════════════════════ DISPOSITIVOS GPS ════════════════════════ */}
       {tab === "dispositivos" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {dispKpis.map((k, idx) => {
-              const KIcon = k.icon;
-              return <Kpi key={idx} label={k.label} value={k.value} tone={k.tone} icon={KIcon} />;
+        <div>
+          {/* KPIs horizontales */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:16, marginBottom:16 }}>
+            {[
+              { label:"Dispositivos", v:"199", icon:Cpu,    color:"#8B3DFF", bg:"#F1EAFF" },
+              { label:"Reportando",   v:"191", icon:Wifi,   color:"#059669", bg:"#ECFDF5" },
+              { label:"No reportan",  v:"5",   icon:WifiOff,color:"#DC2626", bg:"#FEF2F2" },
+              { label:"Sin asignar",  v:"3",   icon:Unlink, color:"#B45309", bg:"#FFFBEB" },
+            ].map((k,i) => {
+              const KIc = k.icon;
+              return (
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:12, padding:16, background:"#fff", border:"1px solid #F0F0F3", borderRadius:16, boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
+                  <div style={{ width:42, height:42, borderRadius:12, background:k.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                    <KIc style={{ width:21, height:21, color:k.color }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize:26, fontWeight:700, color:"#111827", lineHeight:1 }}>{k.v}</div>
+                    <div style={{ fontSize:12.5, color:"#6B7280", marginTop:4 }}>{k.label}</div>
+                  </div>
+                </div>
+              );
             })}
           </div>
 
-          <div className="flex justify-end">
-            <button className="px-4 py-2 bg-brand text-white rounded-lg text-sm font-bold hover:bg-brand-hover shadow-sm transition-colors">
-              <Plus className="w-4 h-4 inline mr-1" /> Registrar GPS
+          <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:14 }}>
+            <button style={{ display:"flex", alignItems:"center", gap:8, background:"#8B3DFF", color:"#fff", border:"none", borderRadius:8, height:38, padding:"0 16px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+              <Plus style={{ width:16, height:16 }} /> Registrar dispositivo
             </button>
           </div>
 
-          <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-neutral-900 text-white text-xs uppercase font-bold">
-                  <tr>
-                    <th className="px-4 py-3.5 text-left">Serie / IMEI</th>
-                    <th className="px-4 py-3.5 text-left">Modelo de GPS</th>
-                    <th className="px-4 py-3.5 text-left">SIM / Operador</th>
-                    <th className="px-4 py-3.5 text-left">Estado Conexión</th>
-                    <th className="px-4 py-3.5 text-left">Vehículo Asignado</th>
-                    <th className="px-4 py-3.5 text-left">Último Reporte</th>
-                    <th className="px-4 py-3.5 text-right">Acción</th>
+          <div style={{ background:"#fff", border:"1px solid #F0F0F3", borderRadius:16, overflow:"hidden", boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
+            <div style={{ overflowX:"auto" }}>
+              <table style={{ borderCollapse:"collapse", width:"100%", minWidth:900 }}>
+                <thead>
+                  <tr style={{ background:"#2A2A3C" }}>
+                    {["Serie / IMEI","Modelo","SIM / Operador","Estado","Vehículo asignado","Última comunicación","Acciones"].map((h,i) => (
+                      <th key={i} style={{ textAlign:"left", color:"#fff", fontWeight:600, textTransform:"uppercase", fontSize:10.5, letterSpacing:".03em", padding:"12px 16px", whiteSpace:"nowrap" }}>{h}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {dispositivos.map((d, idx) => {
-                    const statusStyles = {
-                      reportando: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-                      "no reporta": "bg-rose-50 text-rose-700 ring-rose-200",
-                      "sin asignar": "bg-amber-50 text-amber-700 ring-amber-200"
-                    }[d.estado.toLowerCase()] || "bg-neutral-50 text-neutral-600 ring-neutral-200";
-
-                    const dotColors = {
-                      reportando: "bg-emerald-500",
-                      "no reporta": "bg-rose-500",
-                      "sin asignar": "bg-amber-500"
-                    }[d.estado.toLowerCase()] || "bg-neutral-400";
-
+                  {MOCK_DISPS.map((d,i) => {
+                    const { c, b } = d[3]==="Reportando" ? { c:"#059669", b:"#ECFDF5" } : d[3]==="No reporta" ? { c:"#DC2626", b:"#FEF2F2" } : { c:"#B45309", b:"#FFFBEB" };
+                    const btn = d[3]==="Sin asignar" ? "Asignar" : "Reasignar";
                     return (
-                      <tr key={idx} className="border-t border-neutral-100 hover:bg-neutral-50">
-                        <td className="px-4 py-3 font-semibold text-neutral-800">
-                          <div className="flex items-center gap-2">
-                            <Cpu className="w-4 h-4 text-brand flex-shrink-0" />
-                            <span className="font-mono text-xs">{d.imei}</span>
+                      <tr key={i} style={{ borderTop: i>0 ? "1px solid #F3F4F6" : "none" }}>
+                        <td style={{ padding:"12px 16px" }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                            <Cpu style={{ width:14, height:14, color:"#8B3DFF" }} />
+                            <span style={{ fontWeight:600, color:"#374151", fontSize:13 }}>{d[0]}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-neutral-600">{d.modelo}</td>
-                        <td className="px-4 py-3 text-xs text-neutral-500">{d.sim}</td>
-                        <td className="px-4 py-3">
-                          <span className={cls("inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold ring-1", statusStyles)}>
-                            <span className={cls("w-1.5 h-1.5 rounded-full", dotColors)} />
-                            {d.estado}
+                        <td style={{ padding:"12px 16px", color:"#4b5563", fontSize:13, whiteSpace:"nowrap" }}>{d[1]}</td>
+                        <td style={{ padding:"12px 16px", color:"#4b5563", fontSize:13, whiteSpace:"nowrap" }}>{d[2]}</td>
+                        <td style={{ padding:"12px 16px" }}>
+                          <span style={{ display:"inline-flex", alignItems:"center", gap:6, borderRadius:999, fontWeight:600, fontSize:11, padding:"3px 10px", color:c, background:b }}>
+                            <span style={{ width:6, height:6, borderRadius:"50%", background:c, display:"inline-block" }} />{d[3]}
                           </span>
                         </td>
-                        <td className="px-4 py-3 font-semibold text-neutral-700">{d.asignado}</td>
-                        <td className="px-4 py-3 text-xs text-neutral-500 font-medium">{d.fecha}</td>
-                        <td className="px-4 py-3 text-right">
-                          <button className="px-2.5 py-1 text-xs font-bold text-brand bg-brand-50 hover:bg-brand-100 rounded-lg transition-colors">
-                            {d.estado === "Sin asignar" ? "Asignar" : "Reasignar"}
-                          </button>
+                        <td style={{ padding:"12px 16px", color:"#374151", fontSize:13, whiteSpace:"nowrap" }}>{d[4]}</td>
+                        <td style={{ padding:"12px 16px", color:"#6b7280", fontSize:13, whiteSpace:"nowrap" }}>{d[5]}</td>
+                        <td style={{ padding:"12px 16px" }}>
+                          <button style={{ border:"none", borderRadius:8, fontSize:12, fontWeight:600, padding:"5px 12px", color:"#8B3DFF", background:"#F1EAFF", cursor:"pointer" }}>{btn}</button>
                         </td>
                       </tr>
                     );
@@ -927,116 +758,63 @@ export default function Vehiculos() {
         </div>
       )}
 
-      {/* CRUD Modal */}
-      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.type === "edit" ? "Editar Unidad Vehicular" : "Registrar Unidad Vehicular"}>
-        <form onSubmit={handleSave} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Field label="Placa" required>
-                <input
-                  required
-                  placeholder="Ej: ABC-123"
-                  maxLength={7}
-                  value={form.placa || ""}
-                  onChange={e => setForm({ ...form, placa: e.target.value.toUpperCase().trim() })}
-                  className={inputCls}
-                />
-              </Field>
+      {/* ═══════════ MODAL CREAR/EDITAR ═══════════ */}
+      <Modal open={!!modal} onClose={() => setModal(null)} title={modal==="edit" ? "Editar Vehículo" : "Registrar Vehículo"}>
+        <form onSubmit={handleSave} style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ gridColumn:"1/-1" }}>
+              <label style={{ fontSize:12, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:".05em" }}>Placa *</label>
+              <input required maxLength={7} value={form.placa||""} placeholder="ABC-123"
+                onChange={e => setForm({...form, placa: e.target.value.toUpperCase().trim()})}
+                style={{ ...inputSt, marginTop:4 }} />
             </div>
-            <Field label="Marca">
-              <input
-                placeholder="Ej: Chevrolet"
-                value={form.marca || ""}
-                onChange={e => setForm({ ...form, marca: e.target.value })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Modelo">
-              <input
-                placeholder="Ej: Corsa"
-                value={form.modelo || ""}
-                onChange={e => setForm({ ...form, modelo: e.target.value })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Año">
-              <input
-                type="number"
-                placeholder="Ej: 2024"
-                value={form.año || ""}
-                onChange={e => setForm({ ...form, año: e.target.value })}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Código Unidad">
-              <input
-                placeholder="Ej: 567"
-                value={form.unidad || ""}
-                onChange={e => setForm({ ...form, unidad: e.target.value })}
-                className={inputCls}
-              />
-            </Field>
-            <div className="col-span-2">
-              <Field label="Conductor Principal">
-                <select
-                  value={form.conductor_principal_id || ""}
-                  onChange={e => setForm({ ...form, conductor_principal_id: e.target.value })}
-                  className={inputCls}
-                >
-                  <option value="">Seleccione Conductor</option>
-                  {conductores.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nombre} {c.apellidos}</option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-            <div className="col-span-2">
-              <Field label="Empresa">
-                <input
-                  placeholder="Ej: Sede Central"
-                  value={form.empresa || ""}
-                  onChange={e => setForm({ ...form, empresa: e.target.value })}
-                  className={inputCls}
-                />
-              </Field>
-            </div>
-            <div className="col-span-2">
-              <Field label="Medidor Kilómetros">
-                <input
-                  type="number"
-                  placeholder="Ej: 150000"
-                  value={form.medidor || ""}
-                  onChange={e => setForm({ ...form, medidor: e.target.value })}
-                  className={inputCls}
-                />
-              </Field>
-            </div>
-            <Field label="Estado">
-              <select
-                value={form.estado || "OPERATIVO"}
-                onChange={e => setForm({ ...form, estado: e.target.value })}
-                className={inputCls}
-              >
-                <option value="OPERATIVO">OPERATIVO</option>
-                <option value="OEM">OEM</option>
-                <option value="TALLER">TALLER</option>
-                <option value="INACTIVO">INACTIVO</option>
+            {[
+              ["Marca",   "marca",  "Ej: Chevrolet"],
+              ["Modelo",  "modelo", "Ej: Corsa"],
+              ["Año",     "año",    "Ej: 2024"],
+              ["Unidad",  "unidad", "Ej: 567"],
+            ].map(([lbl, key, ph]) => (
+              <div key={key}>
+                <label style={{ fontSize:12, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:".05em" }}>{lbl}</label>
+                <input value={form[key]||""} placeholder={ph}
+                  onChange={e => setForm({...form, [key]: e.target.value})}
+                  style={{ ...inputSt, marginTop:4 }} />
+              </div>
+            ))}
+            <div style={{ gridColumn:"1/-1" }}>
+              <label style={{ fontSize:12, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:".05em" }}>Estado</label>
+              <select value={form.estado||"OPERATIVO"} onChange={e => setForm({...form, estado: e.target.value})}
+                style={{ ...inputSt, marginTop:4 }}>
+                {["OPERATIVO","OEM","TALLER","INACTIVO"].map(o => <option key={o}>{o}</option>)}
               </select>
-            </Field>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}>
+              <label style={{ fontSize:12, fontWeight:700, color:"#374151", textTransform:"uppercase", letterSpacing:".05em" }}>Conductor Principal</label>
+              <select value={form.conductor_principal_id||""} onChange={e => setForm({...form, conductor_principal_id: e.target.value})}
+                style={{ ...inputSt, marginTop:4 }}>
+                <option value="">Seleccionar conductor...</option>
+                {conductores.map(c => <option key={c.id} value={c.id}>{c.nombre} {c.apellidos}</option>)}
+              </select>
+            </div>
           </div>
-
-          {errMsg && <div className="text-rose-600 text-xs font-bold">{errMsg}</div>}
-
-          <div className="flex gap-2 justify-end border-t border-neutral-100 pt-4 mt-2">
-            <button type="button" onClick={() => setModal(null)} className="px-4 py-2 border border-neutral-200 text-neutral-700 hover:bg-neutral-50 rounded-lg text-sm font-bold transition-all">
+          {errMsg && <div style={{ color:"#DC2626", fontSize:12, fontWeight:600 }}>{errMsg}</div>}
+          <div style={{ display:"flex", justifyContent:"flex-end", gap:8, borderTop:"1px solid #F0F0F3", paddingTop:14 }}>
+            <button type="button" onClick={() => setModal(null)}
+              style={{ padding:"8px 16px", border:"1px solid #D1D5DB", borderRadius:8, fontSize:13, fontWeight:600, color:"#374151", background:"#fff", cursor:"pointer" }}>
               Cancelar
             </button>
-            <button type="submit" disabled={saving} className="px-5 py-2 bg-brand hover:bg-brand-hover text-white rounded-lg text-sm font-bold shadow-sm transition-all disabled:opacity-50">
+            <button type="submit" disabled={saving}
+              style={{ padding:"8px 20px", background:"#8B3DFF", color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", opacity: saving ? .6 : 1 }}>
               {saving ? "Guardando..." : "Guardar"}
             </button>
           </div>
         </form>
       </Modal>
+
+      {/* footer */}
+      <div style={{ textAlign:"center", color:"#9ca3af", fontSize:11, padding:"24px 0 8px" }}>
+        ENERED | Red Inteligente de Energías &nbsp;I Copyright © 2024 I Energix Peru I Todos los derechos son reservados.
+      </div>
     </div>
   );
 }
