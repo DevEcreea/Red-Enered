@@ -2052,17 +2052,32 @@ async def health():
 
 # --- MODELS ---
 class VehiculoCreate(BaseModel):
-    placa: str = Field(min_length=6, max_length=7)
+    placa: str = Field(min_length=6, max_length=8)
     marca: Optional[str] = None
     modelo: Optional[str] = None
     año: Optional[int] = None
+    chasis: Optional[str] = None
+    estado: Optional[str] = "OPERATIVO"
+    unidad: Optional[str] = None
+    tipo: Optional[str] = None
+    base: Optional[str] = None
+    titular: Optional[str] = None
+    cc: Optional[str] = None
     conductor_principal_id: Optional[str] = None
     empresa: Optional[str] = None
 
 class VehiculoUpdate(BaseModel):
+    placa: Optional[str] = None
     marca: Optional[str] = None
     modelo: Optional[str] = None
     año: Optional[int] = None
+    chasis: Optional[str] = None
+    estado: Optional[str] = None
+    unidad: Optional[str] = None
+    tipo: Optional[str] = None
+    base: Optional[str] = None
+    titular: Optional[str] = None
+    cc: Optional[str] = None
     conductor_principal_id: Optional[str] = None
 
 class ConductorCreate(BaseModel):
@@ -2131,6 +2146,13 @@ async def create_vehiculo(req: Request, body: VehiculoCreate):
         "marca": body.marca,
         "modelo": body.modelo,
         "año": body.año,
+        "chasis": body.chasis,
+        "estado": body.estado or "OPERATIVO",
+        "unidad": body.unidad,
+        "tipo": body.tipo,
+        "base": body.base,
+        "titular": body.titular,
+        "cc": body.cc,
         "conductor_principal_id": body.conductor_principal_id,
         "empresa": body.empresa or u.get("empresa"),
         "created_at": datetime.now(timezone.utc).isoformat(),
