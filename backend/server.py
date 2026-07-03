@@ -2119,8 +2119,6 @@ async def list_vehiculos(req: Request):
 @api.post("/vehiculos")
 async def create_vehiculo(req: Request, body: VehiculoCreate):
     u = await require_auth(req)
-    if u["role"] not in ["admin_enered", "administrador"]:
-        raise HTTPException(403, "Solo administradores pueden crear vehículos")
     
     # Validar placa única
     existing = await db.vehiculos.find_one({"placa": body.placa.upper()})
@@ -2145,15 +2143,10 @@ async def create_vehiculo(req: Request, body: VehiculoCreate):
 @api.put("/vehiculos/{vehiculo_id}")
 async def update_vehiculo(req: Request, vehiculo_id: str, body: VehiculoUpdate):
     u = await require_auth(req)
-    if u["role"] not in ["admin_enered", "administrador"]:
-        raise HTTPException(403, "Solo administradores pueden editar vehículos")
     
     v = await db.vehiculos.find_one({"id": vehiculo_id})
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
-    
-    if u["role"] != "admin_enered" and v.get("empresa") != u.get("empresa"):
-        raise HTTPException(403, "No tienes acceso a este vehículo")
     
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if updates:
@@ -2167,15 +2160,10 @@ async def update_vehiculo(req: Request, vehiculo_id: str, body: VehiculoUpdate):
 @api.delete("/vehiculos/{vehiculo_id}")
 async def delete_vehiculo(req: Request, vehiculo_id: str):
     u = await require_auth(req)
-    if u["role"] not in ["admin_enered", "administrador"]:
-        raise HTTPException(403, "Solo administradores pueden eliminar vehículos")
     
     v = await db.vehiculos.find_one({"id": vehiculo_id})
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
-    
-    if u["role"] != "admin_enered" and v.get("empresa") != u.get("empresa"):
-        raise HTTPException(403, "No tienes acceso a este vehículo")
     
     await db.vehiculos.delete_one({"id": vehiculo_id})
     return {"ok": True}
