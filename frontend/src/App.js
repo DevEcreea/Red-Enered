@@ -39,6 +39,7 @@ import Documentacion from "./pages/Documentacion";
 import Mantenimiento from "./pages/Mantenimiento";
 import Neumaticos from "./pages/Neumaticos";
 import Infracciones from "./pages/Infracciones";
+import Vehiculos from "./pages/Vehiculos";
 import RegistroSubsidio from "./pages/RegistroSubsidio";
 import SubsidioDocumentos from "./pages/SubsidioDocumentos";
 import SubsidioVerificar from "./pages/SubsidioVerificar";
@@ -134,6 +135,7 @@ function App() {
           <Route path="/checklist" element={<Gated titulo="Checklist"><Checklist /></Gated>} />
           <Route path="/viajes" element={<Gated titulo="Viajes"><Viajes /></Gated>} />
           <Route path="/infracciones" element={<Gated titulo="Infracciones"><Infracciones /></Gated>} />
+          <Route path="/vehiculos" element={<Gated titulo="Vehículos"><Vehiculos /></Gated>} />
           <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
