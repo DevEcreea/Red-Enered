@@ -18,7 +18,7 @@ import requests
 
 BASE_URL = os.environ.get(
     "REACT_APP_BACKEND_URL",
-    "https://role-manager-52.preview.emergentagent.com",
+    "https://senior-devops-suite.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 
