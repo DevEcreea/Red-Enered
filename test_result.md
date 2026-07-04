@@ -102,145 +102,120 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: "Refactor backend for cloud deployment (Netlify + Render + Atlas + Cloudflare R2). Make uploads (invoices/QRs/security docs) work via Cloudflare R2 with presigned URLs, support GOOGLE_SHEETS_CREDENTIALS_JSON env var, add /api/health endpoint, dynamic CORS, and create deploy artifacts (render.yaml, netlify.toml, .env.example, migration scripts, DEPLOY.md)."
+user_problem_statement: "FASE 1 — Interconexión entre módulos por servicios contratados. Agregar campo `servicios={plataforma, combustible, gps}` + `tipo_cliente={enered|subsidio}` a `empresas_config`. Nueva pantalla admin `/admin/empresas` para configurar servicios + token Wialon (encriptado). Refactor de `Flotas.jsx` (Combustible): (1) quitar sparklines de KPIs, (2) usar data real de `/api/consumptions`, (3) ocultar tarjeta y columna 'Ahorro' cuando `servicios.combustible=false`, (4) botón 'Nueva carga' con formulario + PDF factura cuando `servicios.combustible=false`. Endpoint `POST /api/consumptions/manual` para carga manual con PDF. Integración Wialon verificada con token real (61 unidades detectadas). Índices Mongo adicionales para acelerar dashboards."
 
 backend:
-  - task: "Storage abstraction module (R2 + local fallback)"
+  - task: "Modelo Servicios por empresa + Fernet encryption Wialon token"
     implemented: true
     working: true
-    file: "backend/storage.py"
+    file: "backend/servicios.py"
     stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "main"
-          comment: "Created /app/backend/storage.py with save_object, get_object_bytes, delete_object, object_exists, presigned_url, download_response. Auto-selects R2 when R2_* env vars set, else local FS at /app/backend/uploads/. Smoke test passed (save/read/delete cycle). Lint clean."
+          comment: "Nuevo módulo backend/servicios.py con: DEFAULT_SERVICIOS, get_empresa_servicios (fetch defensivo con defaults seguros), encrypt/decrypt/mask_wialon_token (Fernet derivado de JWT_SECRET vía SHA-256), test_wialon_connection (httpx async — probado 100% con token real: 61 unidades), backfill_servicios (migración idempotente en startup)."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: All servicios functionality working correctly. Encryption/decryption verified, token masking working (shows test••••••••2345 format), backfill_servicios is idempotent (scanned 2, updated 0 on subsequent runs). Real Wialon token test successful: detected 61 units for user 'energix'."
 
-  - task: "Refactor invoices upload/download to use storage abstraction"
+  - task: "/auth/me + /auth/login incluyen servicios, tipo_cliente, wialon_configurado"
     implemented: true
     working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
           agent: "main"
-          comment: "Replaced INV_DIR filesystem usage with storage.save_object/download_response. Bulk upload of XML+PDF now writes to storage backend (R2 in prod). Download endpoint /api/invoices/{id}/download/{kind} now returns 307 redirect to R2 presigned URL in prod, FileResponse locally. Login OK, /api/invoices returns 9 docs. Needs retest after deploy."
+          comment: "Nueva función async user_public_with_servicios(u) que enriquece la respuesta con los servicios de empresas_config. admin_enered siempre recibe {plataforma:true, combustible:true, gps:true}. Fallback seguro si empresa no tiene config."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: Login enrichment working perfectly. All users receive servicios (plataforma, combustible, gps as booleans), tipo_cliente, and wialon_configurado fields. Admin gets all services enabled. Lima user shows wialon_configurado=true, Andina shows combustible=false as expected. GET /auth/me returns same enriched data with Bearer token."
 
-  - task: "Refactor QR upload/download to use storage abstraction"
+  - task: "Endpoints admin: /admin/empresas/{empresa}/servicios + wialon (put/delete/test)"
     implemented: true
     working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
           agent: "main"
-          comment: "Replaced QR_DIR with _qr_key + storage. Bulk QR upload + per-placa download + delete all use storage abstraction. content_type now set per-extension (png/jpg/webp/svg)."
+          comment: "Solo admin_enered. Endpoints: PUT /admin/empresas/{empresa}/servicios (actualiza servicios + tipo_cliente, crea config si no existe); PUT /admin/empresas/{empresa}/wialon (encripta token, activa gps=true automáticamente); DELETE .../wialon (borra token); POST .../wialon/test (valida token contra Wialon en real-time). GET /empresas-config extendido para incluir token_mask y flag configurado."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: All admin endpoints working correctly. GET /empresas-config returns masked tokens (never plain text), 403 for non-admin. PUT /servicios updates existing empresa and creates new ones, validates tipo_cliente enum, 403 for non-admin. PUT /wialon encrypts token and auto-enables gps service. DELETE /wialon removes token. POST /wialon/test validates real token (61 units detected), rejects invalid tokens gracefully. All endpoints correctly deny non-admin with 403."
 
-  - task: "Refactor security docs upload/download to use storage abstraction"
+  - task: "POST /consumptions/manual — carga manual con PDF factura"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Endpoint multipart con Form fields (placa, fecha, hora, estacion, ciudad, producto, galones, precio_unitario, importe_total, kilometraje, conductor, numero_factura) + File opcional (factura, hasta 20MB). Guarda PDF via storage.save_object en manual_invoices/{empresa}/{consumo_id}.{ext}. Refleja en db.consumptions con _origen='manual', ahorro=0 (no aplica). Si viene numero_factura también crea entrada en db.invoices (estado=pendiente). GET /consumptions/{id}/factura descarga el PDF con tenant check."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: Manual consumption creation working perfectly. PDF upload successful (541 bytes), stored with correct path. Consumption appears in GET /consumptions with _origen='manual', EMPRESA correct. Invoice created in /invoices with estado=pendiente. GET /consumptions/{id}/factura downloads PDF with correct content-type. Tenant isolation working (403 for different empresa). Admin correctly rejected (400). Works without PDF (factura_key=None). Required field validation working (422). All edge cases covered."
+
+  - task: "Índices Mongo adicionales para acelerar dashboards"
     implemented: true
     working: true
     file: "backend/server.py"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
-    status_history:
-        - working: true
-          agent: "main"
-          comment: "Replaced SEC_DIR with storage. Upload/download/delete via storage backend."
-
-  - task: "Google Sheets credentials via env var (string JSON)"
-    implemented: true
-    working: true
-    file: "backend/google_sheets_sync.py"
-    stuck_count: 0
-    priority: "high"
     needs_retesting: false
     status_history:
         - working: true
           agent: "main"
-          comment: "_get_client() now accepts GOOGLE_SHEETS_CREDENTIALS_JSON (raw JSON content) OR GOOGLE_SHEETS_CREDENTIALS_PATH. Backwards compatible with existing local setup. Tested locally — sync works, reads creds from path."
+          comment: "En startup(): índices compuestos consumptions(EMPRESA+FECHA), consumptions(EMPRESA+PLACA), PLACA, SEMANA, invoices(empresa+estado), qr_codes(empresa+placa), consumos_subsidio(user_id+status), (user_id+fecha), empresas_config(empresa unique). Try/except para no romper si ya existen."
 
-  - task: "/api/health endpoint with diagnostics"
-    implemented: true
-    working: true
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "medium"
-    needs_retesting: false
-    status_history:
-        - working: true
-          agent: "main"
-          comment: "Added GET /api/health returning {status, mongo, storage_backend, version}. Used as Render healthCheckPath. Tested locally: returns storage_backend='local' currently, will be 'r2' in production."
-
-  - task: "Dynamic CORS configuration"
-    implemented: true
-    working: true
-    file: "backend/server.py"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: true
-          agent: "main"
-          comment: "CORS now reads CORS_ORIGINS (comma-separated), FRONTEND_URL, and CORS_ORIGIN_REGEX (for Netlify preview deploys). Backwards compatible. Logged at startup."
-
-  - task: "Deploy artifacts: render.yaml, netlify.toml, .env.example, .gitignore, DEPLOY.md, migration scripts"
+frontend:
+  - task: "Refactor Flotas.jsx (Combustible): KPIs reales + sparklines fuera + Ahorro condicional + Nueva carga"
     implemented: true
     working: "NA"
-    file: "render.yaml, netlify.toml, .gitignore, backend/.env.example, frontend/.env.example, scripts/migrate_*, DEPLOY.md"
+    file: "frontend/src/pages/Flotas.jsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
         - working: "NA"
           agent: "main"
-          comment: "Created Render Blueprint (auto-deploy backend), Netlify config (auto-deploy frontend with SPA fallback + security headers), comprehensive .gitignore (excludes .env, google_credentials.json, uploads/), env.example templates, scripts/migrate_uploads_to_r2.py and scripts/migrate_mongo_to_atlas.py, and step-by-step DEPLOY.md guide. Removed unused emergentintegrations from requirements.txt."
+          comment: "TabResumen ahora recibe {rows, totals, services, onOpenNuevaCarga}. Cambios: (1) BIG_CARDS_META (nombres) con valores computados desde totals; (2) SVG sparklines eliminados; (3) tarjeta Ahorro y columna Ahorro se ocultan si !services.combustible → grid pasa de 4 a 3 cols; (4) columnas de tabla cambian: si combustible=true muestra [Ahorro, GL/100 KM, Costo/km], si !combustible muestra [Factura] (link descarga PDF); (5) botón 'Nueva carga' visible solo si !services.combustible; (6) Cargas Inválidas ahora computado (rows sin PLACA, gal<=0 o imp<=0); (7) ModalNuevaCarga: form multipart con validación, POST a /api/consumptions/manual con FormData, PDF opcional; (8) refresh automático tras guardar."
 
-frontend:
-  - task: "Toggle Buttons Brand Color Update (#8039F4)"
+  - task: "Nueva pantalla /admin/empresas — Empresas & Servicios"
     implemented: true
-    working: true
-    file: "frontend/src/pages/Dashboard.jsx, frontend/tailwind.config.js"
+    working: "NA"
+    file: "frontend/src/pages/AdminEmpresas.jsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
-        - working: true
-          agent: "testing"
-          comment: "✅ Verified previously."
-
-  - task: "Línea de Crédito Card Divider Simplification"
-    implemented: true
-    working: true
-    file: "frontend/src/pages/Dashboard.jsx"
-    stuck_count: 0
-    priority: "high"
-    needs_retesting: false
-    status_history:
-        - working: true
-          agent: "testing"
-          comment: "✅ Verified previously."
+        - working: "NA"
+          agent: "main"
+          comment: "Nueva página (solo admin_enered) con tabla de empresas + 2 modales: ServiciosModal (toggle plataforma/combustible/gps + tipo_cliente enered|subsidio) y WialonModal (input token + host, botón Probar Conexión que llama /admin/empresas/{empresa}/wialon/test y muestra {ok, user, total_unidades} o error, botón Guardar que encripta y persiste, botón Quitar). Sidebar admin actualizado con enlace 'Empresas & Servicios'. Ruta /admin/empresas registrada en App.js. Layout ROUTE_TITLES actualizado."
 
 metadata:
   created_by: "main_agent"
-  version: "2.0"
-  test_sequence: 11
+  version: "3.1"
+  test_sequence: 13
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Refactor invoices upload/download to use storage abstraction"
-    - "Refactor QR upload/download to use storage abstraction"
-    - "Refactor security docs upload/download to use storage abstraction"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-      message: "Cloud-deploy refactor done. New /app/backend/storage.py abstraction switches between Cloudflare R2 (prod) and local FS (dev) automatically based on R2_* env vars. server.py refactored: invoice/QR/security upload+download endpoints now use storage abstraction; downloads on R2 return 307 to presigned URL (browser fetches directly from R2 CDN). google_sheets_sync.py supports GOOGLE_SHEETS_CREDENTIALS_JSON env var. Added /api/health (mongo + storage status). CORS now configurable via env. Deploy artifacts created: render.yaml, netlify.toml, .gitignore, .env.example, DEPLOY.md, scripts/migrate_*. Removed emergentintegrations (not used). Local backend smoke tested: /api/health, login, /api/invoices, /api/qr/list, /api/admin/sheets/status all OK. NEXT: user pushes to GitHub, deploys backend on Render with R2/Atlas env vars, deploys frontend on Netlify, runs migration scripts."
+      message: "FASE 1 Combustible/Servicios completada. Backend testeado manualmente OK (login enriquecido con servicios, admin puede guardar/probar token Wialon real que devolvió 61 unidades). Frontend refactoreado sin errores de lint. Necesito: (1) validar endpoints backend nuevos con casos edge (permisos por rol, empresa inexistente, token inválido, PDF grande, tenant isolation en GET /consumptions/{id}/factura, backfill_servicios idempotencia). Credenciales: admin@enered.com/admin123 (admin_enered). Empresas de prueba pre-configuradas: TRANSPORTES LIMA SAC (combustible+gps+token real), LOGISTICA ANDINA SA (solo plataforma → prueba carga manual). Testing frontend NO se pide todavía."
+    - agent: "testing"
+      message: "✅ FASE 1 BACKEND TESTING COMPLETE - ALL TESTS PASSED (7/7). Comprehensive testing performed covering: (1) Login enrichment with servicios/tipo_cliente/wialon_configurado for all user types, (2) Admin GET /empresas-config with token masking and 403 for non-admin, (3) Admin PUT /servicios with create/update/validation/permissions, (4) Admin Wialon endpoints (PUT/DELETE/TEST) with real token validation (61 units detected), encryption, auto-enable gps, and 403 for non-admin, (5) POST /consumptions/manual with PDF upload, invoice creation, download, tenant isolation, and all edge cases, (6) Regression test for /consumptions filtering by empresa (tenant isolation intact), (7) Backfill idempotence verified. No critical issues found. All security checks (permissions, tenant isolation) working correctly. Real Wialon integration verified with production token."

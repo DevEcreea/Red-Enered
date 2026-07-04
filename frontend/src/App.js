@@ -34,6 +34,7 @@ import Monitoreo from "./pages/Monitoreo";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
+import AdminEmpresas from "./pages/AdminEmpresas";
 import Flotas from "./pages/Flotas";
 import Documentacion from "./pages/Documentacion";
 import Mantenimiento from "./pages/Mantenimiento";
@@ -140,6 +141,7 @@ function App() {
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
           <Route path="/admin/qr" element={<Shell roles={["admin_enered"]}><AdminQRUpload /></Shell>} />
+          <Route path="/admin/empresas" element={<Shell roles={["admin_enered"]}><AdminEmpresas /></Shell>} />
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

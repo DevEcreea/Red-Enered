@@ -22,6 +22,9 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
+import servicios as _svc
+from storage import save_object, download_response
+
 # ---------- Config ----------
 JWT_ALGORITHM = "HS256"
 JWT_ACCESS_MINUTES = 60 * 8  # 8 hours
@@ -98,6 +101,23 @@ def user_public(u: dict) -> dict:
         "documentos_completos": u.get("documentos_completos", True),
         "expediente_status": u.get("expediente_status", "confirmed"),
     }
+
+
+async def user_public_with_servicios(u: dict) -> dict:
+    """Igual que user_public pero enriquecido con servicios de la empresa."""
+    base = user_public(u)
+    # admin_enered no está atado a una empresa; tiene todos los servicios habilitados por default
+    if u.get("role") == "admin_enered":
+        base["servicios"] = {"plataforma": True, "combustible": True, "gps": True}
+        base["tipo_cliente"] = "enered"
+        base["wialon_configurado"] = False
+        return base
+    empresa = u.get("empresa")
+    info = await _svc.get_empresa_servicios(db, empresa)
+    base["servicios"] = info["servicios"]
+    base["tipo_cliente"] = info["tipo_cliente"]
+    base["wialon_configurado"] = info["wialon_configurado"]
+    return base
 
 
 async def get_current_user(request: Request) -> dict:
@@ -224,7 +244,8 @@ async def login(data: LoginIn, response: Response):
     refresh = create_refresh_token(user["id"])
     set_auth_cookies(response, access, refresh)
     response.headers["X-Access-Token"] = access  # fallback for clients
-    return {"user": user_public(user), "access_token": access}
+    user_data = await user_public_with_servicios(user)
+    return {"user": user_data, "access_token": access}
 
 
 @api.post("/auth/logout")
@@ -235,7 +256,7 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return user_public(user)
+    return await user_public_with_servicios(user)
 
 
 @api.post("/auth/refresh")
@@ -477,7 +498,13 @@ async def dashboard_filter_options(user: dict = Depends(get_current_user), empre
     return {"placas": placas, "semanas": semanas, "estaciones": estaciones, "productos": productos}
 
 
-# ---------- Empresa Config (plan, línea crédito, unidades, RUC, días crédito) ----------
+# ---------- Empresa Config (plan, línea crédito, unidades, RUC, días crédito, servicios) ----------
+class EmpresaServicios(BaseModel):
+    plataforma: bool = True
+    combustible: bool = True
+    gps: bool = False
+
+
 class EmpresaConfig(BaseModel):
     empresa: str
     ruc: Optional[str] = ""
@@ -485,17 +512,41 @@ class EmpresaConfig(BaseModel):
     linea_credito: float = 0.0
     unidades_contratadas: int = 0
     dias_credito: int = 0  # condición de crédito (días)
+    tipo_cliente: Optional[Literal["enered", "subsidio"]] = "enered"
+    servicios: Optional[EmpresaServicios] = None
+
+
+class ServiciosUpdate(BaseModel):
+    servicios: EmpresaServicios
+    tipo_cliente: Optional[Literal["enered", "subsidio"]] = None
+
+
+class WialonConfigIn(BaseModel):
+    token: str
+    host: Optional[str] = None
 
 
 @api.get("/empresas-config")
 async def list_empresas_config(user: dict = Depends(require_roles("admin_enered"))):
     configs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
+    # Mask wialon tokens
+    for c in configs:
+        w = c.get("wialon") or {}
+        if w.get("token"):
+            c["wialon"] = {"host": w.get("host") or _svc.DEFAULT_WIALON_HOST, "configurado": True, "token_mask": _svc.mask_wialon_token(_svc.decrypt_wialon_token(w["token"]))}
+        else:
+            c["wialon"] = {"host": w.get("host") or _svc.DEFAULT_WIALON_HOST, "configurado": False, "token_mask": ""}
+        # Normalize servicios defensively
+        c["servicios"] = _svc._normalize_servicios(c.get("servicios"))
+        c["tipo_cliente"] = c.get("tipo_cliente") or _svc.DEFAULT_TIPO_CLIENTE
     return configs
 
 
 @api.post("/empresas-config")
 async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(require_roles("admin_enered"))):
-    doc = data.model_dump()
+    doc = data.model_dump(exclude_none=True)
+    if "servicios" in doc and isinstance(doc["servicios"], dict):
+        doc["servicios"] = _svc._normalize_servicios(doc["servicios"])
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
     existing = await db.empresas_config.find_one({"empresa": data.empresa}, {"_id": 0})
     if existing:
@@ -503,8 +554,89 @@ async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(requir
     else:
         doc["id"] = str(uuid.uuid4())
         doc["created_at"] = doc["updated_at"]
+        if "servicios" not in doc:
+            doc["servicios"] = dict(_svc.DEFAULT_SERVICIOS)
+        if "tipo_cliente" not in doc:
+            doc["tipo_cliente"] = _svc.DEFAULT_TIPO_CLIENTE
         await db.empresas_config.insert_one(doc)
     return await db.empresas_config.find_one({"empresa": data.empresa}, {"_id": 0})
+
+
+# ---------- Admin: Empresas & Servicios ----------
+@api.put("/admin/empresas/{empresa}/servicios")
+async def update_empresa_servicios(empresa: str, data: ServiciosUpdate, user: dict = Depends(require_roles("admin_enered"))):
+    patch = {
+        "servicios": _svc._normalize_servicios(data.servicios.model_dump()),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if data.tipo_cliente:
+        patch["tipo_cliente"] = data.tipo_cliente
+    existing = await db.empresas_config.find_one({"empresa": empresa}, {"_id": 0})
+    if not existing:
+        # crear config mínima
+        await db.empresas_config.insert_one({
+            "id": str(uuid.uuid4()),
+            "empresa": empresa,
+            "ruc": "",
+            "plan": "tracking",
+            "linea_credito": 0.0,
+            "unidades_contratadas": 0,
+            "created_at": patch["updated_at"],
+            **patch,
+        })
+    else:
+        await db.empresas_config.update_one({"empresa": empresa}, {"$set": patch})
+    return {"ok": True, "empresa": empresa, "servicios": patch["servicios"], "tipo_cliente": patch.get("tipo_cliente", existing.get("tipo_cliente") if existing else _svc.DEFAULT_TIPO_CLIENTE)}
+
+
+@api.put("/admin/empresas/{empresa}/wialon")
+async def set_empresa_wialon(empresa: str, data: WialonConfigIn, user: dict = Depends(require_roles("admin_enered"))):
+    token = (data.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token vacío")
+    host = (data.host or _svc.DEFAULT_WIALON_HOST).strip()
+    enc = _svc.encrypt_wialon_token(token)
+    patch = {
+        "wialon": {"host": host, "token": enc, "updated_at": datetime.now(timezone.utc).isoformat()},
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    existing = await db.empresas_config.find_one({"empresa": empresa}, {"_id": 0})
+    if not existing:
+        await db.empresas_config.insert_one({
+            "id": str(uuid.uuid4()),
+            "empresa": empresa,
+            "created_at": patch["updated_at"],
+            "servicios": {**_svc.DEFAULT_SERVICIOS, "gps": True},
+            "tipo_cliente": _svc.DEFAULT_TIPO_CLIENTE,
+            **patch,
+        })
+    else:
+        # activar gps automáticamente al configurar wialon
+        current_servicios = _svc._normalize_servicios(existing.get("servicios"))
+        current_servicios["gps"] = True
+        patch["servicios"] = current_servicios
+        await db.empresas_config.update_one({"empresa": empresa}, {"$set": patch})
+    return {"ok": True, "empresa": empresa, "host": host, "token_mask": _svc.mask_wialon_token(token)}
+
+
+@api.delete("/admin/empresas/{empresa}/wialon")
+async def delete_empresa_wialon(empresa: str, user: dict = Depends(require_roles("admin_enered"))):
+    await db.empresas_config.update_one(
+        {"empresa": empresa},
+        {"$unset": {"wialon": ""}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"ok": True}
+
+
+@api.post("/admin/empresas/{empresa}/wialon/test")
+async def test_empresa_wialon(empresa: str, data: WialonConfigIn, user: dict = Depends(require_roles("admin_enered"))):
+    """Probar un token Wialon sin guardarlo (o guardado). Si viene token en el body, prueba ese; si no, prueba el guardado."""
+    if data.token:
+        return await _svc.test_wialon_connection(data.token, data.host or _svc.DEFAULT_WIALON_HOST)
+    cfg = await _svc.get_empresa_wialon_config(db, empresa)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Wialon no configurado para esta empresa")
+    return await _svc.test_wialon_connection(cfg["token"], cfg["host"])
 
 
 @api.get("/dashboard/overview")
@@ -1275,6 +1407,125 @@ async def upload_consumptions(file: UploadFile = File(...),
 async def delete_all_consumptions(user: dict = Depends(require_roles("admin_enered"))):
     res = await db.consumptions.delete_many({})
     return {"deleted": res.deleted_count}
+
+
+# ---------- Manual fuel loads (para empresas con servicios.combustible=false: plataforma / solo GPS) ----------
+@api.post("/consumptions/manual")
+async def create_manual_consumption(
+    placa: str = Form(...),
+    fecha: str = Form(...),                    # YYYY-MM-DD
+    hora: Optional[str] = Form(""),            # HH:MM
+    estacion: Optional[str] = Form(""),
+    ciudad: Optional[str] = Form(""),
+    producto: Optional[str] = Form("DIESEL B5"),
+    galones: float = Form(...),
+    precio_unitario: Optional[float] = Form(None),
+    importe_total: float = Form(...),
+    kilometraje: Optional[int] = Form(None),
+    conductor: Optional[str] = Form(""),
+    numero_factura: Optional[str] = Form(""),
+    factura: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Carga manual de un abastecimiento. Usado por empresas que NO consumen con ENERED
+    (servicios.combustible=false). El PDF de la factura es opcional pero recomendado.
+    """
+    empresa = user.get("empresa")
+    if user["role"] == "admin_enered":
+        raise HTTPException(status_code=400, detail="admin_enered no tiene empresa; use un usuario cliente")
+    if not empresa:
+        raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
+
+    # Guardar PDF de factura (si viene)
+    factura_key = None
+    factura_content_type = None
+    if factura and factura.filename:
+        contents = await factura.read()
+        if len(contents) > 20 * 1024 * 1024:  # 20 MB
+            raise HTTPException(status_code=413, detail="Factura excede 20 MB")
+        # Ruta canonical: manual_invoices/{empresa}/{consumo_id}.{ext}
+        ext = (factura.filename.rsplit(".", 1)[-1] or "pdf").lower()
+        consumo_id = str(uuid.uuid4())
+        factura_key = f"manual_invoices/{empresa}/{consumo_id}.{ext}"
+        factura_content_type = factura.content_type or "application/pdf"
+        save_object(factura_key, contents, content_type=factura_content_type)
+    else:
+        consumo_id = str(uuid.uuid4())
+
+    # Semana ISO
+    from datetime import date as _date
+    try:
+        y, m, d = (int(x) for x in fecha[:10].split("-"))
+        wk = _date(y, m, d).isocalendar()
+        semana = f"{wk.year}-W{wk.week:02d}"
+    except Exception:
+        semana = ""
+
+    doc = {
+        "id": consumo_id,
+        "FECHA": fecha,
+        "HORA": hora or "",
+        "CIUDAD": ciudad or "",
+        "ESTACION": estacion or "",
+        "PLACA": placa.strip().upper(),
+        "PRODUCTO": producto or "DIESEL B5",
+        "UNIDAD": "GALON",
+        "CANTIDAD_GL": float(galones),
+        "PRECIO_UNITARIO": float(precio_unitario) if precio_unitario is not None else (float(importe_total) / float(galones) if float(galones) > 0 else 0),
+        "IMPORTE_TOTAL": float(importe_total),
+        "AHORRO": 0,  # no aplica para carga manual
+        "NOTA_DE_DESPACHO": numero_factura or "",
+        "EMPRESA": empresa,
+        "KILOMETRAJE": kilometraje if kilometraje is not None else None,
+        "CONDUCTOR": conductor or "",
+        "SEMANA": semana,
+        "ESTADO": "FACTURADO",
+        "_origen": "manual",
+        "factura_key": factura_key,
+        "factura_content_type": factura_content_type,
+        "numero_factura": numero_factura or "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": user["id"],
+    }
+    await db.consumptions.insert_one(doc)
+
+    # Reflejar también en /api/invoices si viene numero_factura para que aparezca en Facturación
+    if numero_factura:
+        await db.invoices.insert_one({
+            "id": str(uuid.uuid4()),
+            "empresa": empresa,
+            "numero": numero_factura,
+            "fecha_emision": fecha,
+            "fecha_vencimiento": fecha,
+            "monto": float(importe_total),
+            "saldo": float(importe_total),
+            "estado": "pendiente",
+            "pdf_url": f"/api/consumptions/{consumo_id}/factura" if factura_key else None,
+            "origen": "manual",
+            "consumo_id": consumo_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    doc.pop("_id", None)
+    return {"ok": True, "consumo": doc}
+
+
+@api.get("/consumptions/{consumo_id}/factura")
+async def download_manual_factura(consumo_id: str, user: dict = Depends(get_current_user)):
+    """Descargar la factura PDF asociada a una carga manual."""
+    doc = await db.consumptions.find_one({"id": consumo_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Consumo no encontrado")
+    # Tenant check
+    if user["role"] != "admin_enered" and doc.get("EMPRESA") != user.get("empresa"):
+        raise HTTPException(status_code=403, detail="Sin acceso")
+    key = doc.get("factura_key")
+    if not key:
+        raise HTTPException(status_code=404, detail="Esta carga no tiene factura adjunta")
+    ct = doc.get("factura_content_type") or "application/pdf"
+    filename = key.rsplit("/", 1)[-1]
+    return download_response(key, filename=filename, content_type=ct)
 
 
 # ---------- Google Sheets Sync ----------
@@ -2593,9 +2844,27 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.consumptions.create_index("EMPRESA")
     await db.consumptions.create_index("FECHA")
-    await db.invoices.create_index("empresa")
+    # Nuevos índices para acelerar dashboards y filtros (compuestos)
+    try:
+        await db.consumptions.create_index([("EMPRESA", 1), ("FECHA", -1)])
+        await db.consumptions.create_index([("EMPRESA", 1), ("PLACA", 1)])
+        await db.consumptions.create_index("PLACA")
+        await db.consumptions.create_index("SEMANA")
+        await db.invoices.create_index([("empresa", 1), ("estado", 1)])
+        await db.qr_codes.create_index([("empresa", 1), ("placa", 1)])
+        await db.consumos_subsidio.create_index([("user_id", 1), ("status", 1)])
+        await db.consumos_subsidio.create_index([("user_id", 1), ("fecha", -1)])
+        await db.empresas_config.create_index("empresa", unique=True)
+    except Exception as e:
+        logger.warning(f"Index creation warning: {e}")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)
     await seed_demo_data()
+    # Backfill de servicios/tipo_cliente para empresas legacy
+    try:
+        result = await _svc.backfill_servicios(db)
+        logger.info(f"Servicios backfill: {result}")
+    except Exception as e:
+        logger.warning(f"Servicios backfill failed: {e}")
 
 
 @app.on_event("shutdown")

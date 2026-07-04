@@ -41,6 +41,7 @@ const MENU = [
 
 const ADMIN_ITEMS = [
   { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
+  { to: "/admin/empresas", label: "Empresas & Servicios", icon: FolderCheck, testid: "nav-empresas" },
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload" },
   { to: "/admin/qr", label: "QR", icon: QrCode, testid: "nav-qr-admin" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin" },
@@ -64,6 +65,7 @@ const ROUTE_TITLES = {
   "/documentacion": "Documentación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
+  "/admin/empresas": "Empresas & Servicios",
   "/admin/subsidio": "Subsidio · Expedientes",
   "/admin/upload": "Datos",
   "/admin/qr": "QR",
