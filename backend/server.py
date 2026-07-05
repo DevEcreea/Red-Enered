@@ -108,7 +108,7 @@ async def user_public_with_servicios(u: dict) -> dict:
     base = user_public(u)
     # admin_enered no está atado a una empresa; tiene todos los servicios habilitados por default
     if u.get("role") == "admin_enered":
-        base["servicios"] = {"plataforma": True, "combustible": True, "gps": True}
+        base["servicios"] = {"plataforma": True, "combustible": True, "gps": True, "subsidio": True}
         base["tipo_cliente"] = "enered"
         base["wialon_configurado"] = False
         return base
@@ -503,6 +503,7 @@ class EmpresaServicios(BaseModel):
     plataforma: bool = True
     combustible: bool = True
     gps: bool = False
+    subsidio: bool = False
 
 
 class EmpresaConfig(BaseModel):
@@ -2659,6 +2660,51 @@ async def infracciones_dashboard(req: Request):
         "monto_pagado": monto_pagado,
     }
 
+
+# ---------- Wialon: SID on-demand para iframe embed ----------
+@api.get("/wialon/sid")
+async def get_wialon_sid(user: dict = Depends(get_current_user)):
+    """
+    Genera un session_id (sid) fresco de Wialon usando el token guardado de la empresa.
+    El frontend usa este sid en el iframe de hosting.wialon para auto-login.
+    Solo si servicios.gps=true y hay token configurado.
+    """
+    if user.get("role") == "admin_enered":
+        raise HTTPException(status_code=400, detail="admin_enered no está asociado a una empresa con Wialon")
+    empresa = user.get("empresa")
+    if not empresa:
+        raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
+    info = await _svc.get_empresa_servicios(db, empresa)
+    if not info["servicios"].get("gps"):
+        raise HTTPException(status_code=403, detail="Servicio GPS no habilitado para esta empresa")
+    cfg = await _svc.get_empresa_wialon_config(db, empresa)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Token Wialon no configurado. Contacta al administrador de ENERED.")
+    result = await _svc.test_wialon_connection(cfg["token"], cfg["host"])
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail=f"Wialon rechazó el token: {result.get('error')}")
+    import json as _json, httpx as _httpx
+    host = cfg["host"]
+    base = f"https://{host}/wialon/ajax.html"
+    async with _httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.get(base, params={"svc": "token/login", "params": _json.dumps({"token": cfg["token"]})})
+        data = r.json()
+        sid = data.get("eid") if isinstance(data, dict) else None
+    if not sid:
+        raise HTTPException(status_code=502, detail="No se pudo generar sesión Wialon")
+    # base_url para iframe: transformar hst-api.wialon.X → hosting.wialon.X (portal web)
+    api_base = (result.get("base_url") or f"https://{host}").rstrip("/")
+    ui_base = api_base.replace("hst-api.", "hosting.").replace("http://", "https://")
+    return {
+        "sid": sid,
+        "host": host,
+        "base_url": ui_base,
+        "iframe_url": f"{ui_base}/?sid={sid}&lang=es",
+        "total_unidades": result.get("total_unidades", 0),
+        "user": result.get("user", ""),
+    }
+
+
 app.include_router(api)
 
 # ============================================================================
@@ -2837,6 +2883,8 @@ async def seed_demo_data():
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             })
+
+
 
 
 @app.on_event("startup")

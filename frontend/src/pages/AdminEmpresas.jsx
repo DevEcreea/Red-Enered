@@ -10,6 +10,7 @@ const SERVICE_META = {
   plataforma:  { label: "Plataforma", color: "#8B3DFF", icon: Server,     desc: "Acceso a la plataforma web (siempre activo)" },
   combustible: { label: "Combustible", color: "#10B981", icon: Fuel,      desc: "Consume combustible con ENERED (data automática, ahorro real)" },
   gps:         { label: "GPS · Wialon", color: "#3B82F6", icon: MapPin,   desc: "Monitoreo satelital con Wialon (mapa + KM + sensores)" },
+  subsidio:    { label: "Subsidio DU 004", color: "#F59E0B", icon: ShieldCheck, desc: "Expediente DU 004-2026: Mi Flota + Dashboard Subsidio" },
 };
 
 export default function AdminEmpresas() {
@@ -49,17 +50,17 @@ export default function AdminEmpresas() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#241B4A" }}>
-              {["Empresa", "RUC", "Tipo", "Plataforma", "Combustible", "GPS · Wialon", "Acciones"].map((h) => (
+              {["Empresa", "RUC", "Tipo", "Plataforma", "Combustible", "GPS · Wialon", "Subsidio DU 004", "Acciones"].map((h) => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}><Loader2 style={{ width: 22, height: 22, display: "inline", animation: "spin 1s linear infinite" }} /> Cargando...</td></tr>
+              <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}><Loader2 style={{ width: 22, height: 22, display: "inline", animation: "spin 1s linear infinite" }} /> Cargando...</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>
+              <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>
                 No hay empresas configuradas. Se crearán automáticamente al primer login de sus usuarios.
               </td></tr>
             )}
@@ -91,6 +92,7 @@ export default function AdminEmpresas() {
                       )}
                     </div>
                   </td>
+                  <td style={styles.td}><Dot on={!!s.subsidio} /></td>
                   <td style={styles.td}>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => setEditEmpresa(r)} style={btn.iconEdit} title="Editar servicios" data-testid={`btn-edit-servicios-${r.empresa}`}>
@@ -132,6 +134,7 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
     plataforma: empresa.servicios?.plataforma !== false,
     combustible: !!empresa.servicios?.combustible,
     gps: !!empresa.servicios?.gps,
+    subsidio: !!empresa.servicios?.subsidio,
   });
   const [tipoCliente, setTipoCliente] = useState(empresa.tipo_cliente || "enered");
   const [saving, setSaving] = useState(false);

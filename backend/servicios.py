@@ -22,6 +22,7 @@ DEFAULT_SERVICIOS = {
     "plataforma": True,   # base: acceso a la plataforma
     "combustible": True,  # consumo con ENERED (Google Sheets)
     "gps": False,         # monitoreo Wialon
+    "subsidio": False,    # expediente DU 004 (Mi Flota + Dashboard Subsidio)
 }
 
 DEFAULT_TIPO_CLIENTE = "enered"  # enered | subsidio
@@ -70,6 +71,7 @@ def _normalize_servicios(raw: Optional[dict]) -> dict:
         "plataforma": bool(raw.get("plataforma", True)),
         "combustible": bool(raw.get("combustible", DEFAULT_SERVICIOS["combustible"])),
         "gps": bool(raw.get("gps", DEFAULT_SERVICIOS["gps"])),
+        "subsidio": bool(raw.get("subsidio", DEFAULT_SERVICIOS["subsidio"])),
     }
 
 
@@ -181,16 +183,38 @@ async def backfill_servicios(db) -> dict:
     """
     Garantiza que todas las empresas en empresas_config tengan el campo `servicios`
     y `tipo_cliente`. Idempotente: no sobreescribe si ya existe.
+    Reglas especiales:
+    - Si tipo_cliente=subsidio → activa servicios.subsidio=true
+    - Si algún usuario de la empresa tiene role=cliente_subsidio → activa servicios.subsidio=true
     """
     updated = 0
     scanned = 0
     async for cfg in db.empresas_config.find({}, {"_id": 0}):
         scanned += 1
         patch = {}
-        if "servicios" not in cfg or not isinstance(cfg.get("servicios"), dict):
-            patch["servicios"] = dict(DEFAULT_SERVICIOS)
+        current_serv = cfg.get("servicios")
+        if not isinstance(current_serv, dict):
+            current_serv = dict(DEFAULT_SERVICIOS)
+            patch["servicios"] = current_serv
+        else:
+            # add missing keys (e.g. subsidio recién agregado)
+            normalized = _normalize_servicios(current_serv)
+            if normalized != current_serv:
+                patch["servicios"] = normalized
+                current_serv = normalized
+        tipo = cfg.get("tipo_cliente") or DEFAULT_TIPO_CLIENTE
         if "tipo_cliente" not in cfg or not cfg.get("tipo_cliente"):
-            patch["tipo_cliente"] = DEFAULT_TIPO_CLIENTE
+            patch["tipo_cliente"] = tipo
+        # Regla: si tipo_cliente=subsidio, asegurar servicios.subsidio=true
+        if tipo == "subsidio" and not current_serv.get("subsidio"):
+            current_serv = dict(current_serv); current_serv["subsidio"] = True
+            patch["servicios"] = current_serv
+        # Regla: si algún usuario de esta empresa es cliente_subsidio, activar
+        if not current_serv.get("subsidio"):
+            u = await db.users.find_one({"empresa": cfg["empresa"], "role": "cliente_subsidio"}, {"_id": 0, "id": 1})
+            if u:
+                current_serv = dict(current_serv); current_serv["subsidio"] = True
+                patch["servicios"] = current_serv
         if patch:
             await db.empresas_config.update_one({"empresa": cfg["empresa"]}, {"$set": patch})
             updated += 1

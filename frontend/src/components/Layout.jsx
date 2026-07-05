@@ -225,7 +225,16 @@ export default function Layout({ children }) {
 
   if (!user) return null;
 
-  const items = MENU.filter((i) => i.roles.includes(user.role));
+  const items = MENU.filter((i) => {
+    if (!i.roles.includes(user.role)) {
+      // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
+      if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
+      return false;
+    }
+    // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
+    if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
+    return true;
+  });
   const isAdmin = user.role === "admin_enered";
 
   const handleLogout = async () => {
