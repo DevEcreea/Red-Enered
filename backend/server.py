@@ -2720,6 +2720,104 @@ async def list_empresas_with_wialon(user: dict = Depends(require_roles("admin_en
     return out
 
 
+# ---------- Wialon: obtener unidades con última posición (reemplaza iframe bloqueado por X-Frame) ----------
+@api.get("/wialon/units")
+async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """
+    Retorna lista de unidades con última posición conocida.
+    Cliente: usa su propia empresa. admin_enered: debe pasar ?empresa=X.
+    """
+    if user.get("role") == "admin_enered":
+        if not empresa:
+            raise HTTPException(status_code=400, detail="admin_enered debe indicar ?empresa=<nombre>")
+        target_empresa = empresa
+    else:
+        target_empresa = user.get("empresa")
+        if not target_empresa:
+            raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
+    info = await _svc.get_empresa_servicios(db, target_empresa)
+    if not info["servicios"].get("gps"):
+        raise HTTPException(status_code=403, detail=f"Servicio GPS no habilitado para {target_empresa}")
+    cfg = await _svc.get_empresa_wialon_config(db, target_empresa)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Token Wialon no configurado")
+    import json as _json, httpx as _httpx
+    host = cfg["host"]
+    base = f"https://{host}/wialon/ajax.html"
+    async with _httpx.AsyncClient(timeout=15.0) as client:
+        # 1) Login
+        r = await client.get(base, params={"svc": "token/login", "params": _json.dumps({"token": cfg["token"]})})
+        d = r.json()
+        if not isinstance(d, dict) or "eid" not in d:
+            raise HTTPException(status_code=502, detail=f"Login Wialon falló: {d.get('error') if isinstance(d,dict) else 'unknown'}")
+        sid = d["eid"]
+        # 2) search_items con flag para position (1025 = base + last msg + position)
+        # flag 1 sys, 8 unit_prop_lastPos, 256 measure, 1024 lastMsg → suma 1289
+        search_params = {
+            "spec": {"itemsType":"avl_unit","propName":"sys_name","propValueMask":"*","sortType":"sys_name","propType":"property"},
+            "force": 1, "flags": 1025, "from": 0, "to": 500,
+        }
+        r2 = await client.get(base, params={"svc":"core/search_items", "params": _json.dumps(search_params), "sid": sid})
+        d2 = r2.json()
+    units = []
+    for u in (d2.get("items") or []):
+        pos = u.get("pos") or {}
+        lmsg = u.get("lmsg") or {}
+        units.append({
+            "id": u.get("id"),
+            "name": u.get("nm") or "",
+            "lat": pos.get("y"),
+            "lon": pos.get("x"),
+            "speed": pos.get("s"),
+            "course": pos.get("c"),
+            "timestamp": pos.get("t") or lmsg.get("t"),
+            "sat_count": pos.get("sc"),
+        })
+    # Bounding box (para el mapa)
+    lats = [u["lat"] for u in units if u.get("lat") is not None]
+    lons = [u["lon"] for u in units if u.get("lon") is not None]
+    bbox = None
+    if lats and lons:
+        # padding
+        pad = 0.02
+        bbox = {
+            "min_lat": min(lats) - pad, "max_lat": max(lats) + pad,
+            "min_lon": min(lons) - pad, "max_lon": max(lons) + pad,
+        }
+    return {"empresa": target_empresa, "total": len(units), "units": units, "bbox": bbox}
+
+
+# ---------- Admin: eliminar empresa con cascada ----------
+@api.delete("/admin/empresas/{empresa}")
+async def delete_empresa(empresa: str, user: dict = Depends(require_roles("admin_enered"))):
+    """
+    Elimina una empresa y TODOS los datos asociados en cascada:
+    - empresas_config
+    - users (usuarios de esa empresa)
+    - consumptions (facturas de combustible)
+    - invoices (facturación)
+    - qr_codes
+    - subsidio_vehicles, subsidio_documents, subsidio_bank_accounts, subsidio_declaraciones
+    - consumos_subsidio (a través de sus user_ids)
+    Retorna el conteo de documentos eliminados por colección.
+    """
+    if not empresa:
+        raise HTTPException(status_code=400, detail="Nombre de empresa vacío")
+    # Obtener ids de usuarios para cascada de subsidio
+    user_ids = [u["id"] async for u in db.users.find({"empresa": empresa}, {"_id": 0, "id": 1})]
+    counts = {}
+    r = await db.empresas_config.delete_many({"empresa": empresa}); counts["empresas_config"] = r.deleted_count
+    r = await db.users.delete_many({"empresa": empresa}); counts["users"] = r.deleted_count
+    r = await db.consumptions.delete_many({"EMPRESA": empresa}); counts["consumptions"] = r.deleted_count
+    r = await db.invoices.delete_many({"empresa": empresa}); counts["invoices"] = r.deleted_count
+    r = await db.qr_codes.delete_many({"empresa": empresa}); counts["qr_codes"] = r.deleted_count
+    if user_ids:
+        for coll in ["subsidio_vehicles", "subsidio_documents", "subsidio_bank_accounts", "subsidio_declaraciones", "consumos_subsidio", "subsidio_leads"]:
+            r = await db[coll].delete_many({"user_id": {"$in": user_ids}})
+            counts[coll] = r.deleted_count
+    return {"ok": True, "empresa": empresa, "deleted": counts}
+
+
 app.include_router(api)
 
 # ============================================================================

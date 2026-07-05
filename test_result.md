@@ -180,6 +180,74 @@ frontend:
         - working: true
           agent: "testing"
           comment: "✅ TESTED END-TO-END: All 5 test scenarios PASSED. (1) administrador@lima.com: Monitoreo appears in sidebar, navigates to /monitoreo, page loads with monitoreo-page container, header shows 'TRANSPORTES LIMA SAC', badge displays '61 unidades · usuario energix', wialon-iframe element present with correct src (https://hosting.wialon.us/?sid=X&lang=es), Refrescar and Abrir en pestaña buttons working. (2) administrador@andina.com (NO GPS): Monitoreo NOT in sidebar, manual navigation to /monitoreo shows ModuloBloqueado screen with correct message about GPS/Wialon service. (3) admin@enered.com: Monitoreo in sidebar, empresa selector dropdown present with 'TRANSPORTES LIMA SAC' option, iframe loads correctly with 61 units badge. All testids present (nav-monitoreo, monitoreo-page, wialon-empresa-select, btn-wialon-refresh, btn-wialon-newtab, wialon-iframe). Real Wialon integration working with production token. NO CRITICAL ISSUES."
+        - working: true
+          agent: "main"
+          comment: "BUG FIX: Wialon bloqueaba iframe con X-Frame-Options. Solución: reemplazado iframe SID por (a) OpenStreetMap embed con bbox/marker + (b) GET /api/wialon/units que retorna lista de unidades con última posición. Ahora Monitoreo.jsx muestra 2 columnas: MAPA (iframe OSM) + PANEL lateral con lista de unidades (nombre, timestamp, velocidad, estado GPS). Click en unidad enfoca el mapa. Header muestra 'X unidades · Y con GPS activo'. Botón 'Abrir Wialon completo' apunta a hosting.wialon.us directamente."
+        - working: true
+          agent: "testing"
+          comment: "✅ BUG FIX VERIFIED: Wialon X-Frame-Options issue RESOLVED. (1) administrador@lima.com: ✓ 2-column layout (MAP + PANEL), ✓ Map iframe src points to openstreetmap.org (NOT hosting.wialon), ✓ Header shows '61 unidades · 59 con GPS activo', ✓ 61 unit rows with data-testid='unit-row-{id}', ✓ First unit has visible name (ADA772), ✓ Wialon API responds within 15s. (2) admin@enered.com: ✓ Empresa selector (data-testid='wialon-empresa-select') with TRANSPORTES LIMA SAC, ✓ Selecting empresa loads map + 61 units. OpenStreetMap integration working perfectly. Real Wialon API integration confirmed (61 units detected)."
+
+backend:
+  - task: "GET /api/wialon/units — lista de unidades con posición GPS"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Nuevo endpoint que reemplaza /api/wialon/sid (bloqueado por X-Frame-Options). Hace login con token Wialon, llama core/search_items con flags 1025 (base + lastMsg + position), retorna lista de unidades con {id, name, lat, lon, speed, course, timestamp, sat_count} + bbox para el mapa. Cliente usa su empresa, admin_enered debe pasar ?empresa=X. Errores: 400 sin empresa, 403 sin gps, 404 sin token, 502 login falló."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: GET /api/wialon/units working perfectly. administrador@lima.com returns 200 with 61 units, each with id/name/lat/lon/speed/timestamp. bbox calculated correctly for map bounds. admin@enered.com with ?empresa=TRANSPORTES LIMA SAC returns same data. Real Wialon API integration confirmed (core/search_items with flags 1025). NO ISSUES."
+
+  - task: "GET /api/wialon/empresas — lista empresas con GPS activo"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Endpoint para admin_enered que retorna lista de empresas con servicios.gps=true Y token Wialon configurado. Usado por selector de empresa en Monitoreo admin. Retorna [{empresa, tipo_cliente}]."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: GET /api/wialon/empresas returns 1 empresa (TRANSPORTES LIMA SAC) with gps=true and token configured. Used by admin empresa selector. Working correctly."
+
+  - task: "DELETE /api/admin/empresas/{empresa} — eliminar empresa con cascada"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Endpoint solo admin_enered que elimina empresa y TODOS los datos relacionados en cascada: empresas_config, users (usuarios de esa empresa), consumptions, invoices, qr_codes, subsidio_vehicles, subsidio_documents, subsidio_bank_accounts, subsidio_declaraciones, consumos_subsidio (a través de user_ids), subsidio_leads. Retorna conteo de documentos eliminados por colección."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: DELETE /api/admin/empresas/{empresa} working perfectly. Deleted TEST EMPRESA with cascade delete of all related data. Empresa removed from table. Cascade delete confirmed (users deleted). NO ISSUES."
+
+frontend:
+  - task: "AdminEmpresas: botón eliminar empresa con modal confirmación"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/AdminEmpresas.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "Agregado 3er botón DELETE (data-testid='btn-delete-{empresa}') en cada fila de tabla. Al hacer clic abre DeleteModal (data-testid='modal-delete-empresa') que muestra lista de qué se eliminará (config, users, consumos, facturas, QR, subsidio) + campo de confirmación (data-testid='delete-confirm-input') que requiere escribir el nombre EXACTO de la empresa. Botón 'Eliminar definitivamente' (data-testid='btn-confirm-delete') deshabilitado hasta que el nombre coincida. Tras eliminar, refresca tabla."
+        - working: true
+          agent: "testing"
+          comment: "✅ TESTED: Delete empresa functionality working perfectly. (1) Each row has 3 buttons (edit, wialon, DELETE with correct testids), (2) Delete modal appears with warning list, (3) Confirmation input requires exact empresa name, (4) Delete button disabled with wrong name, enabled with correct name, (5) Empresa removed from table after deletion. Cascade delete working (TEST EMPRESA deleted successfully). NO ISSUES."
 
 metadata:
   created_by: "main_agent"
@@ -200,6 +268,10 @@ agent_communication:
       message: "✅ FASE 2 BACKEND TESTING COMPLETE - ALL 6 TEST CASES PASSED (6/6). Comprehensive testing performed: (1) GET /auth/me includes subsidio as 4th service key for all user types (admin_enered has all 4=true, client users have subsidio key with correct boolean values), (2) PUT /admin/empresas/{empresa}/servicios accepts and persists subsidio flag, normalizes partial payloads correctly, (3) Backfill verification confirmed - all 4 empresas have servicios.subsidio key, backfill runs idempotently on startup (scanned: 4, updated: 0), (4) GET /api/wialon/sid endpoint working perfectly - Lima user returns 200 with sid (32 chars), iframe_url (hosting.wialon.us), total_unidades=61, all error cases verified (403 for no gps, 400 for admin_enered, 401 for no token), (5) iframe_url correctly transformed from hst-api to hosting domain, (6) Regression Phase 1 features working - manual consumption upload, token masking, wialon config updates. Real Wialon integration verified with production token. NO CRITICAL ISSUES. Backend ready for production."
     - agent: "testing"
       message: "✅ FASE 2 FRONTEND TESTING COMPLETE - ALL TESTS PASSED (3/3 tasks). End-to-end validation performed on Monitoreo module: (1) Layout sidebar filtering: Monitoreo appears for users with servicios.gps=true and admin_enered, correctly hidden for users without GPS. (2) Monitoreo page with Wialon iframe: administrador@lima.com successfully loads page with empresa header, 61 units badge, iframe with correct hosting.wialon.us URL and sid parameter, Refrescar and Abrir en pestaña buttons functional. (3) ModuloBloqueado screen: administrador@andina.com (no GPS) correctly shows blocked module message. (4) Admin view: admin@enered.com sees empresa selector dropdown with TRANSPORTES LIMA SAC, iframe loads with correct data. All testids present and working. Real Wialon integration confirmed. IMPORTANT NOTE: Testing performed from https://senior-devops-suite.preview.emergentagent.com (CORS configured correctly). The URL https://b6ce8693-5c7b-4be3-9e96-4224aa9ffb28.preview.emergentagent.com mentioned in review_request has CORS issues - backend only allows localhost:3000 in CORS_ORIGINS. For production deployment, ensure CORS_ORIGIN_REGEX is set to allow preview URLs or add specific frontend URL to CORS_ORIGINS. NO CRITICAL CODE ISSUES - only deployment configuration note."
+    - agent: "main"
+      message: "BUG FIX: Wialon iframe bloqueado por X-Frame-Options. Solución aplicada: (a) Reemplazado iframe Wialon SID por OpenStreetMap embed con markers + (b) Nueva API GET /api/wialon/units que retorna lista de unidades con última posición desde Wialon API + (c) Panel lateral con lista de unidades (nombre, timestamp, velocidad, estado GPS). También agregado botón eliminar empresa en /admin/empresas con modal de confirmación y cascada de delete (empresas_config, users, consumptions, invoices, qr_codes, subsidio collections). Necesito: (1) Validar Monitoreo con administrador@lima.com muestra mapa OSM + lista de unidades; (2) Validar admin selector empresa + mapa carga; (3) Validar delete empresa con confirmación y cascada."
+    - agent: "testing"
+      message: "✅ BUG FIX TESTING COMPLETE - ALL 3 TESTS PASSED (3/3). Wialon X-Frame-Options issue RESOLVED. (1) Monitoreo con administrador@lima.com: ✓ Page loads with 2-column layout (MAP + PANEL), ✓ Map iframe points to openstreetmap.org (NOT hosting.wialon), ✓ Header shows '61 unidades · 59 con GPS activo', ✓ Units panel lists 61 units with data-testid='unit-row-{id}', ✓ First unit has visible name (ADA772), ✓ Wialon API responds within 15s. (2) Admin selector: ✓ admin@enered.com sees empresa selector (data-testid='wialon-empresa-select') with TRANSPORTES LIMA SAC option, ✓ Selecting empresa loads map + 61 units, ✓ Map points to OpenStreetMap. (3) Delete empresa: ✓ /admin/empresas shows 3 buttons per row (edit, wialon, DELETE with correct testids), ✓ Delete modal appears (data-testid='modal-delete-empresa') with warning list, ✓ Confirmation input requires exact empresa name, ✓ Delete button disabled with wrong name, enabled with correct name, ✓ Empresa removed from table after deletion, ✓ Cascade delete working (TEST EMPRESA deleted successfully). NO CRITICAL ISSUES. OpenStreetMap integration working perfectly. Real Wialon API integration confirmed (61 units detected). All testids present and functional."
 
 backend:
   - task: "Modelo Servicios por empresa + Fernet encryption Wialon token"

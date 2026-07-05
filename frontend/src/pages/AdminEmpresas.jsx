@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Building2, Server, Fuel, MapPin, ShieldCheck, KeyRound,
-  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw
+  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw, AlertTriangle
 } from "lucide-react";
 
 const SERVICE_META = {
@@ -18,6 +18,7 @@ export default function AdminEmpresas() {
   const [loading, setLoading] = useState(true);
   const [editEmpresa, setEditEmpresa] = useState(null);   // servicios modal
   const [wialonEmpresa, setWialonEmpresa] = useState(null); // wialon modal
+  const [deleteEmpresa, setDeleteEmpresa] = useState(null); // delete confirm modal
 
   async function load() {
     setLoading(true);
@@ -101,6 +102,9 @@ export default function AdminEmpresas() {
                       <button onClick={() => setWialonEmpresa(r)} style={btn.iconWialon} title="Configurar Wialon" data-testid={`btn-wialon-${r.empresa}`}>
                         <KeyRound style={{ width: 14, height: 14 }} />
                       </button>
+                      <button onClick={() => setDeleteEmpresa(r)} style={btn.iconDelete} title="Eliminar empresa" data-testid={`btn-delete-${r.empresa}`}>
+                        <Trash2 style={{ width: 14, height: 14 }} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -124,7 +128,92 @@ export default function AdminEmpresas() {
           onSaved={() => { setWialonEmpresa(null); load(); }}
         />
       )}
+      {deleteEmpresa && (
+        <DeleteModal
+          empresa={deleteEmpresa}
+          onClose={() => setDeleteEmpresa(null)}
+          onDeleted={() => { setDeleteEmpresa(null); load(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Delete Modal ────────────────────────────────────────────────────────────
+function DeleteModal({ empresa, onClose, onDeleted }) {
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const canDelete = confirmText.trim() === empresa.empresa;
+
+  async function doDelete() {
+    if (!canDelete) return;
+    setDeleting(true);
+    try {
+      const { data } = await api.delete(`/admin/empresas/${encodeURIComponent(empresa.empresa)}`);
+      const total = Object.values(data.deleted || {}).reduce((a,b) => a+b, 0);
+      toast.success(`Empresa eliminada · ${total} registros borrados en cascada`);
+      onDeleted();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Error al eliminar");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} testid="modal-delete-empresa">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", color: "#DC2626", textTransform: "uppercase" }}>Zona peligrosa</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>Eliminar empresa</div>
+        </div>
+        <button onClick={onClose} style={btn.close}><X style={{ width: 22, height: 22 }} /></button>
+      </div>
+
+      <div style={{ padding: "16px 18px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, color: "#991B1B", fontSize: 14, marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <AlertTriangle style={{ width: 20, height: 20, flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Esta acción es irreversible.</div>
+            <div>Se eliminarán TODOS los datos relacionados con <strong>{empresa.empresa}</strong>:</div>
+            <ul style={{ margin: "8px 0 0 20px", padding: 0, fontSize: 13 }}>
+              <li>Configuración de servicios y token Wialon</li>
+              <li>Todos los usuarios de la empresa</li>
+              <li>Consumos de combustible + facturas</li>
+              <li>QR de facturas y códigos</li>
+              <li>Expedientes de subsidio (flota, documentos, cuentas bancarias, declaraciones)</li>
+              <li>Consumos DU 004 asociados a sus usuarios</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label style={{ display: "block", fontSize: 13, color: "#374151", fontWeight: 500, marginBottom: 6 }}>
+          Para confirmar, escribe exactamente el nombre de la empresa: <br/>
+          <code style={{ background: "#F3F4F6", padding: "2px 8px", borderRadius: 4, fontSize: 13, marginTop: 6, display: "inline-block" }}>{empresa.empresa}</code>
+        </label>
+        <input
+          value={confirmText}
+          onChange={(e) => setConfirmText(e.target.value)}
+          data-testid="delete-confirm-input"
+          placeholder="Escribe el nombre exacto"
+          style={{ width: "100%", height: 42, border: `1px solid ${canDelete ? "#DC2626" : "#E5E7EB"}`, borderRadius: 10, padding: "0 14px", fontSize: 14, background: "#fff", outline: "none", boxSizing: "border-box" }}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+        <button onClick={onClose} style={btn.secondary}>Cancelar</button>
+        <button onClick={doDelete} disabled={!canDelete || deleting} data-testid="btn-confirm-delete"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 20px", height: 40, border: "none", borderRadius: 10,
+            background: (!canDelete || deleting) ? "#FCA5A5" : "#DC2626", color: "#fff", fontSize: 14, fontWeight: 600,
+            cursor: (!canDelete || deleting) ? "not-allowed" : "pointer",
+            boxShadow: canDelete ? "0 4px 12px rgba(220,38,38,.25)" : "none" }}>
+          {deleting ? <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} /> : <Trash2 style={{ width: 16, height: 16 }} />}
+          Eliminar definitivamente
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -399,6 +488,7 @@ const btn = {
   close: { background: "none", border: "none", cursor: "pointer", color: "#6b7280" },
   iconEdit: { width: 32, height: 32, borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#8B3DFF" },
   iconWialon: { width: 32, height: 32, borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#3B82F6" },
+  iconDelete: { width: 32, height: 32, borderRadius: 8, border: "1px solid #FCA5A5", background: "#FEF2F2", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#DC2626" },
 };
 
 const pill = {
