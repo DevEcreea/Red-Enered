@@ -50,7 +50,7 @@ const ADMIN_ITEMS = [
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
   "/analitica": "Analytics BI",
-  "/centro-monitoreo": "Monitoreo",
+  "/monitoreo": "Monitoreo",
   "/flotas": "Combustible",
   "/facturacion": "Cuenta",
   "/gestion-gastos": "Gestión Gastos",

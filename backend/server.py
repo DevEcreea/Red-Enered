@@ -2663,21 +2663,24 @@ async def infracciones_dashboard(req: Request):
 
 # ---------- Wialon: SID on-demand para iframe embed ----------
 @api.get("/wialon/sid")
-async def get_wialon_sid(user: dict = Depends(get_current_user)):
+async def get_wialon_sid(empresa: Optional[str] = None, user: dict = Depends(get_current_user)):
     """
-    Genera un session_id (sid) fresco de Wialon usando el token guardado de la empresa.
-    El frontend usa este sid en el iframe de hosting.wialon para auto-login.
-    Solo si servicios.gps=true y hay token configurado.
+    Genera un session_id (sid) fresco de Wialon usando el token guardado.
+    - Usuario cliente: usa el token de SU empresa (ignora ?empresa=).
+    - admin_enered: debe pasar ?empresa=NOMBRE para elegir qué cliente monitorear.
     """
     if user.get("role") == "admin_enered":
-        raise HTTPException(status_code=400, detail="admin_enered no está asociado a una empresa con Wialon")
-    empresa = user.get("empresa")
-    if not empresa:
-        raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
-    info = await _svc.get_empresa_servicios(db, empresa)
+        if not empresa:
+            raise HTTPException(status_code=400, detail="admin_enered debe indicar ?empresa=<nombre>")
+        target_empresa = empresa
+    else:
+        target_empresa = user.get("empresa")
+        if not target_empresa:
+            raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
+    info = await _svc.get_empresa_servicios(db, target_empresa)
     if not info["servicios"].get("gps"):
-        raise HTTPException(status_code=403, detail="Servicio GPS no habilitado para esta empresa")
-    cfg = await _svc.get_empresa_wialon_config(db, empresa)
+        raise HTTPException(status_code=403, detail=f"Servicio GPS no habilitado para {target_empresa}")
+    cfg = await _svc.get_empresa_wialon_config(db, target_empresa)
     if not cfg:
         raise HTTPException(status_code=404, detail="Token Wialon no configurado. Contacta al administrador de ENERED.")
     result = await _svc.test_wialon_connection(cfg["token"], cfg["host"])
@@ -2692,10 +2695,10 @@ async def get_wialon_sid(user: dict = Depends(get_current_user)):
         sid = data.get("eid") if isinstance(data, dict) else None
     if not sid:
         raise HTTPException(status_code=502, detail="No se pudo generar sesión Wialon")
-    # base_url para iframe: transformar hst-api.wialon.X → hosting.wialon.X (portal web)
     api_base = (result.get("base_url") or f"https://{host}").rstrip("/")
     ui_base = api_base.replace("hst-api.", "hosting.").replace("http://", "https://")
     return {
+        "empresa": target_empresa,
         "sid": sid,
         "host": host,
         "base_url": ui_base,
@@ -2703,6 +2706,18 @@ async def get_wialon_sid(user: dict = Depends(get_current_user)):
         "total_unidades": result.get("total_unidades", 0),
         "user": result.get("user", ""),
     }
+
+
+# ---------- Wialon: listar empresas con GPS configurado (para selector admin) ----------
+@api.get("/wialon/empresas")
+async def list_empresas_with_wialon(user: dict = Depends(require_roles("admin_enered"))):
+    """Lista empresas con servicios.gps=true Y token Wialon guardado — usado por selector de admin."""
+    out = []
+    async for cfg in db.empresas_config.find({}, {"_id": 0}):
+        serv = _svc._normalize_servicios(cfg.get("servicios"))
+        if serv.get("gps") and (cfg.get("wialon") or {}).get("token"):
+            out.append({"empresa": cfg["empresa"], "tipo_cliente": cfg.get("tipo_cliente", "enered")})
+    return out
 
 
 app.include_router(api)
