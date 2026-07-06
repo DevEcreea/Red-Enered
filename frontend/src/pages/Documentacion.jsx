@@ -591,6 +591,7 @@ export default function Documentacion() {
               <button onClick={handleSaveDoc} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 16px",fontSize:13,fontWeight:600,color:"#fff",background:"#8B3DFF",border:"none",borderRadius:8,cursor:"pointer" }}>Guardar</button>
             </div>
           </div>
+          <div style={{ overflowY:"auto",padding:24 }}>
             {/* Drop zone */}
             <div style={{ fontSize:13,fontWeight:600,color:"#374151",marginBottom:10 }}>Adjuntos</div>
             <input
