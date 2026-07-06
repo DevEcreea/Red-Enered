@@ -3395,6 +3395,7 @@ SUB_CAT_MAP = {
     "resolucion_autorizacion": ("Empresa", "Resolución de autorización"),
     "dni_representante": ("Empresa", "DNI del representante"),
     "tarjeta_propiedad": ("Vehículos", "Tarjeta de propiedad"),
+    "tarjeta_habilitacion": ("Vehículos", "Tarjeta de habilitación"),
     "tarjeta_circulacion": ("Vehículos", "Tarjeta de circulación"),
     "soat": ("Vehículos", "SOAT"),
     "revision_tecnica": ("Vehículos", "Revisión Técnica"),
@@ -3427,6 +3428,20 @@ async def list_documents(
         sub_q["user_id"] = {"$in": uids}
     subsidio_docs = await db.subsidio_documents.find(sub_q).to_list(1000)
 
+    # Load verified dates from db.subsidio_vehicles
+    veh_map = {}
+    if subsidio_docs:
+        uids = list(set(sd.get("user_id") for sd in subsidio_docs if sd.get("user_id")))
+        plates = list(set(sd.get("placa").upper().strip() for sd in subsidio_docs if sd.get("placa")))
+        if uids and plates:
+            v_cursor = db.subsidio_vehicles.find({
+                "user_id": {"$in": uids},
+                "placa": {"$in": plates}
+            }, {"_id": 0, "user_id": 1, "placa": 1, "vigente_desde": 1, "vigente_hasta": 1})
+            async for v in v_cursor:
+                key = (v.get("user_id"), v.get("placa").upper().strip() if v.get("placa") else "")
+                veh_map[key] = v
+
     results = []
 
     # Map manual documents
@@ -3455,7 +3470,66 @@ async def list_documents(
         cat = sd.get("categoria") or sd.get("category")
         tipo, doc_name = SUB_CAT_MAP.get(cat, ("Otros", cat or "Documento"))
         
+        placa = sd.get("placa").upper().strip() if sd.get("placa") else ""
+        emi_date = "—"
+        ven_date = "—"
+        atr_str = "—"
         est = "Vigente"
+
+        # If it's a fleet document with a plate, read dates from manual validation
+        if placa and cat in ["tarjeta_habilitacion", "tarjeta_propiedad"]:
+            v_info = veh_map.get((sd.get("user_id"), placa))
+            if v_info:
+                raw_emi = v_info.get("vigente_desde")
+                raw_ven = v_info.get("vigente_hasta")
+
+                if raw_emi and raw_emi != "—":
+                    try:
+                        if "-" in raw_emi:
+                            parts = raw_emi.split("-")
+                            if len(parts) == 3:
+                                emi_date = f"{parts[2]}/{parts[1]}/{parts[0][2:]}"
+                            else:
+                                emi_date = raw_emi
+                        else:
+                            emi_date = raw_emi
+                    except Exception:
+                        emi_date = raw_emi
+
+                if raw_ven and raw_ven != "—":
+                    try:
+                        if "-" in raw_ven:
+                            parts = raw_ven.split("-")
+                            if len(parts) == 3:
+                                ven_date = f"{parts[2]}/{parts[1]}/{parts[0][2:]}"
+                            else:
+                                ven_date = raw_ven
+                        else:
+                            ven_date = raw_ven
+                    except Exception:
+                        ven_date = raw_ven
+
+                # Calculate expiration status if vigente_hasta is set
+                if raw_ven and raw_ven != "—":
+                    try:
+                        if "-" in raw_ven:
+                            y, m, d = map(int, raw_ven.split("-")[:3])
+                        else:
+                            d, m, y = map(int, raw_ven.split("/")[:3])
+                            if y < 100:
+                                y += 2000
+                        exp_dt = datetime(y, m, d, tzinfo=timezone.utc)
+                        now_dt = datetime.now(timezone.utc)
+                        diff_days = (exp_dt - now_dt).days
+                        if diff_days < 0:
+                            est = "Vencido"
+                            atr_str = f"{abs(diff_days)} días"
+                        elif diff_days <= 30:
+                            est = "Próximo"
+                            atr_str = f"{diff_days} días"
+                    except Exception:
+                        pass
+
         if sd.get("status") == "rechazado":
             est = "Vencido"
         elif sd.get("archived"):
@@ -3476,13 +3550,13 @@ async def list_documents(
             "doc": doc_name,
             "por": "Cliente (Subsidio)",
             "el": el_date,
-            "emi": "—",
-            "ven": "—",
-            "atr": "—",
-            "veh": 1 if sd.get("placa") else 0,
+            "emi": emi_date,
+            "ven": ven_date,
+            "atr": atr_str,
+            "veh": 1 if placa else 0,
             "grp": 0,
             "all": 0,
-            "placa": sd.get("placa") or "",
+            "placa": placa,
             "archived": 1 if sd.get("archived") else 0,
             "est": est,
             "filename": sd.get("filename") or "",
