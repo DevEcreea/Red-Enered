@@ -3702,7 +3702,7 @@ async def download_document(
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
-@api.get("/temp-clean-db-unique-992")
+@app.get("/api/temp-clean-db-unique-992")
 async def temp_clean_db_unique():
     empresa = "CONTRATA DE TRANSPORTE RAPESA S.A.C"
     res1 = await db.consumptions.delete_many({"EMPRESA": empresa})
