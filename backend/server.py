@@ -3735,6 +3735,56 @@ async def download_document(
         )
 
 
+@app.get("/api/temp-backfill-invoices-881")
+async def temp_backfill_invoices():
+    """Temporary: sync existing confirmed subsidio records to db.invoices."""
+    from datetime import timedelta as _td
+    confirmed = await db.consumos_subsidio.find({"status": "confirmed"}).to_list(10000)
+    created = 0
+    for d in confirmed:
+        n_doc = (d.get("numero_documento") or "").upper().strip()
+        empresa = d.get("empresa") or ""
+        if not n_doc or not empresa:
+            continue
+        existing = await db.invoices.find_one({"empresa": empresa, "n_doc": n_doc})
+        if existing:
+            continue
+        fecha_str = (d.get("fecha") or "")[:10]
+        f_venc = fecha_str
+        try:
+            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+            f_venc = (f_dt + _td(days=30)).date().isoformat()
+        except Exception:
+            try:
+                f_dt = datetime.strptime(fecha_str, "%d/%m/%Y")
+                fecha_str = f_dt.date().isoformat()
+                f_venc = (f_dt + _td(days=30)).date().isoformat()
+            except Exception:
+                pass
+        inv_doc = {
+            "id": d.get("id") or str(uuid.uuid4()),
+            "empresa": empresa,
+            "n_doc": n_doc,
+            "tipo_doc": "factura",
+            "producto": d.get("producto") or "DIESEL B5 S-50",
+            "f_emision": fecha_str,
+            "f_vencimiento": f_venc,
+            "moneda": "PEN",
+            "monto_total": float(d.get("importe_total") or 0),
+            "saldo": float(d.get("importe_total") or 0),
+            "estado": "pendiente",
+            "atraso_dias": 0,
+            "pdf_filename": d.get("factura_filename"),
+            "xml_filename": None,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            "uploaded_by": "backfill",
+            "created_via": "subsidio_backfill",
+        }
+        await db.invoices.insert_one(inv_doc)
+        created += 1
+    return {"ok": True, "backfilled": created}
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
