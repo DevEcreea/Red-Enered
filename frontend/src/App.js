@@ -67,25 +67,18 @@ function Gated({ children, titulo, roles }) {
   );
 }
 
-/** Render distinto del Dashboard según rol. */
+/** Render distinto del Dashboard según rol y servicios. */
 function DashboardRouter() {
   const { user } = useAuth();
-  if (user?.role === "cliente_subsidio") return <DashboardSubsidioView />;
+  // cliente_subsidio (o empresa con servicios.subsidio) sin combustible ni gps → default = subsidio
+  if (user?.role === "cliente_subsidio" && !user?.servicios?.combustible && !user?.servicios?.gps) {
+    return <DashboardSubsidioView />;
+  }
   return <Dashboard />;
 }
 
 /** Dashboard route: gateado para todos excepto cliente_subsidio (su dashboard es su vista principal). */
 function DashboardRoute() {
-  const { user } = useAuth();
-  if (user?.role === "cliente_subsidio") {
-    return (
-      <ProtectedRoute>
-        <Layout>
-          <DashboardSubsidioView />
-        </Layout>
-      </ProtectedRoute>
-    );
-  }
   return (
     <Gated titulo="Dashboard">
       <DashboardRouter />
@@ -103,8 +96,8 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
-          <Route path="/subsidio/documentos" element={<Shell roles={["cliente_subsidio"]}><SubsidioDocumentos /></Shell>} />
-          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
+          <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
+          <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           {/* Dashboard: router por rol; gateado para subsidio */}

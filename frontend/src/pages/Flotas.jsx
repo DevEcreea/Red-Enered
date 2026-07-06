@@ -7,7 +7,7 @@ import {
   FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
   ChevronDown, Download, Share2, Printer, Columns3, Upload,
   Filter, Calendar, User, Car, ArrowUpDown, Search, X,
-  CheckCircle2
+  CheckCircle2, Trash2
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -112,6 +112,39 @@ function FSel({ label, icon:Icon, grow, children }) {
 }
 
 // ═════════════════════════════════ TABS ══════════════════════════════════════
+
+function RowActions({ row, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={()=>setOpen(v=>!v)} data-testid={`row-actions-${row.id||row.PLACA}`}
+        style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}>
+        <MoreHorizontal style={{ width:15,height:15 }}/>
+      </button>
+      {open && (
+        <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
+          {(row.factura_key || row._origen==="manual") && (
+            <a href={`${process.env.REACT_APP_BACKEND_URL||""}/api/consumptions/${row.id}/factura`} target="_blank" rel="noreferrer" onClick={()=>setOpen(false)}
+              style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6" }}>
+              <FileText style={{ width:14,height:14,color:"#8B3DFF" }}/> Ver factura
+            </a>
+          )}
+          <button onClick={()=>{setOpen(false); onDelete(row);}} data-testid={`row-delete-${row.id||row.PLACA}`}
+            style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
+            <Trash2 style={{ width:14,height:14 }}/> Eliminar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
 function TabResumen({ rows, totals, services, onOpenNuevaCarga }) {
@@ -535,13 +568,14 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
     setSaving(true);
     try {
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => { if (v !== "" && v !== null) fd.append(k, v); });
+      Object.entries(form).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) fd.append(k, v); });
       if (factura) fd.append("factura", factura);
-      await api.post("/consumptions/manual", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      onSaved?.();
+      const { data } = await api.post("/consumptions/manual", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      onSaved?.(data?.consumo);
       onClose();
     } catch (e) {
-      setErr(e.response?.data?.detail || "Error al guardar la carga");
+      console.error("Error al guardar carga manual:", e);
+      setErr(e.response?.data?.detail || e.message || "Error al guardar la carga");
     } finally {
       setSaving(false);
     }
@@ -661,7 +695,7 @@ export default function Flotas() {
       {activeTab==="Control" && <TabControl onToast={showToast}/>}
       {activeTab==="QR"      && <TabQR onToast={showToast}/>}
 
-      <ModalNuevaCarga open={nuevaCargaOpen} onClose={()=>setNuevaCargaOpen(false)} onSaved={()=>{ reload(); showToast("Carga registrada correctamente"); }}/>
+      <ModalNuevaCarga open={nuevaCargaOpen} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo)=>{ if (newConsumo) setRows(prev=>[newConsumo,...prev]); reload(); showToast("Carga registrada correctamente"); }}/>
       <Toast msg={toast}/>
 
       <div style={{ textAlign:"center",color:"#9ca3af",fontSize:11,padding:"26px 0 10px" }}>

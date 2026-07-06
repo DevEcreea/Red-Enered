@@ -22,6 +22,7 @@ const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contab
 const MENU = [
   { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
+  { to: "/dashboard-subsidio", label: "Panel Subsidio", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
   { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
   { to: "/monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
   { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
@@ -231,6 +232,8 @@ export default function Layout({ children }) {
       if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
       return false;
     }
+    // Panel Subsidio: solo si role=cliente_subsidio O servicios.subsidio=true (admin siempre)
+    if (i.requiresSubsidio && user.role !== "admin_enered" && user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
     // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
     if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
     return true;

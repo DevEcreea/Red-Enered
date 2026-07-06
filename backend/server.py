@@ -1491,25 +1491,48 @@ async def create_manual_consumption(
     }
     await db.consumptions.insert_one(doc)
 
-    # Reflejar también en /api/invoices si viene numero_factura para que aparezca en Facturación
-    if numero_factura:
-        await db.invoices.insert_one({
-            "id": str(uuid.uuid4()),
-            "empresa": empresa,
-            "numero": numero_factura,
-            "fecha_emision": fecha,
-            "fecha_vencimiento": fecha,
-            "monto": float(importe_total),
-            "saldo": float(importe_total),
-            "estado": "pendiente",
-            "pdf_url": f"/api/consumptions/{consumo_id}/factura" if factura_key else None,
-            "origen": "manual",
-            "consumo_id": consumo_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+    # SIEMPRE crear la factura en /api/invoices para que aparezca en Facturación
+    inv_numero = numero_factura or f"MAN-{consumo_id[:8]}"
+    await db.invoices.insert_one({
+        "id": str(uuid.uuid4()),
+        "empresa": empresa,
+        "numero": inv_numero,
+        "fecha_emision": fecha,
+        "fecha_vencimiento": fecha,
+        "monto": float(importe_total),
+        "saldo": float(importe_total),
+        "estado": "pendiente",
+        "pdf_url": f"/api/consumptions/{consumo_id}/factura" if factura_key else None,
+        "origen": "manual",
+        "consumo_id": consumo_id,
+        "placa": doc["PLACA"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
 
     doc.pop("_id", None)
-    return {"ok": True, "consumo": doc}
+    return {"ok": True, "consumo": doc, "invoice_numero": inv_numero}
+
+
+# ---------- Delete individual consumption (tenant-checked) ----------
+@api.delete("/consumptions/{consumo_id}")
+async def delete_consumption(consumo_id: str, user: dict = Depends(get_current_user)):
+    """Elimina un consumo individual + su invoice + su PDF factura si existe."""
+    doc = await db.consumptions.find_one({"id": consumo_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Consumo no encontrado")
+    if user["role"] != "admin_enered" and doc.get("EMPRESA") != user.get("empresa"):
+        raise HTTPException(status_code=403, detail="Sin acceso")
+    # borrar PDF factura si existe
+    try:
+        from storage import delete_object as _delobj
+        if doc.get("factura_key"):
+            _delobj(doc["factura_key"])
+    except Exception:
+        pass
+    # borrar invoice asociada si es manual
+    await db.invoices.delete_many({"consumo_id": consumo_id})
+    r = await db.consumptions.delete_one({"id": consumo_id})
+    return {"ok": True, "deleted": r.deleted_count}
 
 
 @api.get("/consumptions/{consumo_id}/factura")
