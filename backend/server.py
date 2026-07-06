@@ -845,7 +845,7 @@ async def dashboard_overview(
     rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
 
     # Fetch subsidio consumptions
-    sub_q = {}
+    sub_q = {"status": "confirmed"}
     if target_empresa:
         sub_q["empresa"] = target_empresa
     elif user["role"] != "admin_enered":
@@ -1101,7 +1101,7 @@ async def dashboard_kpis(
     rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
 
     # Fetch subsidio consumptions
-    sub_q = {}
+    sub_q = {"status": "confirmed"}
     if empresa and user["role"] == "admin_enered":
         sub_q["empresa"] = empresa
     elif user["role"] != "admin_enered":
