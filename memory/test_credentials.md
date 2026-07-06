@@ -3,11 +3,16 @@
 ## Local development (current Emergent env)
 - **Admin**: `admin@enered.com` / `admin123`
 - **Demo users** (password = `demo123`):
-  - `administrador@lima.com` (rol: administrador, empresa: TRANSPORTES LIMA SAC)
+  - `administrador@lima.com` (rol: administrador, empresa: TRANSPORTES LIMA SAC) → servicios: **combustible + gps** (con token Wialon real configurado)
   - `logistica@lima.com` (rol: logistica, empresa: TRANSPORTES LIMA SAC)
   - `contabilidad@lima.com` (rol: contabilidad, empresa: TRANSPORTES LIMA SAC)
-  - `administrador@andina.com` (rol: administrador, empresa: LOGISTICA ANDINA SA)
-  - `administrador@cargo.com` (rol: administrador, empresa: CARGO PERU EIRL)
+  - `administrador@andina.com` (rol: administrador, empresa: LOGISTICA ANDINA SA) → servicios: **solo plataforma** (para probar carga manual sin ahorro)
+  - `administrador@cargo.com` (rol: administrador, empresa: CARGO PERU EIRL) → servicios: defaults (combustible=true, gps=false)
+
+## Servicios por empresa (nuevo — Jul 2026)
+Se agregó el campo `servicios={plataforma, combustible, gps}` + `tipo_cliente={enered|subsidio}` en `empresas_config`.
+Configurable desde `/admin/empresas` (solo `admin_enered`).
+El token Wialon se encripta con Fernet derivado de `JWT_SECRET`.
 
 ## Subsidio DU 004-2026 (cliente_subsidio)
 - **Cliente subsidio (expediente sin completar)**: `cliente.subsidio@test.com` / `subsidio123`

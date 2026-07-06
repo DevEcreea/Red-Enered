@@ -34,6 +34,7 @@ import Monitoreo from "./pages/Monitoreo";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
+import AdminEmpresas from "./pages/AdminEmpresas";
 import Flotas from "./pages/Flotas";
 import Documentacion from "./pages/Documentacion";
 import Mantenimiento from "./pages/Mantenimiento";
@@ -66,25 +67,18 @@ function Gated({ children, titulo, roles }) {
   );
 }
 
-/** Render distinto del Dashboard según rol. */
+/** Render distinto del Dashboard según rol y servicios. */
 function DashboardRouter() {
   const { user } = useAuth();
-  if (user?.role === "cliente_subsidio") return <DashboardSubsidioView />;
+  // cliente_subsidio (o empresa con servicios.subsidio) sin combustible ni gps → default = subsidio
+  if (user?.role === "cliente_subsidio" && !user?.servicios?.combustible && !user?.servicios?.gps) {
+    return <DashboardSubsidioView />;
+  }
   return <Dashboard />;
 }
 
 /** Dashboard route: gateado para todos excepto cliente_subsidio (su dashboard es su vista principal). */
 function DashboardRoute() {
-  const { user } = useAuth();
-  if (user?.role === "cliente_subsidio") {
-    return (
-      <ProtectedRoute>
-        <Layout>
-          <DashboardSubsidioView />
-        </Layout>
-      </ProtectedRoute>
-    );
-  }
   return (
     <Gated titulo="Dashboard">
       <DashboardRouter />
@@ -102,8 +96,8 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
-          <Route path="/subsidio/documentos" element={<Shell roles={["cliente_subsidio"]}><SubsidioDocumentos /></Shell>} />
-          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
+          <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
+          <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           {/* Dashboard: router por rol; gateado para subsidio */}
@@ -140,6 +134,7 @@ function App() {
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
           <Route path="/admin/qr" element={<Shell roles={["admin_enered"]}><AdminQRUpload /></Shell>} />
+          <Route path="/admin/empresas" element={<Shell roles={["admin_enered"]}><AdminEmpresas /></Shell>} />
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

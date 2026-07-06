@@ -22,6 +22,7 @@ const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contab
 const MENU = [
   { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
   { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
+  { to: "/dashboard-subsidio", label: "Panel Subsidio", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
   { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
   { to: "/monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
   { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
@@ -41,6 +42,7 @@ const MENU = [
 
 const ADMIN_ITEMS = [
   { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
+  { to: "/admin/empresas", label: "Empresas & Servicios", icon: FolderCheck, testid: "nav-empresas" },
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload" },
   { to: "/admin/qr", label: "QR", icon: QrCode, testid: "nav-qr-admin" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin" },
@@ -49,7 +51,7 @@ const ADMIN_ITEMS = [
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
   "/analitica": "Analytics BI",
-  "/centro-monitoreo": "Monitoreo",
+  "/monitoreo": "Monitoreo",
   "/flotas": "Combustible",
   "/facturacion": "Cuenta",
   "/gestion-gastos": "Gestión Gastos",
@@ -64,6 +66,7 @@ const ROUTE_TITLES = {
   "/documentacion": "Documentación",
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
+  "/admin/empresas": "Empresas & Servicios",
   "/admin/subsidio": "Subsidio · Expedientes",
   "/admin/upload": "Datos",
   "/admin/qr": "QR",
@@ -223,7 +226,18 @@ export default function Layout({ children }) {
 
   if (!user) return null;
 
-  const items = MENU.filter((i) => i.roles.includes(user.role));
+  const items = MENU.filter((i) => {
+    if (!i.roles.includes(user.role)) {
+      // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
+      if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
+      return false;
+    }
+    // Panel Subsidio: solo si role=cliente_subsidio O servicios.subsidio=true (admin siempre)
+    if (i.requiresSubsidio && user.role !== "admin_enered" && user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
+    // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
+    if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
+    return true;
+  });
   const isAdmin = user.role === "admin_enered";
 
   const handleLogout = async () => {
