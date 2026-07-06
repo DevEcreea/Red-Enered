@@ -338,7 +338,7 @@ function LockedMetricCard({ icon: Icon, title, value, unit, deltaText, deltaPosi
   );
 }
 
-function MetricDemoCard({ icon: Icon, title, value, unit, deltaText, deltaPositive = true, badge, accentColor = "neutral" }) {
+function MetricDemoCard({ icon: Icon, title, value, unit, deltaText, deltaPositive = true, badge, accentColor = "neutral", isDemo = true }) {
   const isAccent = accentColor === "brand";
   return (
     <div
@@ -359,9 +359,11 @@ function MetricDemoCard({ icon: Icon, title, value, unit, deltaText, deltaPositi
           <TrendingUp className={`w-3.5 h-3.5 ${!deltaPositive && "rotate-180"}`} />
           {deltaText}
         </div>
-        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[9px] font-black uppercase tracking-wider">
-          Demo
-        </span>
+        {isDemo && (
+          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[9px] font-black uppercase tracking-wider">
+            Demo
+          </span>
+        )}
       </div>
     </div>
   );
@@ -541,7 +543,13 @@ export default function Dashboard() {
     );
   }
 
-  const { linea_credito, ahorro, consumo, promedios, cargas, unidades_contratadas, red_estaciones, ultima_sincronizacion } = overview;
+  const {
+    linea_credito, ahorro, consumo, promedios, cargas, unidades_contratadas,
+    red_estaciones, ultima_sincronizacion, servicios, unidades_activas,
+    total_vehicles, cargas_semana, cargas_invalidas, rendimiento, costo_km, und_con_gps
+  } = overview;
+
+  const services = servicios || user?.servicios || { plataforma: true, combustible: true, gps: false };
 
   // KPI calculations
   const alertasCriticas = alerts.filter((a) => a.nivel === "red").length;
@@ -617,34 +625,40 @@ export default function Dashboard() {
           iconColor="text-rose-500"
           testid="kpi-alertas"
         />
-        <LockedKpiCard
+        <MiniKpiCard
           icon={Truck}
           label="Unidades activas"
-          value="62/77"
-          subtitle="15 sin reporte GPS"
-          tooltip="Desbloquea análisis avanzados de uso y comportamiento del conductor para optimizar tu flota"
+          value={`${unidades_activas || 0}/${total_vehicles || 0}`}
+          subtitle={services.gps ? `${(total_vehicles || 0) - (unidades_activas || 0)} sin reporte GPS` : "Mapeado desde base"}
+          borderColor="border-brand"
+          valueColor="text-brand"
+          subtitleColor="text-brand-600"
+          iconColor="text-brand"
           testid="kpi-unidades-activas"
         />
-        <LockedKpiCard
+        <MiniKpiCard
           icon={Fuel}
           label="Cargas inválidas"
-          value="3"
-          subtitle="Posible fraude"
-          tooltip="Detecta cargas sospechosas y posibles fraudes en tiempo real para proteger tu flota"
+          value={formatNumber(cargas_invalidas || 0, 0)}
+          subtitle="Posible desvío"
+          borderColor="border-rose-400"
+          valueColor={(cargas_invalidas || 0) > 0 ? "text-rose-600" : "text-neutral-900"}
+          subtitleColor="text-neutral-500"
+          iconColor="text-rose-500"
           testid="kpi-cargas-invalidas"
         />
         <MiniKpiCard
           icon={CreditCard}
           label="Unidades habilitadas"
-          value={formatNumber(unidades_contratadas, 0)}
-          subtitle="consumo por tarjeta"
+          value={formatNumber(unidades_contratadas || 0, 0)}
+          subtitle={`${formatNumber(und_con_gps || 0, 0)} con GPS`}
           iconColor="text-neutral-500"
           testid="kpi-unidades-habilitadas"
         />
         <MiniKpiCard
           icon={Droplet}
           label="Cargas / semana"
-          value={formatNumber(cargas, 0)}
+          value={formatNumber(cargas_semana || 0, 0)}
           subtitle="esta semana"
           iconColor="text-cyan-500"
           testid="kpi-cargas"
@@ -687,22 +701,20 @@ export default function Dashboard() {
         <MetricDemoCard
           icon={Gauge}
           title="Rendimiento promedio"
-          value="8.4"
+          value={rendimiento > 0 ? formatNumber(rendimiento, 1) : "—"}
           unit="km/gal"
-          deltaText="+1.2 vs meta (7.2)"
+          deltaText={rendimiento > 0 ? "Calculado de cargas" : "Sin odómetros registrados"}
           deltaPositive={true}
+          isDemo={!services.gps}
         />
-        <LockedMetricCard
+        <MetricDemoCard
           icon={Activity}
           title="Costo por km · TCO"
-          value="S/ 1.68"
+          value={costo_km > 0 ? `S/ ${formatNumber(costo_km, 2)}` : "—"}
           unit="/km"
-          deltaText="-4.3% · meta S/ 1.60"
+          deltaText={costo_km > 0 ? "Calculado de cargas" : "Sin odómetros registrados"}
           deltaPositive={true}
-          badge="Métrica Maestra"
-          accentColor="brand"
-          buttonText="Optimizar flota"
-          tooltip="Calcula el costo total de operación por kilómetro, incluyendo combustible, mantenimiento, depreciación y seguros para tomar decisiones informadas de inversión"
+          isDemo={!services.gps}
         />
       </div>
 

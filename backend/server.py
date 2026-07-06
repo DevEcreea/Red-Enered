@@ -850,7 +850,6 @@ async def dashboard_overview(
 
     total_gal = sum(_f(r.get("CANTIDAD_GL")) for r in rows)
     total_gasto = sum(_f(r.get("IMPORTE_TOTAL")) for r in rows)
-    total_ahorro = sum(_f(r.get("AHORRO")) for r in rows)
     cargas = len(rows)
 
     # Precio promedio ponderado
@@ -860,7 +859,25 @@ async def dashboard_overview(
 
     ticket_prom = total_gasto / cargas if cargas else 0
     gal_por_carga = total_gal / cargas if cargas else 0
-    ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
+
+    # Ahorro calculation based on services
+    if target_empresa:
+        svc_info = await _svc.get_empresa_servicios(db, target_empresa)
+        has_comb = svc_info.get("servicios", {}).get("combustible", True)
+        if not has_comb:
+            total_ahorro = 0
+            ahorro_gl = 0
+        else:
+            total_ahorro = sum(_f(r.get("AHORRO")) for r in rows)
+            ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
+    else:
+        cursor = db.empresas_config.find({})
+        comb_companies = set()
+        async for c in cursor:
+            if c.get("servicios", {}).get("combustible", True):
+                comb_companies.add(c.get("empresa"))
+        total_ahorro = sum(_f(r.get("AHORRO")) for r in rows if r.get("EMPRESA") in comb_companies)
+        ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
 
     # Línea de crédito: utilizada = facturas pendientes/vencidas (saldo) + notas de despacho
     # (alineado con /api/account-state para mostrar los mismos valores que Estado de Cuenta)
@@ -886,16 +903,94 @@ async def dashboard_overview(
     # Unidades (placas únicas reales)
     placas_reales = len({r.get("PLACA") for r in rows if r.get("PLACA")})
 
+    # Cargas de la última semana (últimos 7 días)
+    from datetime import datetime, timedelta
+    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    cargas_semana = sum(1 for r in rows if r.get("FECHA") and r.get("FECHA") >= seven_days_ago)
+
+    # Cargas inválidas
+    cargas_invalidas = sum(
+        1 for r in rows
+        if not r.get("PLACA") or _f(r.get("CANTIDAD_GL")) <= 0 or _f(r.get("IMPORTE_TOTAL")) <= 0
+    )
+
+    # Unidades / Vehículos
+    veh_q = {}
+    if target_empresa:
+        veh_q["empresa"] = target_empresa
+    total_vehicles = await db.vehiculos.count_documents(veh_q)
+
+    # Active vehicles (OPERATIVO state)
+    veh_active_q = {"estado": "OPERATIVO"}
+    if target_empresa:
+        veh_active_q["empresa"] = target_empresa
+    unidades_activas = await db.vehiculos.count_documents(veh_active_q)
+
+    # Unidades con GPS
+    if target_empresa:
+        svc_info = await _svc.get_empresa_servicios(db, target_empresa)
+        if svc_info.get("servicios", {}).get("gps"):
+            und_con_gps = total_vehicles
+        else:
+            und_con_gps = 0
+    else:
+        cursor = db.empresas_config.find({})
+        gps_companies = []
+        async for c in cursor:
+            if c.get("servicios", {}).get("gps"):
+                gps_companies.append(c.get("empresa"))
+        und_con_gps = await db.vehiculos.count_documents({"empresa": {"$in": gps_companies}})
+
+    # Rendimiento promedio (km/gal) y Costo por km (TCO)
+    by_placa_km = {}
+    for r in rows:
+        p = r.get("PLACA")
+        if not p: continue
+        km = _f(r.get("KILOMETRAJE"))
+        gl = _f(r.get("CANTIDAD_GL"))
+        if km > 0:
+            d = by_placa_km.setdefault(p, {"kms": [], "gal": 0})
+            d["kms"].append(km)
+            d["gal"] += gl
+            
+    total_dist = 0
+    total_gal_km = 0
+    for p, d in by_placa_km.items():
+        if len(d["kms"]) >= 2:
+            dist = max(d["kms"]) - min(d["kms"])
+            if dist > 0:
+                total_dist += dist
+                total_gal_km += d["gal"]
+                
+    rendimiento = total_dist / total_gal_km if total_gal_km > 0 else 0
+    costo_km = total_gasto / total_dist if total_dist > 0 else 0
+
     # Última sync de sheets
     last_sync = await db.sheets_sync_log.find_one({}, {"_id": 0}, sort=[("finished_at", -1)])
     last_sync_at = last_sync["finished_at"] if last_sync else None
+
+    # Get services configuration for response
+    svc_data = {}
+    if target_empresa:
+        svc_info = await _svc.get_empresa_servicios(db, target_empresa)
+        svc_data = svc_info.get("servicios", {})
+    else:
+        svc_data = {"plataforma": True, "combustible": True, "gps": True, "subsidio": True}
 
     return {
         "empresa": cfg["empresa"],
         "ruc": cfg.get("ruc", ""),
         "plan": cfg.get("plan", "tracking"),
+        "servicios": svc_data,
         "unidades_contratadas": int(cfg.get("unidades_contratadas", 0) or 0),
         "unidades_reales": placas_reales,
+        "unidades_activas": unidades_activas,
+        "total_vehicles": total_vehicles,
+        "cargas_semana": cargas_semana,
+        "cargas_invalidas": cargas_invalidas,
+        "rendimiento": round(rendimiento, 1) if rendimiento > 0 else 0,
+        "costo_km": round(costo_km, 2) if costo_km > 0 else 0,
+        "und_con_gps": und_con_gps,
         "red_estaciones": 358,
         "linea_credito": {
             "total": total_credito,
@@ -912,6 +1007,7 @@ async def dashboard_overview(
         },
         "promedios": {
             "ticket": round(ticket_prom, 2),
+            "block_gal": round(gal_por_carga, 2), # avoid collision
             "carga_gal": round(gal_por_carga, 2),
             "precio": round(precio_prom, 2),
         },
