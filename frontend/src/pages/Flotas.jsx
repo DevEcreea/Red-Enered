@@ -7,7 +7,7 @@ import {
   FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
   ChevronDown, Download, Share2, Printer, Columns3, Upload,
   Filter, Calendar, User, Car, ArrowUpDown, Search, X,
-  CheckCircle2
+  CheckCircle2, Trash2
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -87,11 +87,11 @@ function qrSvg(seed) {
   return `<svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="xMidYMid meet"><g fill="#8B3DFF">${m}${F(0,0)}${F((N-3)*cell,0)}${F(0,(N-3)*cell)}</g></svg>`;
 }
 
-const BIG_CARDS = [
-  { num:"$52.500",  lab:"Gasto Total de Combustible",  ic:Receipt, col:"#8B3DFF" },
-  { num:"134",      lab:"Total de Galones Consumidos",  ic:Fuel,    col:"#10B981" },
-  { num:"0,0",      lab:"Promedio de KM/Galón",         ic:Gauge,   col:"#3B82F6" },
-  { num:"$391,8",   lab:"Promedio de Costo/Galón",      ic:Coins,   col:"#334155" },
+const BIG_CARDS_META = [
+  { key:"gasto",       lab:"Gasto Total de Combustible",  ic:Receipt, col:"#8B3DFF" },
+  { key:"galones",     lab:"Total de Galones Consumidos",  ic:Fuel,    col:"#10B981" },
+  { key:"kmGal",       lab:"Promedio de KM/Galón",         ic:Gauge,   col:"#3B82F6" },
+  { key:"costoGal",    lab:"Promedio de Costo/Galón",      ic:Coins,   col:"#334155" },
 ];
 
 const thSt = { textAlign:"left",color:"#fff",fontWeight:600,fontSize:13,padding:"16px 14px",whiteSpace:"nowrap" };
@@ -113,57 +113,99 @@ function FSel({ label, icon:Icon, grow, children }) {
 
 // ═════════════════════════════════ TABS ══════════════════════════════════════
 
-// ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
-// ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
-function TabResumen({ rows, totals, onDelete, onAddClick, onDownloadPdf }) {
-  const [openMenuRow, setOpenMenuRow] = useState(null);
+function RowActions({ row, onDelete, onDownloadPdf }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={()=>setOpen(v=>!v)} data-testid={`row-actions-${row.id||row.PLACA}`}
+        style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}>
+        <MoreHorizontal style={{ width:15,height:15 }}/>
+      </button>
+      {open && (
+        <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
+          {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
+            <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA); }}
+              style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
+              <FileText style={{ width:14,height:14,color:"#8B3DFF" }}/> Descargar Factura
+            </button>
+          )}
+          <button onClick={()=>{setOpen(false); onDelete(row.id || row._id);}} data-testid={`row-delete-${row.id||row.PLACA}`}
+            style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
+            <Trash2 style={{ width:14,height:14 }}/> Eliminar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const cards = [
-    { num: formatSoles(totals.gasto), lab: "Gasto Total de Combustible", ic: Receipt, col: "#8B3DFF" },
-    { num: totals.gal.toLocaleString("es-PE", { maximumFractionDigits: 0 }), lab: "Total de Galones Consumidos", ic: Fuel, col: "#10B981" },
-    { num: "—", lab: "Promedio de KM/Galón", ic: Gauge, col: "#3B82F6" },
-    { num: totals.gal > 0 ? formatSoles(totals.gasto / totals.gal) : "—", lab: "Promedio de Costo/Galón", ic: Coins, col: "#334155" },
-  ];
+// ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
+function TabResumen({ rows, totals, services, onOpenNuevaCarga, onDelete, onDownloadPdf }) {
+  const showAhorro = services?.combustible === true;
+
+  const invalidas = useMemo(() => {
+    const list = rows.filter(r => {
+      const gl = parseFloat(r.CANTIDAD_GL || 0);
+      const imp = parseFloat(r.IMPORTE_TOTAL || 0);
+      return !r.PLACA || gl <= 0 || imp <= 0;
+    });
+    const monto = list.reduce((s, r) => s + parseFloat(r.IMPORTE_TOTAL || 0), 0);
+    return { count: list.length, monto };
+  }, [rows]);
+
+  const kpiValues = {
+    gasto:    `S/ ${(totals.gasto || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    galones:  `${Math.round(totals.gal || 0).toLocaleString("es-PE")}`,
+    kmGal:    "—",   // TODO: cuando haya kilometraje entre cargas consecutivas por placa
+    costoGal: totals.gal > 0 ? `S/ ${(totals.gasto / totals.gal).toFixed(2)}` : "—",
+  };
 
   return (
     <div>
-      {/* Big KPIs */}
+      {/* Big KPIs — SIN sparklines, solo números reales */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20 }}>
-        {cards.map((k,i)=>{
+        {BIG_CARDS_META.map((k,i)=>{
           const Icon = k.ic;
           return (
-            <div key={i} style={{ position:"relative",background:"#fff",borderRadius:20,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"22px 24px",overflow:"hidden",minHeight:170 }}>
-              <div style={{ fontSize:38,fontWeight:700,color:"#111827",lineHeight:1 }}>{k.num}</div>
-              <div style={{ fontSize:16,color:"#6b7280",marginTop:8,maxWidth:"60%" }}>{k.lab}</div>
+            <div key={i} style={{ position:"relative",background:"#fff",borderRadius:20,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"22px 24px",overflow:"hidden",minHeight:130 }}>
+              <div style={{ fontSize:36,fontWeight:700,color:"#111827",lineHeight:1.1 }} data-testid={`combustible-kpi-${k.key}`}>{kpiValues[k.key]}</div>
+              <div style={{ fontSize:15,color:"#6b7280",marginTop:10,maxWidth:"75%" }}>{k.lab}</div>
               <div style={{ position:"absolute",top:22,right:22,opacity:.85,color:k.col }}>
                 <Icon style={{ width:26,height:26 }}/>
               </div>
-              <svg style={{ position:"absolute",left:0,right:0,bottom:0,height:70,width:"100%" }} viewBox="0 0 200 70" preserveAspectRatio="none">
-                <path d={AREA_PATH} fill={k.col} opacity="0.16"/>
-                <path d={LINE_PATH} fill="none" stroke={k.col} strokeWidth="2.5" opacity="0.55"/>
-              </svg>
             </div>
           );
         })}
       </div>
 
-      {/* Small KPIs row 2 */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginTop:20 }}>
+      {/* Small KPIs row 2 — Ahorro se oculta si no tiene servicios.combustible */}
+      <div style={{ display:"grid",gridTemplateColumns:showAhorro?"repeat(4,1fr)":"repeat(3,1fr)",gap:20,marginTop:20 }}>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:"relative",display:"flex",flexDirection:"column",justifyContent:"center" }}>
           <span style={{ fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:".04em",textTransform:"uppercase" }}>Cargas</span>
-          <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }}>{rows.length}</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }} data-testid="combustible-kpi-cargas">{rows.length}</span>
           <span style={{ position:"absolute",top:16,right:18,color:"#8B3DFF" }}><Droplet style={{ width:18,height:18 }}/></span>
         </div>
-        {[
-          { label:"Cargas Inválidas",        val:"00",           bg:"#EF4444" },
-          { label:"Monto Cargas Inválidas",   val:"S/ 0.00", bg:"#EF4444" },
-          { label:"Ahorro Combustible",       val: formatSoles(totals.ahorro), bg:"#10B981" },
-        ].map((k,i)=>(
-          <div key={i} style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:k.bg,display:"flex",flexDirection:"column",justifyContent:"center" }}>
-            <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>{k.label}</span>
-            <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }}>{k.val}</span>
+        <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#EF4444",display:"flex",flexDirection:"column",justifyContent:"center" }}>
+          <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Cargas Inválidas</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-invalidas">{String(invalidas.count).padStart(2,"0")}</span>
+        </div>
+        <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#EF4444",display:"flex",flexDirection:"column",justifyContent:"center" }}>
+          <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Monto Cargas Inválidas</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-monto-invalidas">S/ {invalidas.monto.toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        </div>
+        {showAhorro && (
+          <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#10B981",display:"flex",flexDirection:"column",justifyContent:"center" }}>
+            <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Ahorro Combustible</span>
+            <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-ahorro">S/ {(totals.ahorro || 0).toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
           </div>
-        ))}
+        )}
       </div>
 
       {/* Filters */}
@@ -178,23 +220,21 @@ function TabResumen({ rows, totals, onDelete, onAddClick, onDownloadPdf }) {
           <FSel label="Estación"/>
           <FSel label="Producto"/>
           <div style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:16,color:"#9ca3af" }}>
-            {[Share2, Printer, Columns3, Download, Upload].map((Ic,i)=>(
+            {[Share2, Printer, Columns3, Download].map((Ic,i)=>(
               <Ic key={i} style={{ width:18,height:18,cursor:"pointer" }}/>
             ))}
-            <button 
-              onClick={onAddClick} 
-              style={{ display:"inline-flex",alignItems:"center",gap:8,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:40,padding:"0 18px",fontSize:14,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.25)",marginLeft:8 }}
-            >
-              <Plus style={{ width:16,height:16 }}/>Nueva carga
-            </button>
+            {!showAhorro && (
+              <button
+                onClick={onOpenNuevaCarga}
+                data-testid="btn-nueva-carga"
+                style={{ display:"inline-flex",alignItems:"center",gap:6,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:38,padding:"0 16px",fontSize:13.5,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.25)",marginLeft:6 }}
+              >
+                <Plus style={{ width:16,height:16 }}/>Nueva carga
+              </button>
+            )}
           </div>
         </div>
       </div>
-
-      {/* Overlay to close dropdown */}
-      {openMenuRow !== null && (
-        <div style={{ position:"fixed",inset:0,zIndex:40 }} onClick={() => setOpenMenuRow(null)}/>
-      )}
 
       {/* Table */}
       <div style={{ marginTop:18 }}>
@@ -202,112 +242,82 @@ function TabResumen({ rows, totals, onDelete, onAddClick, onDownloadPdf }) {
           <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1500 }}>
             <thead>
               <tr style={{ background:HEADER_BG }}>
-                {["","Placa","Controles","Empresa","Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""].map((h,i)=>(
-                  <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===15?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
+                {(showAhorro
+                  ? ["","Placa","Controles","Empresa","Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""]
+                  : ["","Placa","Controles","Empresa","Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Factura","Conductor",""]
+                ).map((h,i,arr)=>(
+                  <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {(rows.length > 0 ? rows.map(r=>([
-                r.PLACA||"—",
-                r.EMPRESA||"—",
-                r.FECHA||"—",
-                r.ESTACION && r.CIUDAD ? `${r.CIUDAD} / ${r.ESTACION}` : r.ESTACION || r.CIUDAD || "—",
-                r.KILOMETRAJE || r.KM || "—",
-                r.KILOMETRAJE || r.KM || "—",
-                r.PRODUCTO||"Diesel",
-                r.CANTIDAD_GL||"0",
-                r.PRECIO_UNITARIO != null ? formatSoles(r.PRECIO_UNITARIO) : r.PRECIO ? formatSoles(r.PRECIO) : "—",
-                r.IMPORTE_TOTAL != null ? formatSoles(r.IMPORTE_TOTAL) : "—",
-                r.AHORRO != null ? formatSoles(r.AHORRO) : "—",
-                "—",
-                "—",
-                r.CONDUCTOR||"—",
-                r.id || r._id || "",
-                r.pdf_filename || ""
-              ])) : [
-                ["ABC123","Rosandina","06/01/26 15:10","Trujillo / ES Los Postes","10000 km","100000 km","Diesel","8.58","S/24.41","S/209.44","S/13.56","9.7","S/10.9","Luis Galvez","",""],
-                ["BJO894","Rosandina","06/01/26 12:40","Lima / ES Primax 45","152030 km","152030 km","Diesel","32.1","S/15.90","S/510.39","S/28.10","3.2","S/2.1","Carlos Ríos","",""],
-                ["V2P481","Care Perú","05/01/26 09:15","Arequipa / Repsol Sur","89050 km","89050 km","Diesel","28.4","S/15.80","S/448.72","S/24.00","3.5","S/1.9","Ana Rojas","",""],
-                ["BRO700","Rosandina","05/01/26 18:22","Piura / Petroperú","203110 km","203110 km","Diesel","30.8","S/15.95","S/491.26","S/26.50","3.1","S/2.0","Javier Q.","",""],
-                ["BTP808","Rosandina","04/01/26 07:48","Chiclayo / Pecsa","44120 km","44120 km","Gasolina","19.6","S/17.40","S/341.04","S/12.20","4.0","S/2.4","Luis Galvez","",""],
-                ["C3K915","Care Perú","04/01/26 16:05","Trujillo / ES Los Postes","310540 km","310540 km","Diesel","26.9","S/15.90","S/427.71","S/22.80","3.4","S/2.1","Ana Rojas","",""],
-                ["D9L307","Rosandina","03/01/26 11:30","Lima / Primax 45","178900 km","178900 km","Diesel","31.5","S/16.00","S/504.00","S/27.00","3.0","S/2.0","Carlos Ríos","",""],
-              ]).map((r,i)=>(
-                <tr key={i} style={{ borderBottom:"1px solid #E9EBEF" }}>
-                  <td style={tdSt}><input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/></td>
-                  <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{r[0]}</td>
-                  <td style={tdSt}>
-                    <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                      <MapPin style={{ width:15,height:15,color:"#14B8A6" }}/>
-                      <Camera style={{ width:15,height:15,color:"#EF4444" }}/>
-                      {r[15] ? (
-                        <button 
-                          onClick={() => onDownloadPdf(r[14], r[0])}
-                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }}
-                          title="Descargar Comprobante PDF"
-                        >
-                          <Receipt style={{ width:15,height:15,color:"#8B3DFF" }}/>
-                        </button>
-                      ) : (
-                        <Receipt style={{ width:15,height:15,color:"#cbd5e1" }}/>
-                      )}
-                      <CreditCard style={{ width:15,height:15,color:"#3B82F6" }}/>
-                    </span>
-                  </td>
-                  <td style={tdSt}>{r[1]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[2]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[3]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>
-                    <div>{r[4]} {r[4] !== "—" && !String(r[4]).includes("km") ? "km" : ""}</div>
-                    <div style={{ color:"#9ca3af",fontSize:11 }}>{r[5]} {r[5] !== "—" && !String(r[5]).includes("km") ? "km" : ""}</div>
-                  </td>
-                  <td style={tdSt}>{r[6]}</td>
-                  <td style={tdSt}>{r[7]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[8]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[9]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>{r[10]}</td>
-                  <td style={tdSt}>{r[11]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[12]}</td>
-                  <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r[13]}</td>
-                  <td style={{ ...tdSt, position: "relative" }}>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenMenuRow(openMenuRow === i ? null : i);
-                      }}
-                      style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}
-                    >
-                      <MoreHorizontal style={{ width:15,height:15 }}/>
-                    </button>
-                    {openMenuRow === i && (
-                      <div style={{ position:"absolute",right:14,top:38,background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,boxShadow:"0 4px 12px rgba(0,0,0,.1)",zIndex:50,minWidth:100,padding:4 }}>
-                        <button 
-                          onClick={() => {
-                            setOpenMenuRow(null);
-                            onDelete(r[14]);
-                          }}
-                          style={{ width:"100%",padding:"8px 12px",fontSize:13,color:"#DC2626",border:"none",background:"none",cursor:"pointer",textAlign:"left",borderRadius:6,fontWeight:600 }}
-                          onMouseEnter={(e) => e.target.style.background = "#FEF2F2"}
-                          onMouseLeave={(e) => e.target.style.background = "none"}
-                        >
-                          Eliminar
-                        </button>
-                      </div>
+              {rows.slice(0,50).map((r,i)=>{
+                const fecha = r.FECHA ? `${r.FECHA}${r.HORA?" "+r.HORA:""}` : "—";
+                const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
+                const galones = parseFloat(r.CANTIDAD_GL||0);
+                const precio = parseFloat(r.PRECIO_UNITARIO||0);
+                const importe = parseFloat(r.IMPORTE_TOTAL||0);
+                const ahorro = parseFloat(r.AHORRO||0);
+                return (
+                  <tr key={r.id||i} style={{ borderBottom:"1px solid #E9EBEF" }}>
+                    <td style={tdSt}><input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/></td>
+                    <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{r.PLACA||"—"}</td>
+                    <td style={tdSt}>
+                      <span style={{ display:"flex",alignItems:"center",gap:6 }}>
+                        <MapPin style={{ width:15,height:15,color:"#14B8A6" }}/>
+                        <Camera style={{ width:15,height:15,color:"#EF4444" }}/>
+                        {r.pdf_filename ? (
+                          <button onClick={() => onDownloadPdf(r.id, r.PLACA)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }} title="Descargar Factura">
+                            <Receipt style={{ width:15,height:15,color:"#8B3DFF" }}/>
+                          </button>
+                        ) : (
+                          <Receipt style={{ width:15,height:15,color:"#cbd5e1" }}/>
+                        )}
+                        <CreditCard style={{ width:15,height:15,color:"#3B82F6" }}/>
+                      </span>
+                    </td>
+                    <td style={tdSt}>{r.EMPRESA||"—"}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{ciudadEstacion}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
+                    <td style={tdSt}>{r.PRODUCTO||"—"}</td>
+                    <td style={tdSt}>{galones? galones.toFixed(2):"—"}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{precio? `S/ ${precio.toFixed(2)}`:"—"}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{importe? `S/ ${importe.toFixed(2)}`:"—"}</td>
+                    {showAhorro ? (
+                      <>
+                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>{ahorro? `S/ ${ahorro.toFixed(2)}`:"—"}</td>
+                        <td style={tdSt}>—</td>
+                        <td style={{ ...tdSt,whiteSpace:"nowrap" }}>—</td>
+                      </>
+                    ) : (
+                      <td style={tdSt}>
+                        {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
+                          <button onClick={() => onDownloadPdf(r.id, r.PLACA)} style={{ background: "none", border: "none", color:"#8B3DFF", fontSize:13, textDecoration:"none", fontWeight:600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <FileText style={{ width:14,height:14 }}/>Descargar
+                          </button>
+                        ) : "—"}
+                      </td>
                     )}
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.CONDUCTOR||"—"}</td>
+                    <td style={tdSt}>
+                      <RowActions row={r} onDelete={onDelete} onDownloadPdf={onDownloadPdf}/>
+                    </td>
+                  </tr>
+                );
+              })}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={showAhorro?16:14} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
+                    Aún no hay cargas registradas. {!showAhorro && "Haz clic en \"Nueva carga\" para registrar la primera."}
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 6px",fontSize:14,color:"#6b7280" }}>
-          <span>Mostrando 1 - {Math.min(rows.length, 50)} de {rows.length || 155}</span>
-          <div style={{ display:"flex",alignItems:"center",gap:14 }}>
-            <span>Anterior</span>
-            <span style={{ color:"#374151",fontWeight:600 }}>1 / 1</span>
-            <span style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 14px",fontWeight:600,color:"#374151",cursor:"pointer" }}>Siguiente</span>
-          </div>
+          <span>Mostrando {Math.min(rows.length,50)} de {rows.length}</span>
         </div>
       </div>
     </div>
@@ -537,62 +547,144 @@ function TabQR({ onToast }) {
   );
 }
 
-// ── GESTIÓN DE CONSUMOS MAIN ──────────────────────────────────────────────────
+// ── MODAL: NUEVA CARGA MANUAL ─────────────────────────────────────────────────
+function ModalNuevaCarga({ open, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    placa: "", fecha: new Date().toISOString().slice(0,10), hora: "",
+    estacion: "", ciudad: "", producto: "DIESEL B5",
+    galones: "", precio_unitario: "", importe_total: "",
+    kilometraje: "", conductor: "", numero_factura: "",
+  });
+  const [factura, setFactura] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  if (!open) return null;
+
+  const upd = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+
+  async function handleSave() {
+    setErr("");
+    if (!form.placa || !form.fecha || !form.galones || !form.importe_total) {
+      setErr("Placa, fecha, galones e importe son obligatorios");
+      return;
+    }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("PLACA", form.placa.trim().toUpperCase());
+      fd.append("FECHA", `${form.fecha} ${form.hora || "00:00"}`);
+      fd.append("HORA", form.hora || "00:00");
+      fd.append("PRODUCTO", form.producto);
+      if (form.ciudad) fd.append("CIUDAD", form.ciudad.trim());
+      if (form.estacion) fd.append("ESTACION", form.estacion.trim());
+      fd.append("CANTIDAD_GL", parseFloat(form.galones) || 0);
+      fd.append("PRECIO_UNITARIO", parseFloat(form.precio_unitario) || 0);
+      fd.append("IMPORTE_TOTAL", parseFloat(form.importe_total) || 0);
+      if (form.kilometraje) fd.append("KILOMETRAJE", parseInt(form.kilometraje) || 0);
+      if (form.conductor) fd.append("CONDUCTOR", form.conductor.trim());
+      if (form.numero_factura) fd.append("NUMERO_DOCUMENTO", form.numero_factura.trim());
+      if (factura) fd.append("file", factura);
+
+      const { data } = await api.post("/consumptions", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      onSaved?.(data);
+      onClose();
+    } catch (e) {
+      console.error("Error al guardar carga manual:", e);
+      setErr(e.response?.data?.detail || e.message || "Error al guardar la carga");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(15,23,42,.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:20 }} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{ background:"#fff",borderRadius:16,padding:26,width:"100%",maxWidth:680,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)" }} data-testid="modal-nueva-carga">
+        <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18 }}>
+          <div>
+            <div style={{ fontSize:11,fontWeight:700,letterSpacing:".08em",color:"#8B3DFF",textTransform:"uppercase" }}>Registro manual</div>
+            <div style={{ fontSize:22,fontWeight:700,color:"#111827" }}>Nueva carga de combustible</div>
+          </div>
+          <button onClick={onClose} style={{ background:"none",border:"none",cursor:"pointer",color:"#6b7280" }}><X style={{ width:22,height:22 }}/></button>
+        </div>
+
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Placa *</label>
+            <input style={inputSt} value={form.placa} onChange={upd("placa")} placeholder="ABC-123" data-testid="nc-placa"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Fecha *</label>
+            <input type="date" style={inputSt} value={form.fecha} onChange={upd("fecha")} data-testid="nc-fecha"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Hora</label>
+            <input type="time" style={inputSt} value={form.hora} onChange={upd("hora")}/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Producto</label>
+            <select style={{ ...inputSt, ...selSt }} value={form.producto} onChange={upd("producto")}>
+              <option>DIESEL B5</option><option>DIESEL DB5 S-50</option><option>GASOLINA 90</option><option>GASOLINA 95</option>
+            </select></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Ciudad</label>
+            <input style={inputSt} value={form.ciudad} onChange={upd("ciudad")} placeholder="Lima"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Estación</label>
+            <input style={inputSt} value={form.estacion} onChange={upd("estacion")} placeholder="Primax San Isidro"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Galones *</label>
+            <input type="number" step="0.01" style={inputSt} value={form.galones} onChange={upd("galones")} placeholder="20.5" data-testid="nc-galones"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Precio/gal (S/)</label>
+            <input type="number" step="0.01" style={inputSt} value={form.precio_unitario} onChange={upd("precio_unitario")} placeholder="15.50"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Importe total (S/) *</label>
+            <input type="number" step="0.01" style={inputSt} value={form.importe_total} onChange={upd("importe_total")} placeholder="317.75" data-testid="nc-importe"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Kilometraje</label>
+            <input type="number" style={inputSt} value={form.kilometraje} onChange={upd("kilometraje")} placeholder="150000"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Conductor</label>
+            <input style={inputSt} value={form.conductor} onChange={upd("conductor")} placeholder="Nombre del conductor"/></div>
+          <div><label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>N° Factura</label>
+            <input style={inputSt} value={form.numero_factura} onChange={upd("numero_factura")} placeholder="F001-1234"/></div>
+          <div style={{ gridColumn:"1/3" }}>
+            <label style={{ fontSize:12,color:"#6b7280",fontWeight:600 }}>Factura (PDF/PNG/JPG)</label>
+            <div style={{ border:"2px dashed #E5E7EB",borderRadius:10,padding:14,textAlign:"center",background:"#F9FAFB" }}>
+              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" onChange={e=>setFactura(e.target.files?.[0]||null)} data-testid="nc-factura"/>
+              {factura && <div style={{ fontSize:12,color:"#059669",marginTop:6 }}>✓ {factura.name}</div>}
+            </div>
+          </div>
+        </div>
+
+        {err && <div style={{ marginTop:12,color:"#DC2626",background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:8,padding:"10px 12px",fontSize:13.5 }}>{err}</div>}
+
+        <div style={{ display:"flex",gap:10,marginTop:20,justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ padding:"0 18px",height:40,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",fontSize:14,fontWeight:500,color:"#374151",cursor:"pointer" }}>Cancelar</button>
+          <button onClick={handleSave} disabled={saving} data-testid="nc-guardar"
+            style={{ padding:"0 22px",height:40,border:"none",borderRadius:10,background:"#8B3DFF",color:"#fff",fontSize:14,fontWeight:600,cursor:saving?"wait":"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.25)",opacity:saving?0.7:1 }}>
+            {saving ? "Guardando..." : "Guardar carga"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════ MAIN ══════════════════════════════════════
 export default function Flotas() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("Resumen");
   const [rows, setRows]           = useState([]);
   const [toast, setToast]         = useState(null);
+  const [nuevaCargaOpen, setNuevaCargaOpen] = useState(false);
   const toastRef = useRef(null);
 
-  // Modal de Nueva Carga
-  const [showCargaModal, setShowCargaModal] = useState(false);
-  const [cargaForm, setCargaForm] = useState({
-    placa: "",
-    empresa: user?.empresa || "",
-    fecha: new Date().toISOString().split("T")[0],
-    hora: "12:00",
-    ciudad: "",
-    estacion: "",
-    producto: "DIESEL B5 S50",
-    galones: "",
-    precio: "",
-    conductor: "",
-    kilometraje: "",
-    ruc_emisor: "",
-    numero_documento: "",
-    file: null,
-  });
+  const services = user?.servicios || { plataforma:true, combustible:true, gps:false };
 
-  useEffect(() => {
-    // Sincronizar campo empresa en cargaForm cuando cargue el user
-    if (user?.empresa) {
-      setCargaForm(p => ({ ...p, empresa: user.empresa }));
-    }
-  }, [user]);
-
-  const loadConsumptions = () => {
-    api.get("/consumptions").then(r => setRows(r.data || [])).catch(() => {});
+  const reload = () => {
+    api.get("/consumptions").then(r=>setRows(r.data||[])).catch(()=>{});
   };
 
-  useEffect(() => {
-    loadConsumptions();
-  }, []);
+  useEffect(reload, []);
 
-  const totals = useMemo(() => {
-    let gal = 0, gasto = 0, ahorro = 0;
-    rows.forEach(r => {
-      gal += parseFloat(r.CANTIDAD_GL || 0);
-      gasto += parseFloat(r.IMPORTE_TOTAL || 0);
-      ahorro += parseFloat(r.AHORRO || 0);
-    });
-    return { gal, gasto, ahorro, n: rows.length };
+  const totals = useMemo(()=>{
+    let gal=0, gasto=0, ahorro=0;
+    rows.forEach(r=>{ gal+=parseFloat(r.CANTIDAD_GL||0); gasto+=parseFloat(r.IMPORTE_TOTAL||0); ahorro+=parseFloat(r.AHORRO||0); });
+    return { gal, gasto, ahorro, n:rows.length };
   }, [rows]);
 
   function showToast(msg) {
     setToast(msg);
     clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast(null), 2400);
+    toastRef.current = setTimeout(()=>setToast(null), 2400);
   }
 
   const handleDelete = async (id) => {
@@ -625,77 +717,18 @@ export default function Flotas() {
     }
   };
 
-
-  const handleCargaSubmit = async (e) => {
-    e.preventDefault();
-    if (!cargaForm.placa || !cargaForm.fecha || !cargaForm.galones || !cargaForm.precio) {
-      alert("Por favor completa los campos obligatorios.");
-      return;
-    }
-    const gal = parseFloat(cargaForm.galones);
-    const pre = parseFloat(cargaForm.precio);
-    const imp = Math.round(gal * pre * 100) / 100;
-    
-    const fd = new FormData();
-    fd.append("PLACA", cargaForm.placa.trim().toUpperCase());
-    fd.append("EMPRESA", cargaForm.empresa.trim() || user?.empresa || "Manual");
-    fd.append("FECHA", `${cargaForm.fecha} ${cargaForm.hora || "00:00"}`);
-    fd.append("HORA", cargaForm.hora || "00:00");
-    if (cargaForm.ciudad) fd.append("CIUDAD", cargaForm.ciudad.trim());
-    if (cargaForm.estacion) fd.append("ESTACION", cargaForm.estacion.trim());
-    fd.append("PRODUCTO", cargaForm.producto);
-    fd.append("CANTIDAD_GL", gal);
-    fd.append("PRECIO_UNITARIO", pre);
-    fd.append("IMPORTE_TOTAL", imp);
-    if (cargaForm.conductor) fd.append("CONDUCTOR", cargaForm.conductor.trim());
-    fd.append("KILOMETRAJE", cargaForm.kilometraje ? parseInt(cargaForm.kilometraje) : 0);
-    if (cargaForm.ruc_emisor) fd.append("RUC_EMISOR", cargaForm.ruc_emisor.trim());
-    if (cargaForm.numero_documento) fd.append("NUMERO_DOCUMENTO", cargaForm.numero_documento.trim());
-    if (cargaForm.file) {
-      fd.append("file", cargaForm.file);
-    }
-
-    try {
-      const { data } = await api.post("/consumptions", fd, {
-        headers: { "Content-Type": "multipart/form-data" }
-      });
-      setRows(prev => [data, ...prev]);
-      setShowCargaModal(false);
-      // Reset form
-      setCargaForm({
-        placa: "",
-        empresa: user?.empresa || "",
-        fecha: new Date().toISOString().split("T")[0],
-        hora: "12:00",
-        ciudad: "",
-        estacion: "",
-        producto: "DIESEL B5 S50",
-        galones: "",
-        precio: "",
-        conductor: "",
-        kilometraje: "",
-        ruc_emisor: "",
-        numero_documento: "",
-        file: null,
-      });
-      showToast("Carga registrada con éxito");
-    } catch (err) {
-      alert("Error al registrar carga: " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  const TABS = ["Resumen", "Eventos", "Control", "QR"];
+  const TABS = ["Resumen","Eventos","Control","QR"];
 
   return (
-    <div style={{ padding: "22px 26px", background: "#EEF0F2", minHeight: "100%" }} data-testid="flotas-page">
+    <div style={{ padding:"22px 26px",background:"#EEF0F2",minHeight:"100%" }} data-testid="flotas-page">
 
       {/* TABS */}
-      <div style={{ display: "flex", alignItems: "center", gap: 38, marginBottom: 20 }}>
-        {TABS.map(t => (
-          <button key={t} onClick={() => setActiveTab(t)} style={{
-            fontSize: 19, fontWeight: activeTab === t ? 700 : 500,
-            color: activeTab === t ? "#8B3DFF" : "#4b5563",
-            background: "none", border: "none", cursor: "pointer", padding: 0
+      <div style={{ display:"flex",alignItems:"center",gap:38,marginBottom:20 }}>
+        {TABS.map(t=>(
+          <button key={t} onClick={()=>setActiveTab(t)} style={{
+            fontSize:19,fontWeight:activeTab===t?700:500,
+            color:activeTab===t?"#8B3DFF":"#4b5563",
+            background:"none",border:"none",cursor:"pointer",padding:0
           }}>
             {t}
           </button>
@@ -703,130 +736,26 @@ export default function Flotas() {
       </div>
 
       {/* CONTENT */}
-      {activeTab === "Resumen" && (
+      {activeTab==="Resumen" && (
         <TabResumen 
           rows={rows} 
           totals={totals} 
-          onDelete={handleDelete} 
-          onAddClick={() => setShowCargaModal(true)}
+          services={services} 
+          onOpenNuevaCarga={()=>setNuevaCargaOpen(true)}
+          onDelete={handleDelete}
           onDownloadPdf={handleDownloadPdf}
         />
       )}
-      {activeTab === "Eventos" && <TabEventos onToast={showToast} />}
-      {activeTab === "Control" && <TabControl onToast={showToast} />}
-      {activeTab === "QR"      && <TabQR onToast={showToast} />}
+      {activeTab==="Eventos" && <TabEventos onToast={showToast}/>}
+      {activeTab==="Control" && <TabControl onToast={showToast}/>}
+      {activeTab==="QR"      && <TabQR onToast={showToast}/>}
 
-      <Toast msg={toast} />
+      <ModalNuevaCarga open={nuevaCargaOpen} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo)=>{ if (newConsumo) setRows(prev=>[newConsumo,...prev]); reload(); showToast("Carga registrada correctamente"); }}/>
+      <Toast msg={toast}/>
 
-      {/* MODAL NUEVA CARGA */}
-      {showCargaModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.4)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
-          <div style={{ background: "#fff", borderRadius: 24, boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)", width: "90%", maxWidth: 600, padding: 28, position: "relative", maxHeight: "90vh", overflowY: "auto", alignSelf: "center" }}>
-            <button onClick={() => setShowCargaModal(false)} style={{ position: "absolute", top: 20, right: 20, background: "none", border: "none", cursor: "pointer", color: "#9ca3af" }}>
-              <X style={{ width: 20, height: 20 }} />
-            </button>
-            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".08em", color: "#8B3DFF", textTransform: "uppercase" }}>Combustible</div>
-            <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2, color: "#111827", marginBottom: 20 }}>Registrar Nueva Carga</div>
-            
-            <form onSubmit={handleCargaSubmit} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Placa *</label>
-                <input required style={inputSt} value={cargaForm.placa} onChange={e => setCargaForm(p => ({ ...p, placa: e.target.value }))} placeholder="ABC-123" />
-              </div>
-              
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Empresa</label>
-                <input style={inputSt} value={cargaForm.empresa} onChange={e => setCargaForm(p => ({ ...p, empresa: e.target.value }))} placeholder="Nombre de empresa" disabled={user?.role !== "admin_enered"} />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Fecha *</label>
-                <input type="date" required style={inputSt} value={cargaForm.fecha} onChange={e => setCargaForm(p => ({ ...p, fecha: e.target.value }))} />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Hora</label>
-                <input type="time" style={inputSt} value={cargaForm.hora} onChange={e => setCargaForm(p => ({ ...p, hora: e.target.value }))} />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Ciudad</label>
-                <input style={inputSt} value={cargaForm.ciudad} onChange={e => setCargaForm(p => ({ ...p, ciudad: e.target.value }))} placeholder="Ej: Lima" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Estación / Grifo</label>
-                <input style={inputSt} value={cargaForm.estacion} onChange={e => setCargaForm(p => ({ ...p, estacion: e.target.value }))} placeholder="Ej: Primax Javier Prado" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Producto *</label>
-                <select style={{ ...inputSt, ...selSt }} value={cargaForm.producto} onChange={e => setCargaForm(p => ({ ...p, producto: e.target.value }))}>
-                  <option value="DIESEL B5 S50">DIESEL B5 S50</option>
-                  <option value="DIESEL B5">DIESEL B5</option>
-                  <option value="DIESEL B20">DIESEL B20</option>
-                  <option value="GASOHOL 90">GASOHOL 90</option>
-                  <option value="GASOHOL 95">GASOHOL 95</option>
-                  <option value="GASOHOL 97">GASOHOL 97</option>
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Kilometraje</label>
-                <input type="number" style={inputSt} value={cargaForm.kilometraje} onChange={e => setCargaForm(p => ({ ...p, kilometraje: e.target.value }))} placeholder="Ej: 145000" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Cantidad (Galones) *</label>
-                <input type="number" step="any" required style={inputSt} value={cargaForm.galones} onChange={e => setCargaForm(p => ({ ...p, galones: e.target.value }))} placeholder="0.00" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Precio por Galón *</label>
-                <input type="number" step="any" required style={inputSt} value={cargaForm.precio} onChange={e => setCargaForm(p => ({ ...p, precio: e.target.value }))} placeholder="0.00" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: "1/3" }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Conductor</label>
-                <input style={inputSt} value={cargaForm.conductor} onChange={e => setCargaForm(p => ({ ...p, conductor: e.target.value }))} placeholder="Nombre del conductor" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>RUC Emisor / Grifo</label>
-                <input style={inputSt} value={cargaForm.ruc_emisor} onChange={e => setCargaForm(p => ({ ...p, ruc_emisor: e.target.value }))} placeholder="11 dígitos" maxLength={11} />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>N° Documento (Factura)</label>
-                <input style={inputSt} value={cargaForm.numero_documento} onChange={e => setCargaForm(p => ({ ...p, numero_documento: e.target.value }))} placeholder="Ej: F001-0001234" />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, gridColumn: "1/3" }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#4b5563" }}>Comprobante de Pago (PDF)</label>
-                <input 
-                  type="file" 
-                  accept=".pdf" 
-                  style={{ ...inputSt, padding: "8px 14px", height: "auto" }} 
-                  onChange={e => {
-                    const f = e.target.files?.[0] || null;
-                    setCargaForm(p => ({ ...p, file: f }));
-                  }}
-                />
-              </div>
-
-              <div style={{ gridColumn: "1/3", display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 12 }}>
-                <button type="button" onClick={() => setShowCargaModal(false)} style={{ height: 42, padding: "0 20px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#fff", fontWeight: 600, cursor: "pointer", color: "#4b5563" }}>Cancelar</button>
-                <button type="submit" style={{ height: 42, padding: "0 20px", borderRadius: 10, border: "none", background: "#8B3DFF", color: "#fff", fontWeight: 600, cursor: "pointer", boxShadow: "0 4px 12px rgba(139,61,255,.25)" }}>Guardar Carga</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div style={{ textAlign: "center", color: "#9ca3af", fontSize: 11, padding: "26px 0 10px" }}>
+      <div style={{ textAlign:"center",color:"#9ca3af",fontSize:11,padding:"26px 0 10px" }}>
         ENERED | Red Inteligente de Energías &nbsp;I Copyright © 2024 I Energix Peru I Todos los derechos son reservados.
       </div>
     </div>
   );
 }
-
