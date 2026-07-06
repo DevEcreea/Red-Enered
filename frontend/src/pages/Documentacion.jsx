@@ -1,36 +1,27 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState, useEffect } from "react";
 import {
   FileText, CheckCircle2, Clock, AlertTriangle, Plus, Download,
   ChevronDown, Calendar, Users, Truck, Tag, User, Activity,
   LayoutTemplate, MoreHorizontal, X, Route, Building2,
   Car, UploadCloud, Archive, RotateCcw, Trash2, Eye,
-  Sparkles, Folder, Files
+  Sparkles, Folder, Files, Loader2
 } from "lucide-react";
+import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const SEED = {
-  "Vehículos": [
-    { id:"20001", tipo:"Administración", doc:"Tarjeta de propiedad",               por:"Cindy Coach",  el:"12/01/24", emi:"15/01/24", ven:"15/01/27", atr:"—",        est:"Vigente",  veh:1,  grp:0,  all:0, archived:0 },
-    { id:"20002", tipo:"Administración", doc:"SOAT",                               por:"Bisma Ishfaq", el:"28/04/25", emi:"28/04/25", ven:"28/04/26", atr:"2 meses",  est:"Vencido",  veh:3,  grp:2,  all:0, archived:0 },
-    { id:"20003", tipo:"Operación",      doc:"Revisión Técnica",                   por:"Cindy Coach",  el:"10/06/25", emi:"10/06/25", ven:"10/06/26", atr:"22 días",  est:"Vencido",  veh:1,  grp:0,  all:0, archived:0 },
-    { id:"20004", tipo:"Administración", doc:"Seguro Vehicular",                   por:"Anwesha Ch.",  el:"01/01/26", emi:"01/01/26", ven:"01/02/27", atr:"—",        est:"Vigente",  veh:0,  grp:0,  all:1, archived:0 },
-    { id:"20005", tipo:"Operación",      doc:"Permiso de circulación",             por:"Atif Safeer",  el:"03/06/25", emi:"03/06/25", ven:"03/06/26", atr:"29 días",  est:"Vencido",  veh:1,  grp:0,  all:0, archived:0 },
-    { id:"20006", tipo:"Administración", doc:"Tarjeta de identificación de seguro",por:"Bisma Ishfaq", el:"10/02/25", emi:"10/02/25", ven:"10/08/26", atr:"—",        est:"Próximo",  veh:5,  grp:0,  all:0, archived:0 },
-    { id:"20007", tipo:"Administración", doc:"Seguro Vehicular",                   por:"Cindy Coach",  el:"01/03/23", emi:"12/05/23", ven:"01/09/24", atr:"—",        est:"Archivado",veh:20, grp:28, all:0, archived:1 },
-  ],
+  "Vehículos": [],
   "Personal": [
-    { id:"30001", tipo:"Conductor",      doc:"Licencia de conducir",   por:"Cindy Coach",  el:"02/01/25", emi:"15/03/24", ven:"15/03/27", atr:"—",       est:"Vigente", veh:1, grp:0, all:0, archived:0 },
-    { id:"30002", tipo:"Conductor",      doc:"Certificado médico",     por:"Bisma Ishfaq", el:"10/01/25", emi:"10/01/25", ven:"10/01/26", atr:"5 meses", est:"Vencido", veh:1, grp:0, all:0, archived:0 },
-    { id:"30003", tipo:"Conductor",      doc:"Antecedentes penales",   por:"Atif Safeer",  el:"20/02/25", emi:"20/02/25", ven:"20/08/26", atr:"—",       est:"Próximo", veh:0, grp:3, all:0, archived:0 },
+    { id:"30001", tipo:"Personal",      doc:"Licencia de conducir",   por:"Cindy Coach",  el:"02/01/25", emi:"15/03/24", ven:"15/03/27", atr:"—",       est:"Vigente", veh:1, grp:0, all:0, archived:0 },
+    { id:"30002", tipo:"Personal",      doc:"Certificado médico",     por:"Bisma Ishfaq", el:"10/01/25", emi:"10/01/25", ven:"10/01/26", atr:"5 meses", est:"Vencido", veh:1, grp:0, all:0, archived:0 },
+    { id:"30003", tipo:"Personal",      doc:"Antecedentes penales",   por:"Atif Safeer",  el:"20/02/25", emi:"20/02/25", ven:"20/08/26", atr:"—",       est:"Próximo", veh:0, grp:3, all:0, archived:0 },
   ],
   "Viajes": [
-    { id:"40001", tipo:"Viaje", doc:"Guía de remisión",    por:"Cindy Coach",  el:"01/06/26", emi:"01/06/26", ven:"01/07/26", atr:"—",       est:"Vigente", veh:1, grp:0, all:0, archived:0 },
-    { id:"40002", tipo:"Viaje", doc:"Manifiesto de carga", por:"Anwesha Ch.",  el:"20/05/26", emi:"20/05/26", ven:"20/05/26", atr:"10 días", est:"Vencido", veh:2, grp:0, all:0, archived:0 },
+    { id:"40001", tipo:"Viajes", doc:"Guía de remisión",    por:"Cindy Coach",  el:"01/06/26", emi:"01/06/26", ven:"01/07/26", atr:"—",       est:"Vigente", veh:1, grp:0, all:0, archived:0 },
+    { id:"40002", tipo:"Viajes", doc:"Manifiesto de carga", por:"Anwesha Ch.",  el:"20/05/26", emi:"20/05/26", ven:"20/05/26", atr:"10 días", est:"Vencido", veh:2, grp:0, all:0, archived:0 },
   ],
-  "Empresa": [
-    { id:"50001", tipo:"Empresa", doc:"Ficha RUC",     por:"Bisma Ishfaq", el:"01/01/24", emi:"01/01/24", ven:"01/01/27", atr:"—", est:"Vigente", veh:0, grp:1, all:1, archived:0 },
-    { id:"50002", tipo:"Empresa", doc:"Licencia MTC",  por:"Cindy Coach",  el:"15/07/25", emi:"15/07/25", ven:"15/08/26", atr:"—", est:"Próximo", veh:0, grp:0, all:1, archived:0 },
-  ],
+  "Empresa": [],
 };
 
 const TEMPLATES_INIT = [
@@ -143,14 +134,23 @@ const lblSt   = { fontSize:11,color:"#6b7280",marginBottom:4,display:"block" };
 
 // ═════════════════════════════════ MAIN ══════════════════════════════════════
 export default function Documentacion() {
+  const { user } = useAuth();
   const [tab, setTab]           = useState("Vehículos");
-  const [docs, setDocs]         = useState(JSON.parse(JSON.stringify(SEED)));
+  const [docs, setDocs]         = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [empresaFiltro, setEmpresaFiltro] = useState("");
+  const [empresas, setEmpresas] = useState([]);
+
   const [templates, setTemplates] = useState(TEMPLATES_INIT);
   const [verArch, setVerArch]   = useState(false);
   const [openMenu, setOpenMenu] = useState(null); // doc id with open row-menu
   const [addOpen, setAddOpen]   = useState(false);
   const [toast, setToast]       = useState(null);
   const toastRef = useRef(null);
+
+  // file upload refs & state
+  const fileInputRef = useRef(null);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   // modals
   const [typeModal, setTypeModal] = useState(false);
@@ -159,6 +159,41 @@ export default function Documentacion() {
   const [newDoc, setNewDoc]       = useState({});
   const [newTpl, setNewTpl]       = useState({});
 
+  const load = async () => {
+    setLoading(true);
+    try {
+      const url = user?.role === "admin_enered" && empresaFiltro
+        ? `/documents?empresa=${encodeURIComponent(empresaFiltro)}`
+        : "/documents";
+      const { data } = await api.get(url);
+      
+      let mergedDocs = data || [];
+      const hasPersonal = mergedDocs.some(d => d.tipo === "Personal");
+      if (!hasPersonal) {
+        mergedDocs = [...mergedDocs, ...SEED.Personal];
+      }
+      const hasViajes = mergedDocs.some(d => d.tipo === "Viajes");
+      if (!hasViajes) {
+        mergedDocs = [...mergedDocs, ...SEED.Viajes];
+      }
+      setDocs(mergedDocs);
+    } catch (err) {
+      console.error("Error loading documents:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, [empresaFiltro]);
+
+  useEffect(() => {
+    if (user?.role === "admin_enered") {
+      api.get("/admin/empresas").then(r => setEmpresas(r.data || [])).catch(() => {});
+    }
+  }, [user]);
+
   function showToast(msg) {
     setToast(msg);
     clearTimeout(toastRef.current);
@@ -166,8 +201,14 @@ export default function Documentacion() {
   }
 
   const isTemplate = tab === "Plantilla";
-  const tabDocs    = isTemplate ? [] : (docs[tab] || []);
-  const visible    = tabDocs.filter(d => verArch ? true : !d.archived);
+  const tabDocs = useMemo(() => {
+    if (isTemplate) return [];
+    return docs.filter(d => d.tipo === tab);
+  }, [tab, docs, isTemplate]);
+
+  const visible = useMemo(() => {
+    return tabDocs.filter(d => verArch ? true : !d.archived);
+  }, [tabDocs, verArch]);
 
   // KPIs
   const kpis = useMemo(()=>{
@@ -186,44 +227,87 @@ export default function Documentacion() {
       { n:act.filter(d=>d.est==="Próximo").length,     l:"PRÓXIMOS",   icon:Clock,          iconColor:"#D97706", iconBg:"#FFFBEB" },
       { n:act.filter(d=>d.est==="Vencido").length,     l:"VENCIDOS",   icon:AlertTriangle,  iconColor:"#DC2626", iconBg:"#FEF2F2" },
     ];
-  }, [tab, docs, templates]);
+  }, [tab, tabDocs, templates, isTemplate]);
 
-  // actions
-  function doAction(action, id) {
-    setOpenMenu(null);
-    setDocs(prev => {
-      const arr = [...(prev[tab]||[])];
-      const idx = arr.findIndex(x=>x.id===id);
-      if (idx < 0) return prev;
-      const d = { ...arr[idx] };
-      if (action==="archivar")  { d.archived=1; d.est="Archivado"; showToast("Documento archivado"); }
-      if (action==="restaurar") { d.archived=0; d.est="Vigente";   showToast("Documento restaurado"); }
-      if (action==="eliminar")  { arr.splice(idx,1); showToast("Documento eliminado"); return { ...prev, [tab]: arr }; }
-      if (action==="descargar") { showToast("Descargando documento"); return prev; }
-      arr[idx]=d;
-      return { ...prev, [tab]: arr };
-    });
-  }
+  // Actions
+  const handleDelete = async (id) => {
+    if (String(id).startsWith("300") || String(id).startsWith("400")) {
+      setDocs(prev => prev.filter(d => d.id !== id));
+      showToast("Documento eliminado");
+      return;
+    }
+    if (!window.confirm("¿Seguro de que deseas eliminar este documento permanentemente?")) return;
+    try {
+      await api.delete(`/documents/${id}`);
+      showToast("Documento eliminado correctamente");
+      load();
+    } catch (err) {
+      alert("Error al eliminar documento: " + (err.response?.data?.detail || err.message));
+    }
+  };
 
-  function handleSaveDoc(e) {
+  const handleArchive = async (id, isArchive) => {
+    if (String(id).startsWith("300") || String(id).startsWith("400")) {
+      setDocs(prev => prev.map(d => d.id === id ? { ...d, archived: isArchive ? 1 : 0, est: isArchive ? "Archivado" : "Vigente" } : d));
+      showToast(isArchive ? "Documento archivado" : "Documento restaurado");
+      return;
+    }
+    try {
+      await api.put(`/documents/${id}/archive?archived=${isArchive ? 1 : 0}`);
+      showToast(isArchive ? "Documento archivado" : "Documento restaurado");
+      load();
+    } catch (err) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleDownload = async (id, filename) => {
+    if (String(id).startsWith("300") || String(id).startsWith("400")) {
+      showToast("Descargando documento simulado...");
+      return;
+    }
+    try {
+      const r = await api.get(`/documents/${id}/download`, { responseType: "blob" });
+      const blob = new Blob([r.data], { type: r.headers["content-type"] });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || "documento";
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      showToast("Documento descargado");
+    } catch (err) {
+      alert("No se pudo descargar el documento.");
+    }
+  };
+
+  const handleSaveDoc = async (e) => {
     e.preventDefault();
-    const newEntry = {
-      id: String(Date.now()),
-      tipo: addForm,
-      doc: newDoc.doc || addForm,
-      por: "Admin",
-      el: new Date().toLocaleDateString("es-PE"),
-      emi: newDoc.emi || "—",
-      ven: newDoc.ven || "—",
-      atr: "—",
-      est: "Vigente",
-      veh: 0, grp: 0, all: 0, archived: 0,
-    };
-    setDocs(prev => ({ ...prev, [tab]: [newEntry, ...(prev[tab]||[])] }));
-    setAddForm(null);
-    setNewDoc({});
-    showToast("Documento guardado");
-  }
+    if (!selectedFile) {
+      alert("Por favor selecciona un archivo");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", selectedFile);
+    fd.append("tipo", tab);
+    fd.append("doc", newDoc.doc || addForm);
+    if (newDoc.emi) fd.append("emi", newDoc.emi);
+    if (newDoc.ven) fd.append("ven", newDoc.ven);
+    if (newDoc.placa) fd.append("placa", newDoc.placa);
+
+    try {
+      await api.post("/documents", fd, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      setAddForm(null);
+      setSelectedFile(null);
+      setNewDoc({});
+      showToast("Documento guardado correctamente");
+      load();
+    } catch (err) {
+      alert("Error al guardar: " + (err.response?.data?.detail || err.message));
+    }
+  };
 
   function handleCreateTpl(e) {
     e.preventDefault();
@@ -239,7 +323,7 @@ export default function Documentacion() {
 
   return (
     <div style={{ padding:"24px 32px",background:"#F3F4F6",minHeight:"100%" }} data-testid="page-documentacion">
-
+      <Toast msg={toast}/>
       {/* TABS */}
       <div style={{ display:"flex",alignItems:"center",gap:28,borderBottom:"1px solid #E5E7EB",marginBottom:22 }}>
         {TABS.map(({ key, icon:Icon })=>(
@@ -264,6 +348,27 @@ export default function Documentacion() {
       {/* FILTER BAR */}
       <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16 }}>
         <div style={{ display:"flex",alignItems:"center",flexWrap:"wrap",gap:10 }}>
+          {user?.role === "admin_enered" && (
+            <select
+              value={empresaFiltro}
+              onChange={e => setEmpresaFiltro(e.target.value)}
+              style={{
+                height: 38,
+                padding: "0 12px",
+                fontSize: 13,
+                fontWeight: 600,
+                border: "1px solid #E5E7EB",
+                borderRadius: 8,
+                background: "#fff",
+                color: "#374151",
+                outline: "none",
+                minWidth: 160
+              }}
+            >
+              <option value="">Todas las empresas</option>
+              {empresas.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+          )}
           <FBtn icon={Calendar} label="Fecha de creación"/>
           <FBtn label="Grupos"/>
           <FBtn label="Vehículos"/>
@@ -320,7 +425,15 @@ export default function Documentacion() {
                 </tr>
               </thead>
               <tbody>
-                {visible.length===0 ? (
+                {loading ? (
+                  <tr>
+                    <td colSpan={10} style={{ padding: "40px 16px", textAlign: "center" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center", gap: 8, color: "#8B3DFF", fontWeight: 600, fontSize: 14 }}>
+                        <Loader2 className="w-5 h-5 animate-spin" /> Cargando documentos...
+                      </div>
+                    </td>
+                  </tr>
+                ) : visible.length===0 ? (
                   <tr><td colSpan={10} style={{ textAlign:"center",padding:"40px 16px",fontSize:13,color:"#9ca3af" }}>No hay documentos en esta categoría.</td></tr>
                 ) : visible.map((d,i)=>{
                   const menuOpen = openMenu===d.id;
@@ -357,10 +470,10 @@ export default function Documentacion() {
                         {menuOpen && (
                           <div style={{ position:"absolute",right:8,top:44,width:220,background:"#fff",border:"1px solid #F0F0F3",borderRadius:10,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"4px 0",zIndex:40 }}>
                             {[
-                              { icon:Eye,      label:"Ver detalles del documento",  action:null },
-                              { icon:Download, label:"Descargar documento",         action:"descargar" },
+                              { icon:Eye,      label:"Ver detalles del documento",  onClick: () => setOpenMenu(null) },
+                              { icon:Download, label:"Descargar documento",         onClick: () => { setOpenMenu(null); handleDownload(d.id, d.filename); } },
                             ].map((item,j)=>(
-                              <button key={j} onClick={()=>item.action?doAction(item.action,d.id):setOpenMenu(null)}
+                              <button key={j} onClick={item.onClick}
                                 style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                 onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
@@ -369,20 +482,20 @@ export default function Documentacion() {
                             ))}
                             <div style={{ height:1,background:"#F3F4F6",margin:"4px 0" }}/>
                             {d.archived ? (<>
-                              <button onClick={()=>doAction("restaurar",d.id)}
+                              <button onClick={() => { setOpenMenu(null); handleArchive(d.id, false); }}
                                 style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                 onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
                                 <RotateCcw style={{ width:15,height:15,color:"#9ca3af" }}/>Restaurar documento
                               </button>
-                              <button onClick={()=>doAction("eliminar",d.id)}
+                              <button onClick={() => { setOpenMenu(null); handleDelete(d.id); }}
                                 style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                 onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
                                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
                                 <Trash2 style={{ width:15,height:15,color:"#DC2626" }}/>Eliminar documento
                               </button>
                             </>) : (
-                              <button onClick={()=>doAction("archivar",d.id)}
+                              <button onClick={() => { setOpenMenu(null); handleArchive(d.id, true); }}
                                 style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                 onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
                                 onMouseLeave={e=>e.currentTarget.style.background="none"}>
@@ -478,14 +591,25 @@ export default function Documentacion() {
               <button onClick={handleSaveDoc} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 16px",fontSize:13,fontWeight:600,color:"#fff",background:"#8B3DFF",border:"none",borderRadius:8,cursor:"pointer" }}>Guardar</button>
             </div>
           </div>
-          <div style={{ overflowY:"auto",padding:24 }}>
             {/* Drop zone */}
             <div style={{ fontSize:13,fontWeight:600,color:"#374151",marginBottom:10 }}>Adjuntos</div>
-            <div style={{ border:"2px dashed #DDD6F3",borderRadius:12,padding:"28px 16px",background:"#FAF9FF",display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",marginBottom:20 }}>
-              <UploadCloud style={{ width:26,height:26,color:"#8B3DFF" }}/>
-              <div style={{ fontSize:13,fontWeight:600,color:"#8B3DFF",marginTop:8 }}>Agregar adjunto</div>
-              <div style={{ fontSize:11.5,color:"#9ca3af",marginTop:2 }}>o arrastra los archivos aquí</div>
-              <div style={{ fontSize:11,color:"#9ca3af",marginTop:8 }}>Hasta 5 adjuntos · JPG, PNG y PDF</div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              style={{ display: "none" }}
+              onChange={(e) => setSelectedFile(e.target.files[0])}
+            />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{ cursor: "pointer", border: "2px dashed #DDD6F3", borderRadius: 12, padding: "28px 16px", background: "#FAF9FF", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", marginBottom: 20 }}
+            >
+              <UploadCloud style={{ width: 26, height: 26, color: "#8B3DFF" }} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#8B3DFF", marginTop: 8 }}>
+                {selectedFile ? selectedFile.name : "Agregar adjunto"}
+              </div>
+              <div style={{ fontSize: 11.5, color: "#9ca3af", marginTop: 2 }}>
+                {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : "o haz clic para seleccionar un archivo"}
+              </div>
             </div>
             {/* Fields */}
             <div style={{ fontSize:13,fontWeight:600,color:"#374151",marginBottom:10 }}>Detalles</div>
@@ -510,13 +634,12 @@ export default function Documentacion() {
                 <label style={lblSt}>Nombre del documento</label>
                 <input style={inputSt} placeholder="Ej. Seguro Vehicular 2026" value={newDoc.doc||""} onChange={e=>setNewDoc(p=>({...p,doc:e.target.value}))}/>
               </div>
-              <div style={{ gridColumn:"1/-1" }}>
-                <label style={lblSt}>Compartir con</label>
-                <div style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 12px",border:"1px solid #E5E7EB",borderRadius:8 }}>
-                  <Users style={{ width:15,height:15,color:"#9ca3af" }}/>
-                  <span style={{ fontSize:13,color:"#9ca3af" }}>Selecciona vehículos o grupos</span>
+              {tab === "Vehículos" && (
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lblSt}>Placa del vehículo</label>
+                  <input style={inputSt} placeholder="Ej. ABC-123" value={newDoc.placa||""} onChange={e=>setNewDoc(p=>({...p,placa:e.target.value.toUpperCase()}))}/>
                 </div>
-              </div>
+              )}
               <div style={{ gridColumn:"1/-1" }}>
                 <label style={lblSt}>Descripción</label>
                 <textarea style={{ ...inputSt,height:"auto",minHeight:64,padding:"8px 12px",resize:"none" }} placeholder="Agrega una nota o descripción…" value={newDoc.desc||""} onChange={e=>setNewDoc(p=>({...p,desc:e.target.value}))}/>

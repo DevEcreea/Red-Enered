@@ -3388,6 +3388,249 @@ async def seed_demo_data():
 
 
 
+# ─── DOCUMENTACION MODULE ENDPOINTS ───
+
+SUB_CAT_MAP = {
+    "ficha_ruc": ("Empresa", "Ficha RUC"),
+    "resolucion_autorizacion": ("Empresa", "Resolución de autorización"),
+    "dni_representante": ("Empresa", "DNI del representante"),
+    "tarjeta_propiedad": ("Vehículos", "Tarjeta de propiedad"),
+    "tarjeta_circulacion": ("Vehículos", "Tarjeta de circulación"),
+    "soat": ("Vehículos", "SOAT"),
+    "revision_tecnica": ("Vehículos", "Revisión Técnica"),
+}
+
+@api.get("/documents")
+async def list_documents(
+    user: dict = Depends(get_current_user),
+    empresa: Optional[str] = None,
+):
+    # Multi-tenant isolation
+    if user["role"] == "admin_enered":
+        target_empresa = empresa or None
+    else:
+        target_empresa = user.get("empresa")
+
+    # Fetch manual documents from db.documents
+    doc_q = {}
+    if target_empresa:
+        doc_q["empresa"] = target_empresa
+    manual_docs = await db.documents.find(doc_q).to_list(1000)
+
+    # Fetch subsidio documents from db.subsidio_documents
+    sub_q = {}
+    if target_empresa:
+        sub_q["empresa"] = target_empresa
+    elif user["role"] != "admin_enered":
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
+        uids = [str(u["_id"]) async for u in cursor]
+        sub_q["user_id"] = {"$in": uids}
+    subsidio_docs = await db.subsidio_documents.find(sub_q).to_list(1000)
+
+    results = []
+
+    # Map manual documents
+    for d in manual_docs:
+        results.append({
+            "id": d.get("id") or str(d.get("_id")),
+            "tipo": d.get("tipo") or "Otros",
+            "doc": d.get("doc") or "Documento",
+            "por": d.get("por") or "Admin",
+            "el": d.get("el") or d.get("uploaded_at") or "",
+            "emi": d.get("emi") or "—",
+            "ven": d.get("ven") or "—",
+            "atr": d.get("atr") or "—",
+            "veh": d.get("veh") or 0,
+            "grp": d.get("grp") or 0,
+            "all": d.get("all") or 0,
+            "placa": d.get("placa") or "",
+            "archived": int(d.get("archived") or 0),
+            "est": d.get("est") or "Vigente",
+            "filename": d.get("filename") or "",
+            "_origen": "manual",
+        })
+
+    # Map subsidio documents
+    for sd in subsidio_docs:
+        cat = sd.get("categoria") or sd.get("category")
+        tipo, doc_name = SUB_CAT_MAP.get(cat, ("Otros", cat or "Documento"))
+        
+        est = "Vigente"
+        if sd.get("status") == "rechazado":
+            est = "Vencido"
+        elif sd.get("archived"):
+            est = "Archivado"
+
+        el_date = ""
+        up_at = sd.get("uploaded_at") or sd.get("created_at")
+        if up_at:
+            try:
+                dt = datetime.fromisoformat(up_at.replace("Z", "+00:00"))
+                el_date = dt.strftime("%d/%m/%y")
+            except Exception:
+                el_date = up_at[:10]
+
+        results.append({
+            "id": sd.get("id") or str(sd.get("_id")),
+            "tipo": tipo,
+            "doc": doc_name,
+            "por": "Cliente (Subsidio)",
+            "el": el_date,
+            "emi": "—",
+            "ven": "—",
+            "atr": "—",
+            "veh": 1 if sd.get("placa") else 0,
+            "grp": 0,
+            "all": 0,
+            "placa": sd.get("placa") or "",
+            "archived": 1 if sd.get("archived") else 0,
+            "est": est,
+            "filename": sd.get("filename") or "",
+            "_origen": "subsidio",
+        })
+
+    results.sort(key=lambda x: x["id"], reverse=True)
+    return results
+
+@api.post("/documents")
+async def upload_manual_document(
+    file: UploadFile = File(...),
+    tipo: str = Form(...),
+    doc: str = Form(...),
+    emi: Optional[str] = Form(None),
+    ven: Optional[str] = Form(None),
+    placa: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user),
+):
+    content = await file.read()
+    key = f"documents/{user.get('empresa') or 'general'}/{str(uuid.uuid4())}_{file.filename}"
+    content_type = file.content_type or "application/octet-stream"
+    storage.save_object(key, content, content_type)
+
+    doc_id = str(uuid.uuid4())
+    doc_record = {
+        "id": doc_id,
+        "empresa": user.get("empresa"),
+        "tipo": tipo,
+        "doc": doc,
+        "por": user.get("name", "Usuario"),
+        "el": datetime.now(timezone.utc).strftime("%d/%m/%y"),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "emi": emi or "—",
+        "ven": ven or "—",
+        "atr": "—",
+        "veh": 1 if placa else 0,
+        "grp": 0,
+        "all": 0 if placa else 1,
+        "placa": placa.upper().strip() if placa else "",
+        "archived": 0,
+        "est": "Vigente",
+        "filename": file.filename,
+        "storage_key": key,
+        "content_type": content_type,
+        "size": len(content),
+    }
+
+    await db.documents.insert_one(doc_record)
+    doc_record.pop("_id", None)
+    doc_record.pop("storage_key", None)
+    doc_record.pop("content_type", None)
+    doc_record["_origen"] = "manual"
+    return doc_record
+
+@api.delete("/documents/{doc_id}")
+async def delete_document(
+    doc_id: str,
+    user: dict = Depends(get_current_user),
+):
+    doc = await db.documents.find_one({"id": doc_id})
+    if doc:
+        if user["role"] != "admin_enered" and doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        try:
+            storage.delete_object(doc["storage_key"])
+        except Exception:
+            pass
+        await db.documents.delete_one({"id": doc_id})
+        return {"status": "deleted"}
+
+    sub_doc = await db.subsidio_documents.find_one({"id": doc_id})
+    if sub_doc:
+        if user["role"] != "admin_enered" and sub_doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        try:
+            storage.delete_object(sub_doc["storage_key"])
+        except Exception:
+            pass
+        await db.subsidio_documents.delete_one({"id": doc_id})
+        return {"status": "deleted"}
+
+    raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+@api.put("/documents/{doc_id}/archive")
+async def archive_document(
+    doc_id: str,
+    archived: int,
+    user: dict = Depends(get_current_user),
+):
+    doc = await db.documents.find_one({"id": doc_id})
+    if doc:
+        if user["role"] != "admin_enered" and doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        est = "Archivado" if archived else "Vigente"
+        await db.documents.update_one({"id": doc_id}, {"$set": {"archived": archived, "est": est}})
+        return {"status": "updated"}
+
+    sub_doc = await db.subsidio_documents.find_one({"id": doc_id})
+    if sub_doc:
+        if user["role"] != "admin_enered" and sub_doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        await db.subsidio_documents.update_one({"id": doc_id}, {"$set": {"archived": bool(archived)}})
+        return {"status": "updated"}
+
+    raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+from fastapi.responses import StreamingResponse
+import io
+
+@api.get("/documents/{doc_id}/download")
+async def download_document(
+    doc_id: str,
+    user: dict = Depends(get_current_user),
+):
+    doc = await db.documents.find_one({"id": doc_id})
+    if doc:
+        if user["role"] != "admin_enered" and doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        file_bytes = storage.read_object(doc["storage_key"])
+        if not file_bytes:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        content_type = doc.get("content_type") or "application/octet-stream"
+        filename = doc.get("filename") or "documento"
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type=content_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    sub_doc = await db.subsidio_documents.find_one({"id": doc_id})
+    if sub_doc:
+        if user["role"] != "admin_enered" and sub_doc.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="No autorizado")
+        file_bytes = storage.read_object(sub_doc["storage_key"])
+        if not file_bytes:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        content_type = sub_doc.get("content_type") or "application/octet-stream"
+        filename = sub_doc.get("filename") or "documento"
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type=content_type,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+
 @app.on_event("startup")
 async def startup():
     await db.users.create_index("email", unique=True)
