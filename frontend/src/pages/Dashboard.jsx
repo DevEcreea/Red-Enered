@@ -650,16 +650,16 @@ export default function Dashboard() {
         <MiniKpiCard
           icon={CreditCard}
           label="Unidades habilitadas"
-          value={formatNumber(unidades_contratadas || 0, 0)}
-          subtitle={`${formatNumber(und_con_gps || 0, 0)} con GPS`}
+          value={formatNumber(und_con_gps || 0, 0)}
+          subtitle={`de ${formatNumber(total_vehicles || 0, 0)} habilitadas`}
           iconColor="text-neutral-500"
           testid="kpi-unidades-habilitadas"
         />
         <MiniKpiCard
           icon={Droplet}
           label="Cargas / semana"
-          value={formatNumber(cargas_semana || 0, 0)}
-          subtitle="esta semana"
+          value={formatNumber(cargas || 0, 0)}
+          subtitle={`${formatNumber(cargas_semana || 0, 0)} esta semana`}
           iconColor="text-cyan-500"
           testid="kpi-cargas"
         />

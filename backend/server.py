@@ -844,6 +844,19 @@ async def dashboard_overview(
         q["EMPRESA"] = target_empresa
     rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
 
+    # Fetch subsidio consumptions
+    sub_q = {}
+    if target_empresa:
+        sub_q["empresa"] = target_empresa
+    elif user["role"] != "admin_enered":
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
+        uids = [str(u["_id"]) async for u in cursor]
+        sub_q["user_id"] = {"$in": uids}
+
+    sub_rows = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(100000)
+    mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
+    rows.extend(mapped_sub)
+
     def _f(x, d=0):
         try: return float(x) if x not in (None, "") else d
         except Exception: return d
@@ -920,17 +933,53 @@ async def dashboard_overview(
         veh_q["empresa"] = target_empresa
     total_vehicles = await db.vehiculos.count_documents(veh_q)
 
-    # Active vehicles (OPERATIVO state)
-    veh_active_q = {"estado": "OPERATIVO"}
+    # Subsidio vehicles count
+    user_ids = []
     if target_empresa:
-        veh_active_q["empresa"] = target_empresa
-    unidades_activas = await db.vehiculos.count_documents(veh_active_q)
+        cursor = db.users.find({"empresa": target_empresa}, {"_id": 1})
+        async for u in cursor:
+            user_ids.append(str(u["_id"]))
+    elif user["role"] != "admin_enered":
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
+        async for u in cursor:
+            user_ids.append(str(u["_id"]))
+    if user.get("id"):
+        user_ids.append(user["id"])
+    user_ids = list(set(user_ids))
 
-    # Unidades con GPS
+    subsidio_vehicles_count = 0
+    if target_empresa or user["role"] != "admin_enered":
+        subsidio_vehicles_count = await db.subsidio_vehicles.count_documents({"user_id": {"$in": user_ids}})
+    else:
+        subsidio_vehicles_count = await db.subsidio_vehicles.count_documents({})
+    
+    total_vehicles = max(total_vehicles, subsidio_vehicles_count)
+
+    # Active GPS units count via Wialon
+    und_con_gps = 0
     if target_empresa:
         svc_info = await _svc.get_empresa_servicios(db, target_empresa)
         if svc_info.get("servicios", {}).get("gps"):
-            und_con_gps = total_vehicles
+            cfg_w = await _svc.get_empresa_wialon_config(db, target_empresa)
+            if cfg_w:
+                try:
+                    import json as _json, httpx as _httpx
+                    host = cfg_w["host"]
+                    base = f"https://{host}/wialon/ajax.html"
+                    async with _httpx.AsyncClient(timeout=4.0) as client:
+                        r = await client.get(base, params={"svc": "token/login", "params": _json.dumps({"token": cfg_w["token"]})})
+                        d = r.json()
+                        if "eid" in d:
+                            sid = d["eid"]
+                            search_params = {
+                                "spec": {"itemsType":"avl_unit","propName":"sys_name","propValueMask":"*","sortType":"sys_name","propType":"property"},
+                                "force": 1, "flags": 1, "from": 0, "to": 500,
+                            }
+                            r2 = await client.get(base, params={"svc":"core/search_items", "params": _json.dumps(search_params), "sid": sid})
+                            d2 = r2.json()
+                            und_con_gps = len(d2.get("items") or [])
+                except Exception:
+                    und_con_gps = total_vehicles
         else:
             und_con_gps = 0
     else:
@@ -940,6 +989,9 @@ async def dashboard_overview(
             if c.get("servicios", {}).get("gps"):
                 gps_companies.append(c.get("empresa"))
         und_con_gps = await db.vehiculos.count_documents({"empresa": {"$in": gps_companies}})
+
+    # Unidades activas is the units with GPS
+    unidades_activas = und_con_gps
 
     # Rendimiento promedio (km/gal) y Costo por km (TCO)
     by_placa_km = {}
@@ -1047,6 +1099,32 @@ async def dashboard_kpis(
         q["PRODUCTO"] = producto
 
     rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+
+    # Fetch subsidio consumptions
+    sub_q = {}
+    if empresa and user["role"] == "admin_enered":
+        sub_q["empresa"] = empresa
+    elif user["role"] != "admin_enered":
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
+        uids = [str(u["_id"]) async for u in cursor]
+        sub_q["user_id"] = {"$in": uids}
+
+    if fecha_desde:
+        sub_q.setdefault("fecha", {})["$gte"] = fecha_desde
+    if fecha_hasta:
+        sub_q.setdefault("fecha", {})["$lte"] = fecha_hasta
+    if placa:
+        sub_q["placa"] = placa.upper()
+    if estacion:
+        sub_q["estacion"] = estacion
+    if producto:
+        sub_q["producto"] = producto
+
+    sub_rows = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(100000)
+    mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
+    if semana:
+        mapped_sub = [r for r in mapped_sub if r.get("SEMANA") == semana]
+    rows.extend(mapped_sub)
 
     def _f(x, default=0):
         try: return float(x) if x not in (None, "") else default
