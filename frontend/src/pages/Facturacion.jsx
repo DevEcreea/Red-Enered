@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
-  Clock, AlertCircle, FileSpreadsheet, Eye,
+  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
@@ -133,6 +133,20 @@ export default function Facturacion() {
       toast.error(`No se encontró el ${kind.toUpperCase()} de la factura`);
     }
   };
+
+  const handleDelete = async (inv) => {
+    if (!window.confirm(`¿Seguro de que deseas eliminar la factura ${inv.n_doc}?`)) return;
+    try {
+      await api.delete(`/invoices/${inv.id}`);
+      setInvoices((prev) => prev.filter((x) => x.id !== inv.id));
+      toast.success(`Factura ${inv.n_doc} eliminada.`);
+      const params = empresa ? { empresa } : {};
+      api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
+    } catch (err) {
+      toast.error("Error al eliminar la factura: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
 
   if (loading || !state) {
     return (
@@ -324,8 +338,12 @@ export default function Facturacion() {
                             <FileSpreadsheet className="w-4 h-4" />
                           </button>
                         )}
+                        <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
+
                   </tr>
                 ))
               )}

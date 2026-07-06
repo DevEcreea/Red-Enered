@@ -368,6 +368,7 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
     except Exception:
         pass
     return {
+        "id": r.get("id") or str(r.get("_id")) or "",
         "EMPRESA": r.get("empresa") or "",
         "FECHA": fecha,
         "HORA": r.get("hora") or "",
@@ -438,6 +439,179 @@ async def list_consumptions(
         q["SEMANA"] = semana
     rows = await db.consumptions.find(q, {"_id": 0}).sort("FECHA", -1).to_list(limit)
     return rows
+
+
+class ConsumptionCreate(BaseModel):
+    PLACA: str
+    EMPRESA: Optional[str] = None
+    FECHA: str
+    HORA: Optional[str] = None
+    CIUDAD: Optional[str] = None
+    ESTACION: Optional[str] = None
+    PRODUCTO: str
+    CANTIDAD_GL: float
+    PRECIO_UNITARIO: float
+    IMPORTE_TOTAL: float
+    CONDUCTOR: Optional[str] = None
+    KILOMETRAJE: Optional[int] = None
+    RUC_EMISOR: Optional[str] = None
+    NUMERO_DOCUMENTO: Optional[str] = None
+
+
+@api.post("/consumptions")
+async def create_consumption(
+    PLACA: str = Form(...),
+    EMPRESA: Optional[str] = Form(None),
+    FECHA: str = Form(...),
+    HORA: Optional[str] = Form(None),
+    CIUDAD: Optional[str] = Form(None),
+    ESTACION: Optional[str] = Form(None),
+    PRODUCTO: str = Form(...),
+    CANTIDAD_GL: float = Form(...),
+    PRECIO_UNITARIO: float = Form(...),
+    IMPORTE_TOTAL: float = Form(...),
+    CONDUCTOR: Optional[str] = Form(None),
+    KILOMETRAJE: Optional[int] = Form(None),
+    RUC_EMISOR: Optional[str] = Form(None),
+    NUMERO_DOCUMENTO: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_user)
+):
+    cid = str(uuid.uuid4())
+    empresa_target = EMPRESA or user.get("empresa") or ""
+    
+    # Guardar comprobante PDF si es provisto
+    pdf_filename = None
+    if file and file.filename:
+        content = await file.read()
+        pdf_filename = f"inv_{cid}_{file.filename}"
+        key = _inv_key(empresa_target, pdf_filename)
+        storage.save_object(key, content, content_type="application/pdf")
+
+    f_venc = FECHA[:10]
+    try:
+        from datetime import datetime as _datetime, timedelta
+        f_dt = _datetime.strptime(FECHA[:10], "%Y-%m-%d")
+        f_venc = (f_dt + timedelta(days=30)).date().isoformat()
+    except Exception:
+        pass
+
+    # Crear factura relacionada
+    if NUMERO_DOCUMENTO:
+        existing_inv = await db.invoices.find_one({"empresa": empresa_target, "n_doc": NUMERO_DOCUMENTO.upper()})
+        if not existing_inv:
+            inv_doc = {
+                "id": cid,
+                "empresa": empresa_target,
+                "n_doc": NUMERO_DOCUMENTO.upper(),
+                "tipo_doc": "factura",
+                "producto": PRODUCTO,
+                "f_emision": FECHA[:10],
+                "f_vencimiento": f_venc,
+                "moneda": "PEN",
+                "monto_total": IMPORTE_TOTAL,
+                "saldo": IMPORTE_TOTAL,
+                "estado": "pendiente",
+                "atraso_dias": 0,
+                "pdf_filename": pdf_filename,
+                "xml_filename": None,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "uploaded_by": user["email"],
+                "created_via": "consumption_sync",
+            }
+            await db.invoices.insert_one(inv_doc)
+
+    if user.get("role") == "cliente_subsidio":
+        doc = {
+            "id": cid,
+            "user_id": user["id"],
+            "empresa": empresa_target,
+            "placa": PLACA.upper(),
+            "fecha": FECHA[:10],
+            "hora": HORA or "00:00",
+            "ciudad": CIUDAD or "",
+            "estacion": ESTACION or "",
+            "producto": PRODUCTO,
+            "galones": CANTIDAD_GL,
+            "precio_unitario": PRECIO_UNITARIO,
+            "importe_total": IMPORTE_TOTAL,
+            "ruc_emisor": RUC_EMISOR or "",
+            "numero_documento": NUMERO_DOCUMENTO or "",
+            "status": "confirmed",
+            "pdf_filename": pdf_filename,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.consumos_subsidio.insert_one(doc)
+        return _subsidio_row_to_consumption(doc)
+    else:
+        semana = ""
+        try:
+            from datetime import date as _date
+            y, m, d = (int(x) for x in FECHA[:10].split("-"))
+            wk = _date(y, m, d).isocalendar()
+            semana = f"{wk.year}-W{wk.week:02d}"
+        except Exception:
+            pass
+            
+        doc = {
+            "id": cid,
+            "EMPRESA": empresa_target,
+            "PLACA": PLACA.upper(),
+            "FECHA": FECHA,
+            "HORA": HORA or "",
+            "CIUDAD": CIUDAD or "",
+            "ESTACION": ESTACION or "",
+            "PRODUCTO": PRODUCTO,
+            "CANTIDAD_GL": CANTIDAD_GL,
+            "PRECIO_UNITARIO": PRECIO_UNITARIO,
+            "IMPORTE_TOTAL": IMPORTE_TOTAL,
+            "AHORRO": round(CANTIDAD_GL * 1.5, 2),
+            "SEMANA": semana,
+            "CONDUCTOR": CONDUCTOR or "",
+            "KILOMETRAJE": KILOMETRAJE or 0,
+            "RUC_EMISOR": RUC_EMISOR or "",
+            "NUMERO_DOCUMENTO": NUMERO_DOCUMENTO or "",
+            "ESTADO": "FACTURADO",
+            "_origen": "manual",
+            "pdf_filename": pdf_filename,
+        }
+        await db.consumptions.insert_one(doc)
+        if "_id" in doc:
+            doc.pop("_id")
+        return doc
+
+
+@api.delete("/consumptions/{cid}")
+async def delete_consumption(cid: str, user: dict = Depends(get_current_user)):
+    if user.get("role") == "cliente_subsidio":
+        c_doc = await db.consumos_subsidio.find_one({"id": cid, "user_id": user["id"]})
+        if not c_doc:
+            raise HTTPException(status_code=404, detail="Consumo no encontrado")
+        
+        n_doc = c_doc.get("numero_documento")
+        empresa = c_doc.get("empresa") or user.get("empresa") or ""
+        if n_doc and empresa:
+            await db.invoices.delete_one({"n_doc": n_doc, "empresa": empresa})
+            
+        await db.consumos_subsidio.delete_one({"id": cid, "user_id": user["id"]})
+        return {"ok": True, "deleted": 1}
+    else:
+        q = {"id": cid}
+        if user["role"] != "admin_enered" and user.get("empresa"):
+            q["EMPRESA"] = user["empresa"]
+        c_doc = await db.consumptions.find_one(q)
+        if not c_doc:
+            raise HTTPException(status_code=404, detail="Consumo no encontrado")
+            
+        n_doc = c_doc.get("NUMERO_DOCUMENTO")
+        empresa = c_doc.get("EMPRESA") or user.get("empresa") or ""
+        if n_doc and empresa:
+            await db.invoices.delete_one({"n_doc": n_doc, "empresa": empresa})
+            
+        await db.consumptions.delete_one(q)
+        return {"ok": True, "deleted": 1}
+
+
 
 
 @api.get("/dashboard/filter-options")
@@ -1342,9 +1516,26 @@ async def update_invoice(inv_id: str, data: InvoiceUpdate,
 
 
 @api.delete("/invoices/{inv_id}")
-async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_enered"))):
+async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
+    inv = await db.invoices.find_one({"id": inv_id})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+        
+    if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
+        raise HTTPException(status_code=403, detail="Sin permisos para eliminar esta factura")
+        
+    n_doc = inv.get("n_doc")
+    empresa = inv.get("empresa")
+    
     await db.invoices.delete_one({"id": inv_id})
+    
+    if n_doc and empresa:
+        await db.consumptions.delete_many({"NUMERO_DOCUMENTO": n_doc, "EMPRESA": empresa})
+        await db.consumos_subsidio.delete_many({"numero_documento": n_doc, "empresa": empresa})
+        
     return {"ok": True}
+
+
 
 
 @api.post("/admin/invoices/{inv_id}/reassign")
