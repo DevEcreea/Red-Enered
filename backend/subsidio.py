@@ -9,7 +9,7 @@ import io
 import uuid
 import logging
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
 import bcrypt
@@ -928,6 +928,13 @@ async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidi
         storage.delete_object(inv["factura_storage_key"])
     except Exception:
         pass
+    
+    # Delete from db.invoices if it was confirmed
+    n_doc = (inv.get("numero_documento") or "").upper().strip()
+    empresa = inv.get("empresa") or user.get("empresa") or ""
+    if n_doc:
+        await db.invoices.delete_one({"empresa": empresa, "n_doc": n_doc})
+
     await db.consumos_subsidio.delete_one({"id": invoice_id})
     return {"ok": True}
 
@@ -935,8 +942,52 @@ async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidi
 @subsidio_router.post("/subsidio/invoices/confirm")
 async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     """Confirma TODAS las facturas en draft del usuario → status=confirmed.
-    Marca expediente_status=confirmed si no quedan drafts."""
+    Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed."""
     now = datetime.now(timezone.utc).isoformat()
+    drafts = await db.consumos_subsidio.find({"user_id": user["id"], "status": "draft"}).to_list(1000)
+
+    for d in drafts:
+        fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
+        if len(fecha_str) > 10:
+            fecha_str = fecha_str[:10]
+        f_venc = fecha_str
+        try:
+            f_dt = datetime.strptime(fecha_str, "%Y-%m-%d")
+            f_venc = (f_dt + timedelta(days=30)).date().isoformat()
+        except Exception:
+            try:
+                f_dt = datetime.strptime(fecha_str, "%d/%m/%Y")
+                fecha_str = f_dt.date().isoformat()
+                f_venc = (f_dt + timedelta(days=30)).date().isoformat()
+            except Exception:
+                pass
+
+        n_doc = (d.get("numero_documento") or "").upper().strip()
+        empresa = d.get("empresa") or user.get("empresa") or ""
+        if n_doc:
+            existing = await db.invoices.find_one({"empresa": empresa, "n_doc": n_doc})
+            if not existing:
+                inv_doc = {
+                    "id": d.get("id") or str(uuid.uuid4()),
+                    "empresa": empresa,
+                    "n_doc": n_doc,
+                    "tipo_doc": "factura",
+                    "producto": d.get("producto") or "DIESEL B5 S-50",
+                    "f_emision": fecha_str,
+                    "f_vencimiento": f_venc,
+                    "moneda": "PEN",
+                    "monto_total": float(d.get("importe_total") or 0.0),
+                    "saldo": float(d.get("importe_total") or 0.0),
+                    "estado": "pendiente",
+                    "atraso_dias": 0,
+                    "pdf_filename": d.get("factura_filename"),
+                    "xml_filename": None,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "uploaded_by": user["email"],
+                    "created_via": "subsidio_confirm",
+                }
+                await db.invoices.insert_one(inv_doc)
+
     res = await db.consumos_subsidio.update_many(
         {"user_id": user["id"], "status": "draft"},
         {"$set": {"status": "confirmed", "confirmed_at": now}},

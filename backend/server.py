@@ -563,6 +563,40 @@ async def create_consumption(
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.consumos_subsidio.insert_one(doc)
+
+        # Sync: crear factura en db.invoices para Facturación/Cuenta
+        n_doc_sub = (NUMERO_DOCUMENTO or "").upper().strip()
+        if n_doc_sub:
+            existing_inv = await db.invoices.find_one({"empresa": empresa_target, "n_doc": n_doc_sub})
+            if not existing_inv:
+                f_venc_sub = FECHA[:10]
+                try:
+                    from datetime import timedelta as _td
+                    f_dt_sub = datetime.strptime(FECHA[:10], "%Y-%m-%d")
+                    f_venc_sub = (f_dt_sub + _td(days=30)).date().isoformat()
+                except Exception:
+                    pass
+                inv_doc_sub = {
+                    "id": cid,
+                    "empresa": empresa_target,
+                    "n_doc": n_doc_sub,
+                    "tipo_doc": "factura",
+                    "producto": PRODUCTO,
+                    "f_emision": FECHA[:10],
+                    "f_vencimiento": f_venc_sub,
+                    "moneda": "PEN",
+                    "monto_total": IMPORTE_TOTAL,
+                    "saldo": IMPORTE_TOTAL,
+                    "estado": "pendiente",
+                    "atraso_dias": 0,
+                    "pdf_filename": pdf_filename,
+                    "xml_filename": None,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "uploaded_by": user["email"],
+                    "created_via": "subsidio_consumption",
+                }
+                await db.invoices.insert_one(inv_doc_sub)
+
         return _subsidio_row_to_consumption(doc)
     else:
         semana = ""
@@ -849,9 +883,7 @@ async def dashboard_overview(
     if target_empresa:
         sub_q["empresa"] = target_empresa
     elif user["role"] != "admin_enered":
-        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
-        uids = [str(u["_id"]) async for u in cursor]
-        sub_q["user_id"] = {"$in": uids}
+        sub_q["empresa"] = user.get("empresa")
 
     sub_rows = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(100000)
     mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
@@ -936,13 +968,15 @@ async def dashboard_overview(
     # Subsidio vehicles count
     user_ids = []
     if target_empresa:
-        cursor = db.users.find({"empresa": target_empresa}, {"_id": 1})
+        cursor = db.users.find({"empresa": target_empresa}, {"_id": 0, "id": 1})
         async for u in cursor:
-            user_ids.append(str(u["_id"]))
+            if u.get("id"):
+                user_ids.append(u["id"])
     elif user["role"] != "admin_enered":
-        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 0, "id": 1})
         async for u in cursor:
-            user_ids.append(str(u["_id"]))
+            if u.get("id"):
+                user_ids.append(u["id"])
     if user.get("id"):
         user_ids.append(user["id"])
     user_ids = list(set(user_ids))
@@ -1105,9 +1139,7 @@ async def dashboard_kpis(
     if empresa and user["role"] == "admin_enered":
         sub_q["empresa"] = empresa
     elif user["role"] != "admin_enered":
-        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
-        uids = [str(u["_id"]) async for u in cursor]
-        sub_q["user_id"] = {"$in": uids}
+        sub_q["empresa"] = user.get("empresa")
 
     if fecha_desde:
         sub_q.setdefault("fecha", {})["$gte"] = fecha_desde
