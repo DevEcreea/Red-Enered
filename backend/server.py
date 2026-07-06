@@ -3702,7 +3702,16 @@ async def download_document(
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
-    raise HTTPException(status_code=404, detail="Documento no encontrado")
+@api.get("/temp-clean-db-unique-992")
+async def temp_clean_db_unique():
+    empresa = "CONTRATA DE TRANSPORTE RAPESA S.A.C"
+    res1 = await db.consumptions.delete_many({"EMPRESA": empresa})
+    res2 = await db.consumos_subsidio.delete_many({"empresa": empresa, "status": {"$ne": "confirmed"}})
+    return {
+        "ok": True,
+        "deleted_consumptions": res1.deleted_count,
+        "deleted_subsidio_drafts": res2.deleted_count
+    }
 
 
 @app.on_event("startup")
