@@ -231,8 +231,12 @@ export default function Layout({ children }) {
       if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
       return false;
     }
-    // Panel Subsidio: solo si role=cliente_subsidio O servicios.subsidio=true (admin siempre)
-    if (i.requiresSubsidio && user.role !== "admin_enered" && user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
+    // Panel Subsidio: Oculto si tiene plataforma activa (porque ya ve el tracker en el Dashboard general)
+    if (i.requiresSubsidio) {
+      if (user.role === "admin_enered") return true;
+      if (user?.servicios?.plataforma) return false;
+      if (user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
+    }
     // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
     if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
     return true;
