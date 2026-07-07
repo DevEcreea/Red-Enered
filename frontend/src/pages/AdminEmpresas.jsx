@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Building2, Server, Fuel, MapPin, ShieldCheck, KeyRound,
-  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw, AlertTriangle
+  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw, AlertTriangle, Banknote
 } from "lucide-react";
 
 const SERVICE_META = {
@@ -19,6 +19,7 @@ export default function AdminEmpresas() {
   const [editEmpresa, setEditEmpresa] = useState(null);   // servicios modal
   const [wialonEmpresa, setWialonEmpresa] = useState(null); // wialon modal
   const [deleteEmpresa, setDeleteEmpresa] = useState(null); // delete confirm modal
+  const [finanzasEmpresa, setFinanzasEmpresa] = useState(null); // finanzas modal
 
   async function load() {
     setLoading(true);
@@ -51,7 +52,7 @@ export default function AdminEmpresas() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#241B4A" }}>
-              {["Empresa", "RUC", "Tipo", "Plataforma", "Combustible", "GPS · Wialon", "Subsidio DU 004", "Acciones"].map((h) => (
+              {["Empresa", "RUC", "Tipo", "Plataforma", "Combustible", "GPS · Wialon", "Subsidio DU 004", "Plan", "Crédito", "Días", "Acciones"].map((h) => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
@@ -95,12 +96,24 @@ export default function AdminEmpresas() {
                   </td>
                   <td style={styles.td}><Dot on={!!s.subsidio} /></td>
                   <td style={styles.td}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "#EDE7FA", color: "#6B21A8", textTransform: "capitalize" }}>
+                      {r.plan || "tracking"}
+                    </span>
+                  </td>
+                  <td style={{ ...styles.td, fontWeight: 600, color: "#111827" }}>
+                    {((r.linea_credito || 0) > 0 ? r.linea_credito : 1).toLocaleString("es-PE", { style: "currency", currency: "PEN", minimumFractionDigits: 0 })}
+                  </td>
+                  <td style={{ ...styles.td, textAlign: "center" }}>{r.dias_credito ?? 0}d</td>
+                  <td style={styles.td}>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => setEditEmpresa(r)} style={btn.iconEdit} title="Editar servicios" data-testid={`btn-edit-servicios-${r.empresa}`}>
                         <Edit3 style={{ width: 14, height: 14 }} />
                       </button>
                       <button onClick={() => setWialonEmpresa(r)} style={btn.iconWialon} title="Configurar Wialon" data-testid={`btn-wialon-${r.empresa}`}>
                         <KeyRound style={{ width: 14, height: 14 }} />
+                      </button>
+                      <button onClick={() => setFinanzasEmpresa(r)} style={btn.iconFinanzas} title="Config. financiera" data-testid={`btn-finanzas-${r.empresa}`}>
+                        <Banknote style={{ width: 14, height: 14 }} />
                       </button>
                       <button onClick={() => setDeleteEmpresa(r)} style={btn.iconDelete} title="Eliminar empresa" data-testid={`btn-delete-${r.empresa}`}>
                         <Trash2 style={{ width: 14, height: 14 }} />
@@ -133,6 +146,13 @@ export default function AdminEmpresas() {
           empresa={deleteEmpresa}
           onClose={() => setDeleteEmpresa(null)}
           onDeleted={() => { setDeleteEmpresa(null); load(); }}
+        />
+      )}
+      {finanzasEmpresa && (
+        <FinanzasModal
+          empresa={finanzasEmpresa}
+          onClose={() => setFinanzasEmpresa(null)}
+          onSaved={() => { setFinanzasEmpresa(null); load(); }}
         />
       )}
     </div>
@@ -452,6 +472,133 @@ function WialonModal({ empresa, onClose, onSaved }) {
   );
 }
 
+// ─── Finanzas Modal ──────────────────────────────────────────────────────────
+const PLAN_OPTIONS_FIN = [
+  { value: "tracking", label: "Plan Tracking" },
+  { value: "advanced", label: "Plan Advanced" },
+  { value: "integral", label: "Plan Integral" },
+];
+
+function FinanzasModal({ empresa, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    plan: empresa.plan || "tracking",
+    linea_credito: empresa.linea_credito ?? 0,
+    dias_credito: empresa.dias_credito ?? 0,
+    unidades_contratadas: empresa.unidades_contratadas ?? 0,
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save() {
+    setSaving(true);
+    setErr("");
+    const lc = parseFloat(form.linea_credito) || 0;
+    try {
+      await api.post("/empresas-config", {
+        empresa: empresa.empresa,
+        ruc: empresa.ruc || "",
+        plan: form.plan,
+        linea_credito: lc <= 0 ? 1.0 : lc,
+        unidades_contratadas: parseInt(form.unidades_contratadas) || 0,
+        dias_credito: parseInt(form.dias_credito, 10) || 0,
+      });
+      toast.success("Configuración financiera guardada");
+      onSaved();
+    } catch (e) {
+      setErr(e.response?.data?.detail || "Error al guardar");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} testid="modal-finanzas">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", color: "#D97706", textTransform: "uppercase" }}>Config. Financiera</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>{empresa.empresa}</div>
+        </div>
+        <button onClick={onClose} style={btn.close}><X style={{ width: 22, height: 22 }} /></button>
+      </div>
+
+      <div style={{ display: "grid", gap: 14 }}>
+        <div>
+          <label style={styles.label}>Plan contratado</label>
+          <select
+            value={form.plan}
+            onChange={(e) => setForm({ ...form, plan: e.target.value })}
+            style={{ ...styles.input, cursor: "pointer" }}
+            data-testid="finanzas-plan"
+          >
+            {PLAN_OPTIONS_FIN.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div>
+            <label style={styles.label}>Línea de crédito (S/)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.linea_credito}
+              onChange={(e) => setForm({ ...form, linea_credito: e.target.value })}
+              style={styles.input}
+              placeholder="0 = S/ 1.00 por defecto"
+              data-testid="finanzas-linea"
+            />
+            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>Si es 0, se guarda como S/ 1.00</div>
+          </div>
+          <div>
+            <label style={styles.label}>Días de crédito</label>
+            <input
+              type="number"
+              min="0"
+              value={form.dias_credito}
+              onChange={(e) => setForm({ ...form, dias_credito: e.target.value })}
+              style={styles.input}
+              placeholder="Ej. 15"
+              data-testid="finanzas-dias"
+            />
+          </div>
+        </div>
+        <div>
+          <label style={styles.label}>Unidades contratadas</label>
+          <input
+            type="number"
+            min="0"
+            value={form.unidades_contratadas}
+            onChange={(e) => setForm({ ...form, unidades_contratadas: e.target.value })}
+            style={styles.input}
+            placeholder="Nº de vehículos / unidades"
+            data-testid="finanzas-unidades"
+          />
+        </div>
+      </div>
+
+      {err && (
+        <div style={{ marginTop: 12, padding: "10px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 13, color: "#991B1B" }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+        <button onClick={onClose} style={btn.secondary}>Cancelar</button>
+        <button
+          onClick={save}
+          disabled={saving}
+          data-testid="btn-save-finanzas"
+          style={{ ...btn.primary, background: "#D97706", boxShadow: "0 4px 12px rgba(217,119,6,.25)", opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} /> : <Save style={{ width: 16, height: 16 }} />}
+          Guardar
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function Modal({ children, onClose, testid }) {
   return (
@@ -488,6 +635,7 @@ const btn = {
   close: { background: "none", border: "none", cursor: "pointer", color: "#6b7280" },
   iconEdit: { width: 32, height: 32, borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#8B3DFF" },
   iconWialon: { width: 32, height: 32, borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#3B82F6" },
+  iconFinanzas: { width: 32, height: 32, borderRadius: 8, border: "1px solid #FDE68A", background: "#FFFBEB", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#D97706" },
   iconDelete: { width: 32, height: 32, borderRadius: 8, border: "1px solid #FCA5A5", background: "#FEF2F2", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#DC2626" },
 };
 

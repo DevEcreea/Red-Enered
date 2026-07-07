@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { formatApiError, formatDate, formatSoles } from "../lib/utils";
+import { formatApiError, formatDate } from "../lib/utils";
 import {
   Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
-  Cloud, RefreshCw, Clock, ExternalLink, Settings, Save, Building2, Receipt,
+  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode,
 } from "lucide-react";
-import { Link } from "react-router-dom";
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];
 
@@ -60,11 +59,11 @@ export default function AdminUpload() {
     <div className="space-y-6">
       <div>
         <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">Administración</div>
-        <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Fuente de datos</h1>
-        <p className="text-neutral-500 mt-1 text-sm">Sincroniza desde Google Sheets, configura empresas y gestiona facturación.</p>
+        <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Datos</h1>
+        <p className="text-neutral-500 mt-1 text-sm">Sincroniza consumos desde Google Sheets, carga facturas y gestiona códigos QR de clientes.</p>
       </div>
 
-      <EmpresaConfigManager />
+      <QRManager />
 
       <InvoicesBulkUpload />
 
@@ -228,161 +227,145 @@ export default function AdminUpload() {
   );
 }
 
-const PLAN_OPTIONS = [
-  { value: "tracking", label: "Plan Tracking" },
-  { value: "advanced", label: "Plan Advanced" },
-  { value: "integral", label: "Plan Integral" },
-];
+// ─── QR Manager ──────────────────────────────────────────────────────────────
+function QRManager() {
+  const [empresas, setEmpresas] = useState([]);
+  const [empresa, setEmpresa] = useState("");
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [list, setList] = useState([]);
+  const inputRef = React.useRef(null);
 
-function EmpresaConfigManager() {
-  const [items, setItems] = useState([]);
-  const [empresasDisponibles, setEmpresasDisponibles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(null);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0, dias_credito: 0 });
-  const [err, setErr] = useState("");
-  const [editing, setEditing] = useState(null);
+  useEffect(() => {
+    api.get("/empresas").then((r) => setEmpresas(r.data)).catch(() => {});
+  }, []);
 
-  const load = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (!empresa) { setList([]); return; }
+    refreshList();
+    // eslint-disable-next-line
+  }, [empresa]);
+
+  const refreshList = async () => {
+    try { const r = await api.get("/qr/list", { params: { empresa } }); setList(r.data || []); }
+    catch {}
+  };
+
+  const handleFiles = (selected) => { setFiles(Array.from(selected || [])); setResult(null); };
+
+  const handleUpload = async () => {
+    if (!empresa) { alert("Selecciona una empresa"); return; }
+    if (files.length === 0) { alert("Selecciona al menos un archivo"); return; }
+    setUploading(true); setResult(null);
     try {
-      const [a, b] = await Promise.all([api.get("/empresas-config"), api.get("/empresas")]);
-      setItems(a.data); setEmpresasDisponibles(b.data);
-    } finally { setLoading(false); }
+      const fd = new FormData();
+      fd.append("empresa", empresa);
+      files.forEach((f) => fd.append("files", f));
+      const r = await api.post("/admin/qr/upload-bulk", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setResult(r.data);
+      setFiles([]);
+      if (inputRef.current) inputRef.current.value = "";
+      refreshList();
+    } catch (e) {
+      alert(e.response?.data?.detail || "Error en la carga");
+    } finally { setUploading(false); }
   };
 
-  useEffect(() => { load(); }, []);
-
-  const openNew = () => {
-    setEditing(null);
-    setForm({ empresa: "", ruc: "", plan: "tracking", linea_credito: 0, unidades_contratadas: 0, dias_credito: 0 });
-    setShowForm(true); setErr("");
-  };
-
-  const openEdit = (cfg) => {
-    setEditing(cfg.empresa);
-    setForm({
-      empresa: cfg.empresa,
-      ruc: cfg.ruc || "",
-      plan: cfg.plan || "tracking",
-      linea_credito: cfg.linea_credito || 0,
-      unidades_contratadas: cfg.unidades_contratadas || 0,
-      dias_credito: cfg.dias_credito ?? 0,
-    });
-    setShowForm(true); setErr("");
-  };
-
-  const submit = async (e) => {
-    e.preventDefault(); setErr("");
-    const dc = parseInt(form.dias_credito, 10);
-    if (isNaN(dc) || dc < 0) { setErr("Condición de crédito (días) es obligatoria. Mínimo 0."); return; }
-    try {
-      setSaving(form.empresa);
-      await api.post("/empresas-config", {
-        ...form,
-        linea_credito: parseFloat(form.linea_credito) || 0,
-        unidades_contratadas: parseInt(form.unidades_contratadas) || 0,
-        dias_credito: dc,
-      });
-      setShowForm(false);
-      load();
-    } catch (e2) { setErr(formatApiError(e2.response?.data?.detail)); }
-    finally { setSaving(null); }
+  const handleDelete = async (placa) => {
+    if (!window.confirm(`¿Eliminar QR de la placa ${placa}?`)) return;
+    try { await api.delete(`/admin/qr/${placa}`, { params: { empresa } }); refreshList(); }
+    catch { alert("No se pudo eliminar"); }
   };
 
   return (
-    <div className="chart-card border-l-4 border-l-amber-400" data-testid="empresa-config-card">
-      <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-neutral-100">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-md bg-amber-50 border border-amber-100 flex items-center justify-center">
-            <Settings className="w-5 h-5 text-amber-600" strokeWidth={2.5} />
-          </div>
-          <div>
-            <h3 className="font-cabinet font-bold text-lg text-neutral-900">Configuración por empresa</h3>
-            <p className="text-xs text-neutral-500 mt-1">Plan contratado · línea de crédito · unidades · RUC</p>
+    <div className="chart-card border-l-4 border-l-violet-400" data-testid="qr-manager-card">
+      <div className="flex items-start gap-3 mb-5 pb-4 border-b border-neutral-100">
+        <div className="w-10 h-10 rounded-md bg-violet-50 border border-violet-100 flex items-center justify-center">
+          <QrCode className="w-5 h-5 text-violet-600" strokeWidth={2.5} />
+        </div>
+        <div>
+          <h3 className="font-cabinet font-bold text-lg text-neutral-900">Códigos QR por empresa</h3>
+          <p className="text-xs text-neutral-500 mt-1">Sube imágenes <b>.png/.jpg/.svg</b> nombradas como <code className="bg-neutral-100 px-1 rounded text-xs">PLACA.png</code>. Se asignan automáticamente a cada unidad.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">Empresa destino</label>
+          <select
+            value={empresa}
+            onChange={(e) => setEmpresa(e.target.value)}
+            className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold w-full"
+            data-testid="qr-empresa-select"
+          >
+            <option value="">— Selecciona empresa —</option>
+            {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">Archivos QR</label>
+          <div
+            onClick={() => inputRef.current?.click()}
+            onDrop={(e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); }}
+            onDragOver={(e) => e.preventDefault()}
+            className="border-2 border-dashed border-violet-200 rounded-xl bg-violet-50/40 hover:bg-violet-50 px-4 py-4 text-center cursor-pointer transition-colors"
+            data-testid="qr-dropzone"
+          >
+            <Upload className="w-6 h-6 text-violet-500 mx-auto mb-1" />
+            <div className="text-sm font-semibold text-neutral-700">
+              {files.length > 0 ? `${files.length} archivo(s) seleccionado(s)` : "Haz click o arrastra imágenes"}
+            </div>
+            <div className="text-xs text-neutral-500 mt-0.5">PNG, JPG, SVG — hasta 5 MB c/u</div>
+            <input ref={inputRef} type="file" multiple accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => handleFiles(e.target.files)} className="hidden" data-testid="qr-file-input" />
           </div>
         </div>
-        <button onClick={openNew} className="btn-brand text-sm flex items-center gap-2" data-testid="empresa-config-new-btn">
-          + Nueva configuración
-        </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={submit} className="bg-neutral-50 border border-border rounded-lg p-4 mb-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="empresa-config-form">
-          {editing ? (
-            <input value={form.empresa} disabled className="h-10 px-3 border border-border rounded-md text-sm bg-white font-mono" />
-          ) : (
-            <select required value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm bg-white">
-              <option value="">Empresa (del sheet)</option>
-              {empresasDisponibles.map((e) => <option key={e}>{e}</option>)}
-            </select>
-          )}
-          <input placeholder="RUC" value={form.ruc} onChange={(e) => setForm({ ...form, ruc: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm font-mono" />
-          <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm bg-white">
-            {PLAN_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
-          <input type="number" step="0.01" placeholder="Línea de crédito (S/)" value={form.linea_credito} onChange={(e) => setForm({ ...form, linea_credito: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-          <input type="number" placeholder="Unidades contratadas" value={form.unidades_contratadas} onChange={(e) => setForm({ ...form, unidades_contratadas: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-          <input
-            required
-            type="number"
-            min="0"
-            placeholder="Días de crédito (ej. 15)"
-            value={form.dias_credito}
-            onChange={(e) => setForm({ ...form, dias_credito: e.target.value })}
-            className="h-10 px-3 border border-border rounded-md text-sm"
-            data-testid="empresa-config-dias-credito"
-          />
-          {err && <div className="md:col-span-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2">{err}</div>}
-          <div className="md:col-span-3 flex gap-2">
-            <button type="submit" disabled={saving} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-60" data-testid="empresa-config-save">
-              <Save className="w-4 h-4" /> {editing ? "Guardar cambios" : "Crear configuración"}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancelar</button>
-          </div>
-        </form>
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={handleUpload}
+          disabled={uploading || !empresa || files.length === 0}
+          className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50"
+          data-testid="qr-upload-btn"
+        >
+          {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+          {uploading ? "Subiendo..." : `Subir ${files.length || ""} archivo(s)`}
+        </button>
+        {files.length > 0 && <button onClick={() => setFiles([])} className="btn-ghost text-sm">Limpiar</button>}
+      </div>
+
+      {result && (
+        <div className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-md px-3 py-2 flex items-center gap-2 mb-4">
+          <CheckCircle2 className="w-4 h-4" /> {result.uploaded} QR cargado(s) correctamente.
+        </div>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="enered-table" data-testid="empresa-config-table">
-          <thead>
-            <tr>
-              <th>Empresa</th><th>RUC</th><th>Plan</th>
-              <th className="text-right">Línea de crédito</th>
-              <th className="text-right">Unidades</th>
-              <th className="text-right">Días Créd.</th>
-              <th className="text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? <tr><td colSpan={7} className="text-center py-6 text-neutral-500">Cargando...</td></tr>
-              : items.length === 0 ? <tr><td colSpan={7} className="text-center py-6 text-neutral-500">Sin empresas configuradas</td></tr>
-              : items.map((cfg) => (
-                <tr key={cfg.empresa}>
-                  <td className="font-bold flex items-center gap-2"><Building2 className="w-3.5 h-3.5 text-brand" />{cfg.empresa}</td>
-                  <td className="font-mono text-xs">{cfg.ruc || "—"}</td>
-                  <td><span className="text-xs font-bold px-2 py-1 bg-brand-50 text-brand rounded-full border border-brand-100 capitalize">{cfg.plan}</span></td>
-                  <td className="text-right font-bold">{formatSoles(cfg.linea_credito)}</td>
-                  <td className="text-right font-bold">{cfg.unidades_contratadas}</td>
-                  <td className="text-right font-bold">{cfg.dias_credito ?? 0}</td>
-                  <td className="text-right">
-                    <button onClick={() => openEdit(cfg)} className="text-xs font-bold text-brand hover:underline" data-testid={`empresa-config-edit-${cfg.empresa}`}>Editar</button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-4 flex items-center gap-3 p-3 bg-brand-50 border border-brand-100 rounded-md text-xs text-brand">
-        <Receipt className="w-4 h-4 flex-shrink-0" />
-        <span><b>Facturas pendientes de pago</b> se gestionan en el módulo <Link to="/facturacion" className="font-bold underline">Estado de Cuenta</Link>. La línea utilizada se calcula automáticamente sumando facturas con estado <b>pendiente</b> o <b>vencida</b>.</span>
-      </div>
+      {empresa && list.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-bold uppercase tracking-widest text-neutral-500">QR existentes — {empresa} ({list.length})</div>
+            <button onClick={refreshList} className="text-xs font-bold text-brand hover:underline flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Refrescar</button>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-8 gap-2">
+            {list.map((q) => (
+              <div key={q.placa} className="border border-neutral-200 rounded-lg p-2 flex flex-col items-center gap-1.5">
+                <QrCode className="w-7 h-7 text-brand" strokeWidth={1.5} />
+                <div className="font-mono font-bold text-xs text-center">{q.placa}</div>
+                <button onClick={() => handleDelete(q.placa)} className="text-[10px] text-red-500 hover:underline flex items-center gap-0.5">
+                  <Trash2 className="w-2.5 h-2.5" /> Eliminar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {empresa && list.length === 0 && (
+        <div className="text-center py-6 text-sm text-neutral-400">Sin QR cargados para esta empresa.</div>
+      )}
     </div>
   );
 }
-
 
 function InvoicesBulkUpload() {
   const [files, setFiles] = useState([]);
