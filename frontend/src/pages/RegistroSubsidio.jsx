@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { Loader2, CheckCircle2, AlertCircle, Globe, ShieldCheck, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, XCircle } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import EmayFooter from "../components/EmayFooter";
+
 
 const HERO_IMG = "https://customer-assets.emergentagent.com/job_ui-update-11/artifacts/mbmk49w0_WhatsApp%20Image%202026-06-10%20at%206.26.35%20PM.jpeg";
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
@@ -167,7 +167,7 @@ export default function RegistroSubsidio() {
         data-testid="registro-hero"
       />
       <div
-        className="lg:hidden h-56 bg-cover bg-center"
+        className="lg:hidden h-36 bg-cover bg-center bg-top"
         style={{ backgroundImage: `url(${HERO_IMG})` }}
       />
 
@@ -356,34 +356,21 @@ export default function RegistroSubsidio() {
             </div>
           </form>
 
-          <div className="mt-10 pt-8 border-t border-neutral-100 text-sm text-neutral-700 leading-relaxed">
-            <p className="font-bold text-neutral-900 mb-2">¿Necesitas ayuda?</p>
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-brand flex items-center justify-center flex-shrink-0">
-                <Globe className="w-4 h-4 text-white" strokeWidth={2} />
-              </div>
-              <div className="flex-1 text-xs md:text-sm text-neutral-700 pt-1.5">
-                (044) 659-3519 | +51 972 228 870 | <a href="mailto:hola@enered.pe" className="hover:text-brand">hola@enered.pe</a>
-              </div>
-            </div>
-          </div>
         </div>
 
-        <div className="w-full max-w-md mx-auto pt-8 space-y-3 text-center">
-          <div className="text-xs text-neutral-600">
-            <a href="#" className="hover:text-brand">Asistencia técnica</a>
-            <span className="mx-2">•</span>
-            <a href="#" className="hover:text-brand">Términos y condiciones</a>
-            <span className="mx-2">•</span>
-            <a href="#" className="hover:text-brand">Avisos de copyright</a>
-          </div>
-          <div className="text-xs text-neutral-500">
-            <a href="https://www.energix.pe" target="_blank" rel="noreferrer" className="hover:text-brand">www.energix.pe</a>
-          </div>
-          <div className="text-[11px] text-neutral-400 pt-2 border-t border-neutral-100">
+        <div className="w-full max-w-md mx-auto pt-6 text-center border-t border-neutral-100">
+          <div className="text-[11px] text-neutral-400 leading-relaxed">
             ENERED | Soluciones en Energías | Copyright © {new Date().getFullYear()} | Energix Perú | Todos los derechos reservados.
           </div>
-          <EmayFooter variant="card" />
+          <div className="text-[11px] text-neutral-400 mt-1 flex items-center justify-center gap-1 flex-wrap">
+            <span>Desarrollado por <strong className="text-neutral-500">EMAY TECH</strong></span>
+            <span className="text-neutral-300">·</span>
+            <a href="https://www.emay.space" target="_blank" rel="noreferrer" className="hover:text-brand transition-colors">www.emay.space</a>
+            <span className="text-neutral-300">·</span>
+            <span>+51 973 982 417</span>
+            <span className="text-neutral-300">·</span>
+            <span>© {new Date().getFullYear()}</span>
+          </div>
         </div>
       </div>
 
