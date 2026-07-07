@@ -11,6 +11,7 @@ import {
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
+import TrackerSubsidio from "../components/TrackerSubsidio";
 
 const MAPS_LINK = "https://maps.app.goo.gl/LZpyBqYs54LazZtV7";
 const UPGRADE_WA = "https://wa.me/51900000000?text=Hola%2C%20quiero%20mejorar%20mi%20plan%20ENERED";
@@ -611,6 +612,8 @@ export default function Dashboard() {
           </select>
         )}
       </div>
+
+      {services.subsidio && <TrackerSubsidio />}
 
       {/* ================= ROW 1 — 8 mini KPI cards ================= */}
       <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5" data-testid="row-1-kpis">
