@@ -21,33 +21,9 @@ const CTRL_TYPES = [
   "Tope por carga (galones)",
 ];
 
-const EV_EST = {
-  "Pendiente de revisión":{ color:"#B45309", bg:"#FEF3C7" },
-  "Coacheable":           { color:"#1D4ED8", bg:"#DBEAFE" },
-  "Coacheado":            { color:"#059669", bg:"#ECFDF5" },
-  "Descartado":           { color:"#64748B", bg:"#F1F5F9" },
-};
-const CT_EST = {
-  "Pendiente": { color:"#B45309", bg:"#FEF3C7" },
-  "Activa":    { color:"#059669", bg:"#ECFDF5" },
-  "Rechazada": { color:"#DC2626", bg:"#FEF2F2" },
-};
 
-const MOCK_EVENTOS = [
-  { tipo:"Ralentí improductivo",   cond:"Luis Galvez · L-2213", placa:"ABC123", info:"06/01/26 · Trujillo · Geocerca Planta",    est:"Pendiente de revisión" },
-  { tipo:"Carga sin GPS",          cond:"Carlos Ríos · C-1180", placa:"BJO894", info:"06/01/26 · Lima · Primax 45",              est:"Pendiente de revisión" },
-  { tipo:"Consumo anómalo",        cond:"Ana Rojas · A-0932",   placa:"V2P481", info:"05/01/26 · Arequipa · Repsol Sur",         est:"Coacheable" },
-  { tipo:"Recarga duplicada",      cond:"Javier Q. · J-0455",   placa:"BRO700", info:"05/01/26 · Piura · Petroperú",            est:"Descartado" },
-  { tipo:"Posible desvío de ruta", cond:"Luis Galvez · L-2213", placa:"BTP808", info:"04/01/26 · Chiclayo · Pecsa",             est:"Coacheado" },
-  { tipo:"Ralentí improductivo",   cond:"Ana Rojas · A-0932",   placa:"C3K915", info:"04/01/26 · Trujillo · Geocerca Norte",    est:"Pendiente de revisión" },
-];
 
-const QR_LIST = [
-  ["BBJ855","CARE PERU"],["BJO894","ROSANDINA SAC"],["BJO899","ROSANDINA S.A.C."],
-  ["BRO700","EMPRESA DE TRANSPORTE…"],["BTP808","ROSANDINA SAC"],["V2P481","CARE PERU"],
-  ["C3K915","ROSANDINA SAC"],["D9L307","ROSANDINA S.A.C."],["A4M650","EMPRESA DE TRANSPORTE…"],
-  ["F1H228","ROSANDINA SAC"],["ABC123","CARE PERU"],["B7T022","ROSANDINA SAC"],
-];
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function Pill({ label, color, bg }) {
@@ -313,91 +289,12 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
 
 // ── TAB: EVENTOS ──────────────────────────────────────────────────────────────
 function TabEventos({ onToast }) {
-  const [evOpen, setEvOpen] = useState(false);
-  const [evSel, setEvSel]   = useState([]);
-  const opts = Object.keys(EV_EST);
-  const vis   = evSel.length ? MOCK_EVENTOS.filter(e=>evSel.includes(e.est)) : MOCK_EVENTOS;
-
-  function toggleEv(o) { setEvSel(p=>p.includes(o)?p.filter(x=>x!==o):[...p,o]); }
-
   return (
-    <div style={{ background:"#fff",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:20 }}>
-      {/* Filters bar */}
-      <div style={{ display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:6 }}>
-        {[
-          { icon:Calendar, label:"29/05 – 30/05" },
-          { icon:User,     label:"Conductor" },
-          { icon:Car,      label:"Vehículo" },
-        ].map(({ icon:Icon, label },i)=>(
-          <div key={i} style={{ position:"relative",height:40,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",gap:8,padding:"0 34px 0 12px",fontSize:13.5,color:"#4b5563",cursor:"pointer",userSelect:"none" }}>
-            <Icon style={{ width:15,height:15,color:"#9ca3af" }}/>{label}
-            <ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:15,height:15,color:"#9ca3af" }}/>
-          </div>
-        ))}
-        {/* Estado dropdown */}
-        <div style={{ position:"relative" }}>
-          <div onClick={()=>setEvOpen(v=>!v)} style={{ height:40,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",padding:"0 34px 0 12px",fontSize:13.5,color:"#4b5563",cursor:"pointer",userSelect:"none",minWidth:100 }}>
-            Estado<ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:15,height:15,color:"#9ca3af" }}/>
-          </div>
-          {evOpen && (
-            <div style={{ position:"absolute",top:44,left:0,width:210,background:"#fff",border:"1px solid #F0F0F3",borderRadius:10,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:6,zIndex:30 }}>
-              {opts.map(o=>(
-                <label key={o} style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 6px",fontSize:13.5,color:"#4b5563",cursor:"pointer",borderRadius:6 }}>
-                  <input type="checkbox" style={{ accentColor:"#8B3DFF",width:15,height:15 }} checked={evSel.includes(o)} onChange={()=>toggleEv(o)}/>
-                  {o}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-        <div style={{ marginLeft:"auto",display:"flex",gap:12 }}>
-          <div style={{ height:40,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",gap:8,padding:"0 34px 0 12px",fontSize:13.5,color:"#4b5563",cursor:"pointer",position:"relative",userSelect:"none" }}>
-            <ArrowUpDown style={{ width:15,height:15,color:"#9ca3af" }}/>Fecha (recientes)
-            <ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:15,height:15,color:"#9ca3af" }}/>
-          </div>
-          <button onClick={()=>onToast("Carga registrada")} style={{ display:"inline-flex",alignItems:"center",gap:8,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:40,padding:"0 18px",fontSize:14,fontWeight:600,cursor:"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.25)" }}>
-            <Plus style={{ width:16,height:16 }}/>Registrar carga
-          </button>
-        </div>
+    <div style={{ background:"#fff",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
+      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#9ca3af",padding:48 }}>
+        <ShieldCheck style={{ width:34,height:34,color:"#cbd5e1",marginBottom:10 }}/>
+        Sin eventos registrados.
       </div>
-
-      {/* Events table */}
-      <div style={{ overflowX:"auto",marginTop:8 }}>
-        <table style={{ borderCollapse:"collapse",width:"100%",minWidth:900 }}>
-          <thead>
-            <tr style={{ background:HEADER_BG }}>
-              {["Comportamiento","Conductor / ID","Vehículo","Fecha · Ubicación · Geocerca","Estado",""].map((h,i)=>(
-                <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===5?"0 12px 12px 0":"none" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {vis.map((e,i)=>{
-              const s = EV_EST[e.est];
-              return (
-                <tr key={i} style={{ borderBottom:"1px solid #E9EBEF" }}>
-                  <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{e.tipo}</td>
-                  <td style={tdSt}>{e.cond}</td>
-                  <td style={tdSt}>{e.placa}</td>
-                  <td style={{ ...tdSt,color:"#6b7280" }}>{e.info}</td>
-                  <td style={tdSt}><Pill label={e.est} color={s.color} bg={s.bg}/></td>
-                  <td style={tdSt}>
-                    <button style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}>
-                      <MoreHorizontal style={{ width:15,height:15 }}/>
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ display:"flex",padding:"14px 6px",fontSize:14,color:"#6b7280" }}>
-        <span>Mostrando {vis.length} resultados</span>
-      </div>
-
-      {/* close dropdown on outside */}
-      {evOpen && <div style={{ position:"fixed",inset:0,zIndex:20 }} onClick={()=>setEvOpen(false)}/>}
     </div>
   );
 }
@@ -497,7 +394,36 @@ function TabControl({ onToast }) {
 // ── TAB: QR ───────────────────────────────────────────────────────────────────
 function TabQR({ onToast }) {
   const [qrq, setQrq] = useState("");
-  const vis = QR_LIST.filter(q=>q[0].toLowerCase().includes(qrq.toLowerCase()));
+  const [qrList, setQrList] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get("/qr/list").then(r => {
+      setQrList(r.data || []);
+      setLoading(false);
+    }).catch(err => {
+      console.error(err);
+      setLoading(false);
+    });
+  }, []);
+
+  const vis = qrList.filter(q => (q.placa || "").toLowerCase().includes(qrq.toLowerCase()));
+
+  const handleDownload = async (placa) => {
+    try {
+      onToast(`Descargando QR ${placa}...`);
+      const r = await api.get(`/qr/download/${placa}`, { responseType: "blob" });
+      const blob = new Blob([r.data], { type: "image/png" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `QR_${placa}.png`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      onToast("No se pudo descargar el QR");
+    }
+  };
 
   return (
     <div style={{ background:"#fff",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"22px 24px" }}>
@@ -515,21 +441,27 @@ function TabQR({ onToast }) {
         </div>
       </div>
 
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:18 }}>
-        {vis.map(([placa, empresa],i)=>(
-          <div key={i} style={{ background:"#fff",border:"1px solid #EFEFF3",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:14,display:"flex",flexDirection:"column",alignItems:"center" }}>
-            <div style={{ width:"100%",aspectRatio:"1",borderRadius:12,background:"linear-gradient(135deg,#F5F1FF,#EDE7FA)",display:"flex",alignItems:"center",justifyContent:"center",padding:22 }}>
-              <div dangerouslySetInnerHTML={{ __html: qrSvg(placa) }} style={{ width:"100%",height:"100%" }}/>
+      {loading ? (
+        <div style={{ textAlign:"center",padding:40,color:"#9ca3af" }}>Cargando QR...</div>
+      ) : vis.length > 0 ? (
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:18 }}>
+          {vis.map((q, i) => (
+            <div key={i} style={{ background:"#fff",border:"1px solid #EFEFF3",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:14,display:"flex",flexDirection:"column",alignItems:"center" }}>
+              <div style={{ width:"100%",aspectRatio:"1",borderRadius:12,background:"linear-gradient(135deg,#F5F1FF,#EDE7FA)",display:"flex",alignItems:"center",justifyContent:"center",padding:22 }}>
+                <div dangerouslySetInnerHTML={{ __html: qrSvg(q.placa) }} style={{ width:"100%",height:"100%" }}/>
+              </div>
+              <div style={{ fontWeight:700,color:"#1f2937",fontSize:15,marginTop:12 }}>{q.placa}</div>
+              <div style={{ fontSize:10.5,color:"#9ca3af",letterSpacing:".03em",textTransform:"uppercase",marginTop:2,textAlign:"center" }}>{q.empresa}</div>
+              <button onClick={() => handleDownload(q.placa)}
+                style={{ width:"100%",marginTop:12,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:40,fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
+                <Download style={{ width:15,height:15 }}/>Descargar
+              </button>
             </div>
-            <div style={{ fontWeight:700,color:"#1f2937",fontSize:15,marginTop:12 }}>{placa}</div>
-            <div style={{ fontSize:10.5,color:"#9ca3af",letterSpacing:".03em",textTransform:"uppercase",marginTop:2,textAlign:"center" }}>{empresa}</div>
-            <button onClick={()=>onToast(`Descargando QR ${placa}`)}
-              style={{ width:"100%",marginTop:12,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:40,fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
-              <Download style={{ width:15,height:15 }}/>Descargar
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ textAlign:"center",padding:40,color:"#9ca3af" }}>No se encontraron códigos QR.</div>
+      )}
     </div>
   );
 }
