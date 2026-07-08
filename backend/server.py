@@ -400,12 +400,15 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
         "CANTIDAD_GL": gal,
         "PRECIO_UNITARIO": pre,
         "IMPORTE_TOTAL": imp,
+        "KILOMETRAJE": r.get("kilometraje") or 0,
         "AHORRO": round(gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón (alineado con dashboard subsidio)
         "SEMANA": semana,
         "RUC_EMISOR": r.get("ruc_emisor") or "",
         "NUMERO_DOCUMENTO": r.get("numero_documento") or "",
         "ESTADO": "FACTURADO",
         "_origen": "subsidio",
+        "CONDUCTOR": r.get("conductor") or "",
+        "pdf_filename": r.get("pdf_filename") or "",
     }
 
 
@@ -556,6 +559,8 @@ async def create_consumption(
             "galones": CANTIDAD_GL,
             "precio_unitario": PRECIO_UNITARIO,
             "importe_total": IMPORTE_TOTAL,
+            "kilometraje": KILOMETRAJE or 0,
+            "conductor": CONDUCTOR or "",
             "ruc_emisor": RUC_EMISOR or "",
             "numero_documento": NUMERO_DOCUMENTO or "",
             "status": "confirmed",

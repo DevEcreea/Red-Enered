@@ -561,7 +561,22 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
 
   if (!open) return null;
 
-  const upd = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
+  const upd = (k) => (e) => {
+    const val = e.target.value;
+    setForm(p => {
+      const next = { ...p, [k]: val };
+      if (k === "galones" || k === "precio_unitario") {
+        const g = parseFloat(next.galones) || 0;
+        const pr = parseFloat(next.precio_unitario) || 0;
+        if (g > 0 && pr > 0) {
+          next.importe_total = (g * pr).toFixed(2);
+        } else {
+          next.importe_total = "";
+        }
+      }
+      return next;
+    });
+  };
 
   async function handleSave() {
     setErr("");
