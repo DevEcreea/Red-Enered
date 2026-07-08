@@ -70,13 +70,7 @@ const INIT_TIPOS = [
   { id:"t5", tipo:"Autobús",    configuracion:"2 ejes · 6 neumáticos",  n:0 },
 ];
 
-const MOCK_DISPS = [
-  ["356938035…801","Teltonika FMC150","900 123 456 · Claro","Reportando","—","—"],
-  ["356938035…802","Teltonika FMC150","900 123 457 · Movistar","Reportando","—","—"],
-  ["356938035…803","Teltonika FMB920","—","No reporta","—","—"],
-  ["356938035…804","Queclink GV75","900 123 459 · Entel","Reportando","—","—"],
-  ["356938035…805","Teltonika FMC150","— sin SIM","Sin asignar","—","—"],
-];
+
 
 // ─── Brand icon ───────────────────────────────────────────────────────────────
 function BrandIcon({ icono, size=12, color="#8B3DFF" }) {
@@ -730,43 +724,10 @@ export default function Vehiculos() {
               <Plus style={{ width:16,height:16 }}/> Registrar dispositivo
             </button>
           </div>
-          <div style={{ background:"#fff",border:"1px solid #F0F0F3",borderRadius:16,overflow:"hidden",boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
-            <div style={{ overflowX:"auto" }}>
-              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:900 }}>
-                <thead><tr style={{ background:"#2A2A3C" }}>
-                  {["Serie / IMEI","Modelo","SIM / Operador","Estado","Vehículo asignado","Última comunicación","Acciones"].map((h,i)=>(
-                    <th key={i} style={{ textAlign:"left",color:"#fff",fontWeight:600,textTransform:"uppercase",fontSize:10.5,letterSpacing:".03em",padding:"12px 16px",whiteSpace:"nowrap" }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>{MOCK_DISPS.map((d,i)=>{
-                  const {c,b}=d[3]==="Reportando"?{c:"#059669",b:"#ECFDF5"}:d[3]==="No reporta"?{c:"#DC2626",b:"#FEF2F2"}:{c:"#B45309",b:"#FFFBEB"};
-                  return (
-                    <tr key={i} style={{ borderTop:i>0?"1px solid #F3F4F6":"none" }}>
-                      <td style={{ padding:"12px 16px" }}>
-                        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-                          <Cpu style={{ width:14,height:14,color:"#8B3DFF" }}/>
-                          <span style={{ fontWeight:600,color:"#374151",fontSize:13 }}>{d[0]}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding:"12px 16px",color:"#4b5563",fontSize:13,whiteSpace:"nowrap" }}>{d[1]}</td>
-                      <td style={{ padding:"12px 16px",color:"#4b5563",fontSize:13,whiteSpace:"nowrap" }}>{d[2]}</td>
-                      <td style={{ padding:"12px 16px" }}>
-                        <span style={{ display:"inline-flex",alignItems:"center",gap:6,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:c,background:b }}>
-                          <span style={{ width:6,height:6,borderRadius:"50%",background:c,display:"inline-block" }}/>{d[3]}
-                        </span>
-                      </td>
-                      <td style={{ padding:"12px 16px",color:"#374151",fontSize:13,whiteSpace:"nowrap" }}>{d[4]}</td>
-                      <td style={{ padding:"12px 16px",color:"#6b7280",fontSize:13,whiteSpace:"nowrap" }}>{d[5]}</td>
-                      <td style={{ padding:"12px 16px" }}>
-                        <button style={{ border:"none",borderRadius:8,fontSize:12,fontWeight:600,padding:"5px 12px",color:"#8B3DFF",background:"#F1EAFF",cursor:"pointer" }}>
-                          {d[3]==="Sin asignar"?"Asignar":"Reasignar"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}</tbody>
-              </table>
-            </div>
+          <div style={{ padding:"60px 20px",textAlign:"center",background:"#fff",borderRadius:16,border:"1px dashed #D1D5DB" }}>
+            <Cpu style={{ width:40,height:40,color:"#D1D5DB",marginBottom:12 }}/>
+            <div style={{ fontSize:16,fontWeight:600,color:"#374151" }}>Módulo en construcción</div>
+            <div style={{ fontSize:13.5,color:"#6B7280",marginTop:4,maxWidth:400,margin:"4px auto 0" }}>Pronto podrás gestionar tus dispositivos GPS desde aquí.</div>
           </div>
         </div>
       )}
