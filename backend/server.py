@@ -983,16 +983,17 @@ async def dashboard_overview(
     q = tenant_filter(user)
     if target_empresa and user["role"] == "admin_enered":
         q["EMPRESA"] = target_empresa
-    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+    proj = {"_id": 0, "CANTIDAD_GL": 1, "IMPORTE_TOTAL": 1, "PRECIO_UNITARIO": 1, "AHORRO": 1, "EMPRESA": 1, "FECHA": 1, "PLACA": 1, "KILOMETRAJE": 1}
+    rows = await db.consumptions.find(q, proj).to_list(100000)
 
     # Fetch subsidio consumptions
     sub_q = {"status": "confirmed"}
-    if target_empresa:
+    if target_empresa and user["role"] == "admin_enered":
         sub_q["empresa"] = target_empresa
     elif user["role"] != "admin_enered":
         sub_q["empresa"] = user.get("empresa")
-
-    sub_rows = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(100000)
+    sub_proj = {"_id": 0, "galones": 1, "importe_total": 1, "precio_unitario": 1, "empresa": 1, "fecha": 1, "placa": 1, "kilometraje": 1}
+    sub_rows = await db.consumos_subsidio.find(sub_q, sub_proj).to_list(100000)
     mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
     rows.extend(mapped_sub)
 
@@ -1239,7 +1240,8 @@ async def dashboard_kpis(
     if producto:
         q["PRODUCTO"] = producto
 
-    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+    proj = {"_id": 0, "CANTIDAD_GL": 1, "IMPORTE_TOTAL": 1, "AHORRO": 1, "SEMANA": 1, "PRECIO_UNITARIO": 1, "PRECIO_PIZARRA": 1, "PLACA": 1, "CIUDAD": 1, "ESTACION": 1, "PRODUCTO": 1, "HORA": 1, "FECHA": 1, "NRO_DE_TARJETA": 1, "MEDIO_DE_IDENTIFICACION": 1, "KILOMETRAJE": 1}
+    rows = await db.consumptions.find(q, proj).to_list(100000)
 
     # Fetch subsidio consumptions
     sub_q = {"status": "confirmed"}
@@ -1259,7 +1261,8 @@ async def dashboard_kpis(
     if producto:
         sub_q["producto"] = producto
 
-    sub_rows = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(100000)
+    sub_proj = {"_id": 0, "galones": 1, "importe_total": 1, "precio_unitario": 1, "precio_pizarra": 1, "fecha": 1, "hora": 1, "placa": 1, "ciudad": 1, "estacion": 1, "producto": 1, "kilometraje": 1, "semana": 1}
+    sub_rows = await db.consumos_subsidio.find(sub_q, sub_proj).to_list(100000)
     mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
     if semana:
         mapped_sub = [r for r in mapped_sub if r.get("SEMANA") == semana]
@@ -1502,7 +1505,8 @@ async def analytics_fleet(
     if fecha_hasta:
         q.setdefault("FECHA", {})["$lte"] = fecha_hasta
 
-    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+    proj = {"_id": 0, "CANTIDAD_GL": 1, "IMPORTE_TOTAL": 1, "AHORRO": 1, "PLACA": 1, "KILOMETRAJE": 1, "FECHA": 1, "ESTACION": 1, "PRECIO_UNITARIO": 1, "SEMANA": 1, "PRODUCTO": 1, "NRO_DE_TARJETA": 1, "MEDIO_DE_IDENTIFICACION": 1}
+    rows = await db.consumptions.find(q, proj).to_list(100000)
     if not rows:
         return {
             "kpis": {"ahorro_pct": 0, "galones_por_carga": 0, "costo_por_carga": 0, "rendimiento_prom": 0, "cargas_por_dia": 0},
@@ -1744,7 +1748,8 @@ async def dashboard_alerts(user: dict = Depends(get_current_user), empresa: Opti
     q = tenant_filter(user)
     if empresa and user["role"] == "admin_enered":
         q["EMPRESA"] = empresa
-    rows = await db.consumptions.find(q, {"_id": 0}).to_list(100000)
+    proj = {"_id": 0, "FECHA": 1, "PLACA": 1, "ESTACION": 1}
+    rows = await db.consumptions.find(q, proj).to_list(100000)
     if not rows:
         return []
 
@@ -3637,8 +3642,8 @@ async def list_documents(
     if target_empresa:
         sub_q["empresa"] = target_empresa
     elif user["role"] != "admin_enered":
-        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 1})
-        uids = [str(u["_id"]) async for u in cursor]
+        cursor = db.users.find({"empresa": user.get("empresa")}, {"_id": 0, "id": 1})
+        uids = [u["id"] async for u in cursor if "id" in u]
         sub_q["user_id"] = {"$in": uids}
     subsidio_docs = await db.subsidio_documents.find(sub_q).to_list(1000)
 
