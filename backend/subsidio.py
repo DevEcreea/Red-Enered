@@ -707,6 +707,7 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
         import urllib.request
         import json
         import ssl
+        import asyncio
         
         token = "tr_6e6e5d380db1da4432d0c3e57851396a"
         placa_clean = placa.replace("-", "").upper()
@@ -729,9 +730,15 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req_api, context=ctx, timeout=10) as response:
-                res_data = json.loads(response.read().decode('utf-8'))
-                if res_data.get("success") and "data" in res_data:
+            
+            def fetch_api():
+                with urllib.request.urlopen(req_api, context=ctx, timeout=5) as response:
+                    return response.read().decode('utf-8')
+                    
+            raw_res = await asyncio.to_thread(fetch_api)
+            res_data = json.loads(raw_res)
+            
+            if res_data.get("success") and "data" in res_data:
                     v = res_data["data"].get("vehiculo", {})
                     props = res_data["data"].get("propietarios", [])
                     
