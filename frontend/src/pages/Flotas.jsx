@@ -246,8 +246,8 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
                       <span style={{ display:"flex",alignItems:"center",gap:6 }}>
                         <MapPin style={{ width:15,height:15,color:"#14B8A6" }}/>
                         <Camera style={{ width:15,height:15,color:"#EF4444" }}/>
-                        {r.pdf_filename ? (
-                          <button onClick={() => onDownloadPdf(r.id, r.PLACA)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }} title="Descargar Factura">
+                        {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
+                          <button onClick={() => onDownloadPdf(r.id, r.PLACA, r.NUMERO_DOCUMENTO)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }} title={`Descargar Factura ${r.NUMERO_DOCUMENTO || ""}`}>
                             <Receipt style={{ width:15,height:15,color:"#8B3DFF" }}/>
                           </button>
                         ) : (
@@ -273,8 +273,8 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
                     ) : (
                       <td style={tdSt}>
                         {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
-                          <button onClick={() => onDownloadPdf(r.id, r.PLACA)} style={{ background: "none", border: "none", color:"#8B3DFF", fontSize:13, textDecoration:"none", fontWeight:600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <FileText style={{ width:14,height:14 }}/>Descargar
+                          <button onClick={() => onDownloadPdf(r.id, r.PLACA, r.NUMERO_DOCUMENTO)} style={{ background: "none", border: "none", color:"#8B3DFF", fontSize:13, textDecoration:"none", fontWeight:600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Descargar"}
                           </button>
                         ) : "—"}
                       </td>
@@ -694,14 +694,14 @@ export default function Flotas() {
     }
   };
 
-  const handleDownloadPdf = async (id, placa) => {
+  const handleDownloadPdf = async (id, placa, numDoc) => {
     try {
-      const r = await api.get(`/invoices/${id}/download/pdf`, { responseType: "blob" });
+      const r = await api.get(`/consumptions/${id}/download/pdf`, { responseType: "blob" });
       const blob = new Blob([r.data], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Factura_${placa || "Combustible"}.pdf`;
+      a.download = `Factura_${numDoc || placa || "Combustible"}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {

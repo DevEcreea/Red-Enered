@@ -753,6 +753,28 @@ async def delete_consumption(cid: str, user: dict = Depends(get_current_user)):
 
 
 
+@api.get("/consumptions/{cid}/download/pdf")
+async def download_consumption_pdf(cid: str, user: dict = Depends(get_current_user)):
+    c_doc = None
+    if user.get("role") == "cliente_subsidio":
+        c_doc = await db.consumos_subsidio.find_one({"id": cid, "user_id": user["id"]})
+    else:
+        q = {"id": cid}
+        if user["role"] != "admin_enered" and user.get("empresa"):
+            q["EMPRESA"] = user["empresa"]
+        c_doc = await db.consumptions.find_one(q)
+        
+    if not c_doc:
+        raise HTTPException(status_code=404, detail="Consumo no encontrado")
+        
+    fname = c_doc.get("pdf_filename") or c_doc.get("factura_key")
+    if not fname:
+        raise HTTPException(status_code=404, detail="Comprobante no adjuntado")
+        
+    empresa = c_doc.get("EMPRESA") or c_doc.get("empresa") or user.get("empresa") or ""
+    key = _inv_key(empresa, fname)
+    return storage.download_response(key, fname, "application/pdf")
+
 
 @api.get("/dashboard/filter-options")
 async def dashboard_filter_options(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
