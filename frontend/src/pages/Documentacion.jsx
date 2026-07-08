@@ -419,7 +419,7 @@ export default function Documentacion() {
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1120 }}>
               <thead>
                 <tr style={{ background:TH }}>
-                  {["N° Doc","Tipo","Documento","Creado por / el","Emisión","Vencimiento","Atraso","Compartido con","Estado","Acciones"].map((h,i)=>(
+                  {["Nº DOC","TIPO","PLACA","DOCUMENTO","CREADO POR / EL","EMISIÓN","VENCIMIENTO","ATRASO","COMPARTIDO CON","ESTADO","ACCIONES"].map((h,i)=>(
                     <th key={i} style={thSt}>{h}</th>
                   ))}
                 </tr>
@@ -448,9 +448,12 @@ export default function Documentacion() {
                     <tr key={d.id} style={{ borderTop:i===0?"none":"1px solid #F3F4F6",transition:"background .15s" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                       onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{ ...tdSt,fontWeight:600,color:"#374151",whiteSpace:"nowrap" }}>{d.id}</td>
+                      <td style={{ ...tdSt,fontWeight:600,color:"#374151",whiteSpace:"nowrap" }}>{d.id.substring(0,8)}</td>
                       <td style={{ ...tdSt,color:"#6b7280",whiteSpace:"nowrap" }}>{d.tipo}</td>
-                      <td style={{ ...tdSt,color:"#374151",fontWeight:500 }}>{d.doc}</td>
+                      <td style={{ ...tdSt,color:"#374151",fontWeight:600 }}>{d.placa || "—"}</td>
+                      <td style={{ ...tdSt,color:"#374151",fontWeight:500 }}>
+                        {d.doc}
+                      </td>
                       <td style={tdSt}>
                         <div style={{ color:"#374151",fontSize:12.5 }}>{d.por}</div>
                         <div style={{ color:"#9ca3af",fontSize:11 }}>{d.el}</div>
