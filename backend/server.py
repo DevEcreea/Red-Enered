@@ -2898,6 +2898,56 @@ class InfraccionUpdate(BaseModel):
     observaciones: Optional[str] = None
 
 # --- VEHICULOS ENDPOINTS ---
+@api.get("/vehiculos/consulta-sunarp/{placa}")
+async def consulta_sunarp_placa(req: Request, placa: str):
+    await require_auth(req)
+    placa_clean = placa.replace("-", "").upper()
+    if not placa_clean:
+        raise HTTPException(400, "Placa no válida")
+        
+    token = "tr_6e6e5d380db1da4432d0c3e57851396a"
+    url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
+    
+    import urllib.request
+    import json
+    
+    try:
+        req_api = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req_api) as response:
+            res_data = json.loads(response.read().decode('utf-8'))
+            
+            if res_data.get("success") and "data" in res_data:
+                v = res_data["data"].get("vehiculo", {})
+                props = res_data["data"].get("propietarios", [])
+                
+                titular = ""
+                if props:
+                    titular = props[0].get("propietario", "")
+                
+                año = None
+                try:
+                    año_str = v.get("ano_fab") or v.get("an_mode")
+                    if año_str:
+                        año = int(año_str)
+                except:
+                    pass
+                    
+                return {
+                    "placa": v.get("num_placa", placa_clean),
+                    "marca": v.get("marca", ""),
+                    "modelo": v.get("modelo", ""),
+                    "chasis": v.get("no_vin") or v.get("num_serie", ""),
+                    "año": año,
+                    "titular": titular,
+                    "tipo": v.get("desc_tipo_carr", "")
+                }
+            else:
+                raise HTTPException(404, "No se encontró información para esta placa")
+    except urllib.error.HTTPError as e:
+        raise HTTPException(e.code, "Error consultando SUNARP")
+    except Exception as e:
+        raise HTTPException(500, f"Error de servidor: {str(e)}")
+
 @api.get("/vehiculos")
 async def list_vehiculos(req: Request):
     u = await require_auth(req)

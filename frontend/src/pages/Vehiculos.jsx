@@ -219,6 +219,7 @@ export default function Vehiculos() {
   const [loading, setLoading]     = useState(false);
   const [saving, setSaving]       = useState(false);
   const [errMsg, setErrMsg]       = useState("");
+  const [loadingSunarp, setLoadingSunarp] = useState(false);
 
   // data
   const [vehiculos, setVehiculos]     = useState([]);
@@ -292,6 +293,27 @@ export default function Vehiculos() {
   }, [vehiculos,q,fMarca,fEstado,fUnidad,fChasis,fModelo,fTipo,fBase,fTitular,fCC,fInact]);
 
   // ── Vehicle CRUD ──
+  async function consultarSunarp() {
+    if (!vForm.placa) return;
+    setLoadingSunarp(true); setErrMsg("");
+    try {
+      const { data } = await api.get(`/vehiculos/consulta-sunarp/${vForm.placa}`);
+      setVForm(prev => ({
+        ...prev,
+        marca: data.marca || prev.marca,
+        modelo: data.modelo || prev.modelo,
+        chasis: data.chasis || prev.chasis,
+        año: data.año || prev.año,
+        titular: data.titular || prev.titular,
+        tipo: data.tipo || prev.tipo
+      }));
+    } catch(e) {
+      setErrMsg(e?.response?.data?.detail || "No se pudo consultar la placa");
+    } finally {
+      setLoadingSunarp(false);
+    }
+  }
+
   function openVCreate() { setErrMsg(""); setVForm({ estado:"OPERATIVO" }); setVModal("create"); }
   function openVEdit(v)  { setErrMsg(""); setVForm({ ...v }); setVModal("edit"); }
 
@@ -743,8 +765,14 @@ export default function Vehiculos() {
           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
             <div>
               <label style={labelSt}>Placa *</label>
-              <input required maxLength={8} value={vForm.placa||""} placeholder="Ej: ABC-123"
-                onChange={e=>setVForm({...vForm,placa:e.target.value.toUpperCase().trim()})} style={inputSt}/>
+              <div style={{ display:"flex",gap:6 }}>
+                <input required maxLength={8} value={vForm.placa||""} placeholder="Ej: ABC-123"
+                  onChange={e=>setVForm({...vForm,placa:e.target.value.toUpperCase().trim()})} style={{ ...inputSt, marginTop:0 }}/>
+                <button type="button" onClick={consultarSunarp} disabled={loadingSunarp} title="Consultar en SUNARP" 
+                  style={{ background:"#8B3DFF",color:"#fff",border:"none",borderRadius:8,padding:"0 12px",cursor:loadingSunarp?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:loadingSunarp?0.6:1 }}>
+                  <Search style={{ width:16,height:16 }}/>
+                </button>
+              </div>
             </div>
             <div>
               <label style={labelSt}>Chasis / VIN</label>
