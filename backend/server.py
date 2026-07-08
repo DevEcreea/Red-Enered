@@ -2912,7 +2912,12 @@ async def consulta_sunarp_placa(req: Request, placa: str):
     import json
     
     try:
-        req_api = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json"
+        }
+        req_api = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req_api) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             
@@ -2942,9 +2947,16 @@ async def consulta_sunarp_placa(req: Request, placa: str):
                     "tipo": v.get("desc_tipo_carr", "")
                 }
             else:
-                raise HTTPException(404, "No se encontró información para esta placa")
+                msg = res_data.get("message", "No se encontró información para esta placa")
+                raise HTTPException(404, msg)
     except urllib.error.HTTPError as e:
-        raise HTTPException(e.code, "Error consultando SUNARP")
+        try:
+            err_body = e.read().decode('utf-8')
+            err_json = json.loads(err_body)
+            err_msg = err_json.get("message", "Error consultando SUNARP")
+        except:
+            err_msg = "Error consultando SUNARP"
+        raise HTTPException(e.code, f"{err_msg} (HTTP {e.code})")
     except Exception as e:
         raise HTTPException(500, f"Error de servidor: {str(e)}")
 
