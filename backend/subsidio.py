@@ -708,7 +708,8 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
         import json
         
         token = "tr_6e6e5d380db1da4432d0c3e57851396a"
-        url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa}"
+        placa_clean = placa.replace("-", "").upper()
+        url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
         
         marca = ""
         modelo = ""
