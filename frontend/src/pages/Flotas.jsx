@@ -89,6 +89,23 @@ function FSel({ label, icon:Icon, grow, children }) {
 
 // ═════════════════════════════════ TABS ══════════════════════════════════════
 
+function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener("mousedown", h);
+    return () => window.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={()=>setOpen(v=>!v)} data-testid={`row-actions-${row.id||row.PLACA}`}
+        style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}>
+        <MoreHorizontal style={{ width:15,height:15 }}/>
+      </button>
+      {open && (
+        <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
           {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
             <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA); }}
               style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
