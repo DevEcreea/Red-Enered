@@ -641,6 +641,86 @@ async def create_consumption(
         return doc
 
 
+@api.put("/consumptions/{cid}")
+async def update_consumption(
+    cid: str,
+    PLACA: str = Form(...),
+    EMPRESA: Optional[str] = Form(None),
+    FECHA: str = Form(...),
+    HORA: Optional[str] = Form(None),
+    CIUDAD: Optional[str] = Form(None),
+    ESTACION: Optional[str] = Form(None),
+    PRODUCTO: str = Form(...),
+    CANTIDAD_GL: float = Form(...),
+    PRECIO_UNITARIO: float = Form(...),
+    IMPORTE_TOTAL: float = Form(...),
+    CONDUCTOR: Optional[str] = Form(None),
+    KILOMETRAJE: Optional[int] = Form(None),
+    RUC_EMISOR: Optional[str] = Form(None),
+    NUMERO_DOCUMENTO: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    user: dict = Depends(get_current_user)
+):
+    empresa_target = EMPRESA or user.get("empresa") or ""
+    
+    coll = db.consumptions
+    if user.get("role") == "cliente_subsidio":
+        coll = db.consumos_subsidio
+        q = {"id": cid, "user_id": user["id"]}
+    else:
+        q = {"id": cid}
+        if user["role"] != "admin_enered" and user.get("empresa"):
+            q["EMPRESA"] = user["empresa"]
+            
+    c_doc = await coll.find_one(q)
+    if not c_doc:
+        raise HTTPException(status_code=404, detail="Consumo no encontrado")
+
+    pdf_filename = c_doc.get("pdf_filename")
+    if file and file.filename:
+        content = await file.read()
+        pdf_filename = f"inv_{cid}_{file.filename}"
+        key = _inv_key(empresa_target, pdf_filename)
+        storage.save_object(key, content, content_type="application/pdf")
+        
+    update_fields = {
+        "placa" if user.get("role") == "cliente_subsidio" else "PLACA": PLACA.upper(),
+        "fecha" if user.get("role") == "cliente_subsidio" else "FECHA": FECHA[:10] if user.get("role") == "cliente_subsidio" else FECHA,
+        "hora" if user.get("role") == "cliente_subsidio" else "HORA": HORA or ("00:00" if user.get("role") == "cliente_subsidio" else ""),
+        "ciudad" if user.get("role") == "cliente_subsidio" else "CIUDAD": CIUDAD or "",
+        "estacion" if user.get("role") == "cliente_subsidio" else "ESTACION": ESTACION or "",
+        "producto" if user.get("role") == "cliente_subsidio" else "PRODUCTO": PRODUCTO,
+        "galones" if user.get("role") == "cliente_subsidio" else "CANTIDAD_GL": CANTIDAD_GL,
+        "precio_unitario" if user.get("role") == "cliente_subsidio" else "PRECIO_UNITARIO": PRECIO_UNITARIO,
+        "importe_total" if user.get("role") == "cliente_subsidio" else "IMPORTE_TOTAL": IMPORTE_TOTAL,
+        "conductor" if user.get("role") == "cliente_subsidio" else "CONDUCTOR": CONDUCTOR or "",
+        "kilometraje" if user.get("role") == "cliente_subsidio" else "KILOMETRAJE": KILOMETRAJE or 0,
+        "ruc_emisor" if user.get("role") == "cliente_subsidio" else "RUC_EMISOR": RUC_EMISOR or "",
+        "numero_documento" if user.get("role") == "cliente_subsidio" else "NUMERO_DOCUMENTO": NUMERO_DOCUMENTO or "",
+        "pdf_filename": pdf_filename,
+    }
+    
+    if user.get("role") != "cliente_subsidio":
+        update_fields["AHORRO"] = round(CANTIDAD_GL * 1.5, 2)
+        try:
+            from datetime import date as _date
+            y, m, d = (int(x) for x in FECHA[:10].split("-"))
+            wk = _date(y, m, d).isocalendar()
+            update_fields["SEMANA"] = f"{wk.year}-W{wk.week:02d}"
+        except:
+            pass
+
+    await coll.update_one(q, {"$set": update_fields})
+    
+    updated_doc = await coll.find_one(q)
+    if "_id" in updated_doc:
+        updated_doc.pop("_id")
+        
+    if user.get("role") == "cliente_subsidio":
+        return _subsidio_row_to_consumption(updated_doc)
+    return updated_doc
+
+
 @api.delete("/consumptions/{cid}")
 async def delete_consumption(cid: str, user: dict = Depends(get_current_user)):
     if user.get("role") == "cliente_subsidio":

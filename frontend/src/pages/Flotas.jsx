@@ -7,7 +7,7 @@ import {
   FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
   ChevronDown, Download, Share2, Printer, Columns3, Upload,
   Filter, Calendar, User, Car, ArrowUpDown, Search, X,
-  CheckCircle2, Trash2
+  CheckCircle2, Trash2, Edit2
 } from "lucide-react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -113,29 +113,16 @@ function FSel({ label, icon:Icon, grow, children }) {
 
 // ═════════════════════════════════ TABS ══════════════════════════════════════
 
-function RowActions({ row, onDelete, onDownloadPdf }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    window.addEventListener("mousedown", h);
-    return () => window.removeEventListener("mousedown", h);
-  }, [open]);
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button onClick={()=>setOpen(v=>!v)} data-testid={`row-actions-${row.id||row.PLACA}`}
-        style={{ width:44,height:34,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:"#6b7280" }}>
-        <MoreHorizontal style={{ width:15,height:15 }}/>
-      </button>
-      {open && (
-        <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
           {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
             <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA); }}
               style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
               <FileText style={{ width:14,height:14,color:"#8B3DFF" }}/> Descargar Factura
             </button>
           )}
+          <button onClick={() => { setOpen(false); onEdit(row); }} data-testid={`row-edit-${row.id||row.PLACA}`}
+            style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
+            <Edit2 style={{ width:14,height:14,color:"#3B82F6" }}/> Editar
+          </button>
           <button onClick={()=>{setOpen(false); onDelete(row.id || row._id);}} data-testid={`row-delete-${row.id||row.PLACA}`}
             style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
             <Trash2 style={{ width:14,height:14 }}/> Eliminar
@@ -147,7 +134,7 @@ function RowActions({ row, onDelete, onDownloadPdf }) {
 }
 
 // ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
-function TabResumen({ rows, totals, services, onOpenNuevaCarga, onDelete, onDownloadPdf }) {
+function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete, onDownloadPdf }) {
   const showAhorro = services?.combustible === true;
 
   const invalidas = useMemo(() => {
@@ -301,7 +288,7 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onDelete, onDown
                     )}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.CONDUCTOR||"—"}</td>
                     <td style={tdSt}>
-                      <RowActions row={r} onDelete={onDelete} onDownloadPdf={onDownloadPdf}/>
+                      <RowActions row={r} onEdit={onEdit} onDelete={onDelete} onDownloadPdf={onDownloadPdf}/>
                     </td>
                   </tr>
                 );
@@ -548,7 +535,7 @@ function TabQR({ onToast }) {
 }
 
 // ── MODAL: NUEVA CARGA MANUAL ─────────────────────────────────────────────────
-function ModalNuevaCarga({ open, onClose, onSaved }) {
+function ModalNuevaCarga({ open, onClose, onSaved, initialData }) {
   const [form, setForm] = useState({
     placa: "", fecha: new Date().toISOString().slice(0,10), hora: "",
     estacion: "", ciudad: "", producto: "DIESEL B5",
@@ -558,6 +545,36 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
   const [factura, setFactura] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      if (initialData) {
+        setForm({
+          placa: initialData.PLACA || "",
+          fecha: initialData.FECHA ? initialData.FECHA.slice(0,10) : new Date().toISOString().slice(0,10),
+          hora: initialData.HORA || "",
+          estacion: initialData.ESTACION || "",
+          ciudad: initialData.CIUDAD || "",
+          producto: initialData.PRODUCTO || "DIESEL B5",
+          galones: initialData.CANTIDAD_GL || "",
+          precio_unitario: initialData.PRECIO_UNITARIO || "",
+          importe_total: initialData.IMPORTE_TOTAL || "",
+          kilometraje: initialData.KILOMETRAJE || "",
+          conductor: initialData.CONDUCTOR || "",
+          numero_factura: initialData.NUMERO_DOCUMENTO || "",
+        });
+      } else {
+        setForm({
+          placa: "", fecha: new Date().toISOString().slice(0,10), hora: "",
+          estacion: "", ciudad: "", producto: "DIESEL B5",
+          galones: "", precio_unitario: "", importe_total: "",
+          kilometraje: "", conductor: "", numero_factura: "",
+        });
+      }
+      setFactura(null);
+      setErr("");
+    }
+  }, [open, initialData]);
 
   if (!open) return null;
 
@@ -601,8 +618,13 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
       if (form.numero_factura) fd.append("NUMERO_DOCUMENTO", form.numero_factura.trim());
       if (factura) fd.append("file", factura);
 
-      const { data } = await api.post("/consumptions", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      onSaved?.(data);
+      if (initialData && (initialData.id || initialData._id)) {
+        const { data } = await api.put(`/consumptions/${initialData.id || initialData._id}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+        onSaved?.(data, true);
+      } else {
+        const { data } = await api.post("/consumptions", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        onSaved?.(data, false);
+      }
       onClose();
     } catch (e) {
       console.error("Error al guardar carga manual:", e);
@@ -617,8 +639,8 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
       <div onClick={e=>e.stopPropagation()} style={{ background:"#fff",borderRadius:16,padding:26,width:"100%",maxWidth:680,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)" }} data-testid="modal-nueva-carga">
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18 }}>
           <div>
-            <div style={{ fontSize:11,fontWeight:700,letterSpacing:".08em",color:"#8B3DFF",textTransform:"uppercase" }}>Registro manual</div>
-            <div style={{ fontSize:22,fontWeight:700,color:"#111827" }}>Nueva carga de combustible</div>
+            <div style={{ fontSize:11,fontWeight:700,letterSpacing:".08em",color:"#8B3DFF",textTransform:"uppercase" }}>{initialData ? "Editar registro" : "Registro manual"}</div>
+            <div style={{ fontSize:22,fontWeight:700,color:"#111827" }}>{initialData ? "Editar carga de combustible" : "Nueva carga de combustible"}</div>
           </div>
           <button onClick={onClose} style={{ background:"none",border:"none",cursor:"pointer",color:"#6b7280" }}><X style={{ width:22,height:22 }}/></button>
         </div>
@@ -665,7 +687,7 @@ function ModalNuevaCarga({ open, onClose, onSaved }) {
           <button onClick={onClose} style={{ padding:"0 18px",height:40,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",fontSize:14,fontWeight:500,color:"#374151",cursor:"pointer" }}>Cancelar</button>
           <button onClick={handleSave} disabled={saving} data-testid="nc-guardar"
             style={{ padding:"0 22px",height:40,border:"none",borderRadius:10,background:"#8B3DFF",color:"#fff",fontSize:14,fontWeight:600,cursor:saving?"wait":"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.25)",opacity:saving?0.7:1 }}>
-            {saving ? "Guardando..." : "Guardar carga"}
+            {saving ? "Guardando..." : (initialData ? "Guardar cambios" : "Guardar carga")}
           </button>
         </div>
       </div>
@@ -680,7 +702,13 @@ export default function Flotas() {
   const [rows, setRows]           = useState([]);
   const [toast, setToast]         = useState(null);
   const [nuevaCargaOpen, setNuevaCargaOpen] = useState(false);
+  const [editCargaData, setEditCargaData] = useState(null);
   const toastRef = useRef(null);
+
+  const handleEdit = (row) => {
+    setEditCargaData(row);
+    setNuevaCargaOpen(true);
+  };
 
   const services = user?.servicios || { plataforma:true, combustible:true, gps:false };
 
@@ -756,7 +784,8 @@ export default function Flotas() {
           rows={rows} 
           totals={totals} 
           services={services} 
-          onOpenNuevaCarga={()=>setNuevaCargaOpen(true)}
+          onOpenNuevaCarga={()=>{ setEditCargaData(null); setNuevaCargaOpen(true); }}
+          onEdit={handleEdit}
           onDelete={handleDelete}
           onDownloadPdf={handleDownloadPdf}
         />
@@ -765,7 +794,17 @@ export default function Flotas() {
       {activeTab==="Control" && <TabControl onToast={showToast}/>}
       {activeTab==="QR"      && <TabQR onToast={showToast}/>}
 
-      <ModalNuevaCarga open={nuevaCargaOpen} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo)=>{ if (newConsumo) setRows(prev=>[newConsumo,...prev]); reload(); showToast("Carga registrada correctamente"); }}/>
+      <ModalNuevaCarga open={nuevaCargaOpen} initialData={editCargaData} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo, isEdit)=>{
+        if (newConsumo) {
+          if (isEdit) {
+            setRows(prev => prev.map(r => (r.id || r._id) === (newConsumo.id || newConsumo._id) ? newConsumo : r));
+          } else {
+            setRows(prev=>[newConsumo,...prev]);
+          }
+        }
+        reload();
+        showToast(isEdit ? "Carga actualizada correctamente" : "Carga registrada correctamente"); 
+      }}/>
       <Toast msg={toast}/>
 
       <div style={{ textAlign:"center",color:"#9ca3af",fontSize:11,padding:"26px 0 10px" }}>
