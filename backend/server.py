@@ -2844,6 +2844,7 @@ class VehiculoCreate(BaseModel):
     cc: Optional[str] = None
     conductor_principal_id: Optional[str] = None
     empresa: Optional[str] = None
+    kilometraje: Optional[int] = None
 
 class VehiculoUpdate(BaseModel):
     placa: Optional[str] = None
@@ -2858,6 +2859,7 @@ class VehiculoUpdate(BaseModel):
     titular: Optional[str] = None
     cc: Optional[str] = None
     conductor_principal_id: Optional[str] = None
+    kilometraje: Optional[int] = None
 
 class ConductorCreate(BaseModel):
     dni: str = Field(min_length=8, max_length=8)
@@ -2934,11 +2936,12 @@ async def create_vehiculo(req: Request, body: VehiculoCreate):
         "cc": body.cc,
         "conductor_principal_id": body.conductor_principal_id,
         "empresa": body.empresa or u.get("empresa"),
+        "kilometraje": body.kilometraje,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": u["id"],
     }
     await db.vehiculos.insert_one(doc)
-    doc.pop("_id")
+    doc.pop("_id", None)
     return doc
 
 @api.put("/vehiculos/{vehiculo_id}")
@@ -2949,7 +2952,7 @@ async def update_vehiculo(req: Request, vehiculo_id: str, body: VehiculoUpdate):
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
     
-    updates = {k: v for k, v in body.dict().items() if v is not None}
+    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
         await db.vehiculos.update_one({"id": vehiculo_id}, {"$set": updates})

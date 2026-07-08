@@ -279,14 +279,14 @@ export default function Vehiculos() {
       if (qq && !`${v.placa||""} ${v.marca||""} ${v.modelo||""} ${v.veh||""} ${v.unidad||""}`.toLowerCase().includes(qq)) return false;
       if (fMarca  && (v.marca||"").toLowerCase()!==fMarca.toLowerCase()) return false;
       if (fEstado && (v.estado||"").toLowerCase()!==fEstado.toLowerCase()) return false;
-      if (fUnidad && !(v.unidad||"").toLowerCase().includes(fUnidad.toLowerCase())) return false;
-      if (fChasis && !(v.chasis||"").toLowerCase().includes(fChasis.toLowerCase())) return false;
-      if (fModelo && !(v.modelo||"").toLowerCase().includes(fModelo.toLowerCase())) return false;
-      if (fTipo   && !(v.tipo||"").toLowerCase().includes(fTipo.toLowerCase())) return false;
-      if (fBase   && !(v.base||"").toLowerCase().includes(fBase.toLowerCase())) return false;
-      if (fTitular&& !(v.titular||"").toLowerCase().includes(fTitular.toLowerCase())) return false;
-      if (fCC     && !(v.cc||"").toLowerCase().includes(fCC.toLowerCase())) return false;
-      if (!fInact && (v.estado||"").toUpperCase()==="INACTIVO") return false;
+      if (fUnidad && !(String(v.unidad||"")).toLowerCase().includes(fUnidad.toLowerCase())) return false;
+      if (fChasis && !(String(v.chasis||"")).toLowerCase().includes(fChasis.toLowerCase())) return false;
+      if (fModelo && !(String(v.modelo||"")).toLowerCase().includes(fModelo.toLowerCase())) return false;
+      if (fTipo   && !(String(v.tipo||"")).toLowerCase().includes(fTipo.toLowerCase())) return false;
+      if (fBase   && !(String(v.base||"")).toLowerCase().includes(fBase.toLowerCase())) return false;
+      if (fTitular&& !(String(v.titular||"")).toLowerCase().includes(fTitular.toLowerCase())) return false;
+      if (fCC     && !(String(v.cc||"")).toLowerCase().includes(fCC.toLowerCase())) return false;
+      if (!fInact && (String(v.estado||"")).toUpperCase()==="INACTIVO") return false;
       return true;
     });
   }, [vehiculos,q,fMarca,fEstado,fUnidad,fChasis,fModelo,fTipo,fBase,fTitular,fCC,fInact]);
@@ -518,7 +518,7 @@ export default function Vehiculos() {
                         <td style={{ padding:"10px 14px" }}>
                           <div style={{ display:"flex",alignItems:"center",gap:4,color:"#4b5563",whiteSpace:"nowrap" }}>
                             <Clock style={{ width:13,height:13,color:"#9ca3af" }}/>
-                            <span style={{ fontSize:12.5 }}>0 Kms</span>
+                            <span style={{ fontSize:12.5 }}>{v.kilometraje || 0} Kms</span>
                           </div>
                         </td>
                         <td style={{ padding:"10px 14px",minWidth:90 }}>
@@ -799,6 +799,11 @@ export default function Vehiculos() {
               <label style={labelSt}>Centro de Costos</label>
               <input value={vForm.cc||""} placeholder="Ej: 100000 - SEDE CENTRAL"
                 onChange={e=>setVForm({...vForm,cc:e.target.value})} style={inputSt}/>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}>
+              <label style={labelSt}>Kilometraje</label>
+              <input type="number" value={vForm.kilometraje||""} placeholder="Ej: 150000"
+                onChange={e=>setVForm({...vForm,kilometraje:parseInt(e.target.value)||0})} style={inputSt}/>
             </div>
           </div>
 
