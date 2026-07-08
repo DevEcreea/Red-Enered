@@ -700,6 +700,74 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await db.subsidio_vehicles.insert_one(doc)
+    
+    # --- AUTO SYNC CON MODULO VEHICULOS ---
+    existing_vehiculo = await db.vehiculos.find_one({"placa": placa})
+    if not existing_vehiculo:
+        import urllib.request
+        import json
+        
+        token = "tr_6e6e5d380db1da4432d0c3e57851396a"
+        url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa}"
+        
+        marca = ""
+        modelo = ""
+        chasis = ""
+        año = None
+        titular = ""
+        tipo = ""
+        
+        try:
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json"
+            }
+            req_api = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req_api, timeout=5) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                if res_data.get("success") and "data" in res_data:
+                    v = res_data["data"].get("vehiculo", {})
+                    props = res_data["data"].get("propietarios", [])
+                    
+                    if props:
+                        titular = props[0].get("propietario", "")
+                    
+                    try:
+                        año_str = v.get("ano_fab") or v.get("an_mode")
+                        if año_str:
+                            año = int(año_str)
+                    except:
+                        pass
+                        
+                    marca = v.get("marca", "")
+                    modelo = v.get("modelo", "")
+                    chasis = v.get("no_vin") or v.get("num_serie", "")
+                    tipo = v.get("desc_tipo_carr", "")
+        except Exception:
+            pass # Si falla SUNARP, registramos el vehiculo con datos en blanco
+            
+        vehiculo_doc = {
+            "id": str(uuid.uuid4()),
+            "placa": placa,
+            "marca": marca,
+            "modelo": modelo,
+            "año": año,
+            "chasis": chasis,
+            "estado": "OPERATIVO",
+            "unidad": "",
+            "tipo": tipo,
+            "base": "",
+            "titular": titular,
+            "cc": "",
+            "conductor_principal_id": None,
+            "empresa": user.get("empresa"),
+            "kilometraje": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": user["id"],
+        }
+        await db.vehiculos.insert_one(vehiculo_doc)
+    # --------------------------------------
     return {"ok": True, "vehicle": {k: v for k, v in doc.items() if k != "_id"}}
 
 
