@@ -2989,6 +2989,107 @@ async def list_vehiculos(req: Request):
         vehiculos.append(v)
     return vehiculos
 
+
+@api.get("/vehiculos/kpis")
+async def vehiculos_kpis(req: Request):
+    """KPIs resumen para el módulo Vehículos (tarjetas superiores)."""
+    u = await require_auth(req)
+    empresa = None if u["role"] == "admin_enered" else u.get("empresa")
+    filt_emp = {"empresa": empresa} if empresa else {}
+
+    # Total vehículos + En Taller + Sin GPS
+    total_veh = 0
+    en_taller = 0
+    sin_gps = 0
+    veh_placas = set()
+    async for v in db.vehiculos.find(filt_emp):
+        total_veh += 1
+        estado = (v.get("estado") or "").strip().upper()
+        if estado == "TALLER":
+            en_taller += 1
+        # "sin GPS" si el vehículo no tiene device_gps configurado
+        if not (v.get("gps") or v.get("device_gps") or v.get("imei")):
+            sin_gps += 1
+        placa = v.get("placa") or v.get("veh")
+        if placa:
+            veh_placas.add(str(placa).upper().strip())
+
+    # Docs vencidos (vehículo y chofer) — solo cuenta placas/personas UNIQUE
+    docs_veh_venc_placas = set()
+    docs_chofer_venc_ids = set()
+
+    # 1) Docs manuales (colección db.documents)
+    async for d in db.documents.find({**filt_emp, "est": "Vencido"}):
+        tipo = (d.get("tipo") or "").lower()
+        if tipo in ("vehículos", "vehiculos"):
+            placa = (d.get("placa") or "").upper().strip()
+            if placa:
+                docs_veh_venc_placas.add(placa)
+        elif tipo == "personal":
+            key = d.get("conductor_id") or d.get("dni") or d.get("por") or d.get("id")
+            if key:
+                docs_chofer_venc_ids.add(str(key))
+
+    # 2) Docs de subsidio (vehículos): compara vigente_hasta contra hoy
+    sub_veh_filter = {}
+    if empresa:
+        sub_veh_filter["empresa"] = empresa
+    now_dt = datetime.now(timezone.utc)
+    async for sv in db.subsidio_vehicles.find(sub_veh_filter):
+        vh = sv.get("vigente_hasta")
+        if not vh:
+            continue
+        try:
+            if "-" in vh:
+                parts = vh.split("-")
+                y, m, d = int(parts[0]), int(parts[1]), int(parts[2][:2])
+            else:
+                dd, mm, yy = vh.split("/")[:3]
+                y = int(yy) + (2000 if len(yy) == 2 else 0)
+                m, d = int(mm), int(dd)
+            exp_dt = datetime(y, m, d, tzinfo=timezone.utc)
+            if exp_dt < now_dt:
+                placa = (sv.get("placa") or "").upper().strip()
+                if placa:
+                    docs_veh_venc_placas.add(placa)
+        except Exception:
+            continue
+
+    # Vehículos con infracciones
+    veh_inf_ids = set()
+    async for i in db.infracciones.find(filt_emp):
+        vid = i.get("vehiculo_id") or i.get("placa")
+        if vid:
+            veh_inf_ids.add(str(vid).upper().strip())
+
+    # Vehículos con cargas inválidas (galones<=0 o importe<=0 o sin placa)
+    veh_cargas_inv = set()
+    cons_filter = {}
+    if empresa:
+        cons_filter["EMPRESA"] = empresa
+    async for c in db.consumptions.find(cons_filter, {"PLACA": 1, "GALONES": 1, "IMPORTE": 1}):
+        gal = c.get("GALONES") or 0
+        imp = c.get("IMPORTE") or 0
+        placa = (c.get("PLACA") or "").upper().strip()
+        try:
+            gal = float(gal); imp = float(imp)
+        except Exception:
+            gal, imp = 0, 0
+        if gal <= 0 or imp <= 0 or not placa:
+            if placa:
+                veh_cargas_inv.add(placa)
+
+    return {
+        "total_vehiculos": total_veh,
+        "sin_gps": sin_gps,
+        "en_taller": en_taller,
+        "docs_vehiculo_vencidos": len(docs_veh_venc_placas),
+        "docs_chofer_vencidos": len(docs_chofer_venc_ids),
+        "vehiculos_con_infracciones": len(veh_inf_ids),
+        "vehiculos_con_cargas_invalidas": len(veh_cargas_inv),
+    }
+
+
 @api.post("/vehiculos")
 async def create_vehiculo(req: Request, body: VehiculoCreate):
     u = await require_auth(req)

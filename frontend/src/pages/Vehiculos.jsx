@@ -224,6 +224,7 @@ export default function Vehiculos() {
   // data
   const [vehiculos, setVehiculos]     = useState([]);
   const [conductores, setConductores] = useState([]);
+  const [kpis, setKpis]               = useState({});
 
   // vehicle modal
   const [vModal, setVModal] = useState(null); // null|"create"|"edit"
@@ -259,13 +260,15 @@ export default function Vehiculos() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [v, c] = await Promise.all([
+      const [v, c, k] = await Promise.all([
         api.get("/vehiculos"),
-        api.get("/conductores").catch(()=>({ data:[] }))
+        api.get("/conductores").catch(()=>({ data:[] })),
+        api.get("/vehiculos/kpis").catch(()=>({ data:{} }))
       ]);
       const real = (v.data||[]);
       setVehiculos(real.length > 0 ? real : []);
       setConductores(c.data||[]);
+      setKpis(k.data || {});
     } catch {
       setVehiculos([]);
     } finally { setLoading(false); }
@@ -440,14 +443,14 @@ export default function Vehiculos() {
       {/* ══════════ VEHÍCULOS ══════════ */}
       {tab==="vehiculos"&&(<>
 
-        {/* KPIs — todos en 0 hasta conectar */}
+        {/* KPIs — computados desde /api/vehiculos/kpis y datos locales */}
         <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:16,marginBottom:16 }}>
-          <KpiCard label="GPS" value="0" foot="Sin GPS" icon={MapPin} color="#14B8A6" />
-          <KpiCard label="En Taller"                icon={Warehouse}  color="#F26B6B" value="0" />
-          <KpiCard label="Doc. Vehículo Vencida"    icon={FileText}   color="#F26B6B" value="0" />
-          <KpiCard label="Doc. Chofer Vencida"      icon={UserCheck}  color="#F26B6B" value="0" />
-          <KpiCard label="Vh. con Infracciones"     icon={Shield}     color="#F26B6B" value="0" />
-          <KpiCard label="Vh. con Cargas Inválidas" icon={Fuel}       color="#F26B6B" value="0" />
+          <KpiCard label="GPS" value={String(kpis.sin_gps ?? vehiculos.filter(v => !(v.gps || v.device_gps || v.imei)).length)} foot="Sin GPS" icon={MapPin} color="#14B8A6" />
+          <KpiCard label="En Taller"                icon={Warehouse}  color="#F26B6B" value={String(kpis.en_taller ?? vehiculos.filter(v => (v.estado||"").toUpperCase() === "TALLER").length)} />
+          <KpiCard label="Doc. Vehículo Vencida"    icon={FileText}   color="#F26B6B" value={String(kpis.docs_vehiculo_vencidos ?? 0)} />
+          <KpiCard label="Doc. Chofer Vencida"      icon={UserCheck}  color="#F26B6B" value={String(kpis.docs_chofer_vencidos ?? 0)} />
+          <KpiCard label="Vh. con Infracciones"     icon={Shield}     color="#F26B6B" value={String(kpis.vehiculos_con_infracciones ?? 0)} />
+          <KpiCard label="Vh. con Cargas Inválidas" icon={Fuel}       color="#F26B6B" value={String(kpis.vehiculos_con_cargas_invalidas ?? 0)} />
         </div>
 
         {/* FABs */}
