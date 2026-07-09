@@ -1,3 +1,4 @@
+// Force update for Netlify deploy - delete button and finance config
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { toast } from "sonner";
