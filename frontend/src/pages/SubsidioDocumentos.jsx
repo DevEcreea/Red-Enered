@@ -17,12 +17,33 @@ const ETAPAS = [
 ];
 
 const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50"];
+const TARGET_DATE = new Date("2026-07-28T23:59:59");
 
 export default function SubsidioDocumentos() {
   const navigate = useNavigate();
   const { setUser } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const diff = TARGET_DATE.getTime() - now.getTime();
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      } else {
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+        const minutes = Math.floor((diff / 1000 / 60) % 60);
+        const seconds = Math.floor((diff / 1000) % 60);
+        setTimeLeft({ days, hours, minutes, seconds });
+      }
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
   const [activeEtapa, setActiveEtapa] = useState("empresa");
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [createdDeclaracion, setCreatedDeclaracion] = useState(null);
@@ -100,6 +121,14 @@ export default function SubsidioDocumentos() {
             <div className="px-4 py-2.5 bg-brand/10 border border-brand/30 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Ahorro reconocido</div>
               <div className="font-cabinet font-black text-xl text-brand">S/ {Number(ahorro_reconocido).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
+            </div>
+            {/* Reloj con cuenta regresiva resaltado en rojo */}
+            <div className="px-4 py-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2.5 shadow-[0_0_10px_rgba(244,63,94,0.08)]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="text-rose-600 animate-pulse flex-shrink-0"><circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="2.2"/><path d="M12 9v4l2.5 2M9 3h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
+              <div>
+                <div className="text-[10px] uppercase tracking-widest font-bold text-rose-600">Cierre solicitud</div>
+                <div className="font-cabinet font-black text-xl text-rose-700 leading-tight">{timeLeft.days}d {timeLeft.hours}h {timeLeft.minutes}m</div>
+              </div>
             </div>
           </div>
         </div>
