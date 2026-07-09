@@ -1,476 +1,420 @@
 #!/usr/bin/env python3
 """
-Backend test for Subsidio DU 004 admin endpoints bug fix.
-Tests performance and cascade delete functionality.
+Backend testing for Documentación module - cliente_subsidio scenarios
+Tests GET /api/documents merge with subsidio_documents and POST /api/documents manual upload
 """
 import os
 import sys
-import time
-import httpx
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
+import httpx
+from io import BytesIO
 
-# Backend URL from environment or default
+# Backend URL - use internal URL for testing
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8001")
 API_BASE = f"{BACKEND_URL}/api"
 
 # Test credentials
 ADMIN_EMAIL = "admin@enered.com"
 ADMIN_PASSWORD = "admin123"
-TEST_CLIENT_EMAIL = "cliente.subsidio@test.com"
-TEST_CLIENT_PASSWORD = "subsidio123"
+CLIENTE_SUBSIDIO_EMAIL = "cliente.subsidio@test.com"
+CLIENTE_SUBSIDIO_PASSWORD = "subsidio123"
+LIMA_EMAIL = "administrador@lima.com"
+LIMA_PASSWORD = "demo123"
 
-# MongoDB connection
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017")
-DB_NAME = os.getenv("DB_NAME", "enered_local")
+# Test results
+test_results = []
 
-class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    RESET = '\033[0m'
+def log_test(name, passed, details=""):
+    """Log test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    test_results.append({"name": name, "passed": passed, "details": details})
+    print(f"{status}: {name}")
+    if details:
+        print(f"  → {details}")
 
-def log_test(name):
-    print(f"\n{Colors.BLUE}[TEST]{Colors.RESET} {name}")
-
-def log_success(msg):
-    print(f"  {Colors.GREEN}✓{Colors.RESET} {msg}")
-
-def log_error(msg):
-    print(f"  {Colors.RED}✗{Colors.RESET} {msg}")
-
-def log_warning(msg):
-    print(f"  {Colors.YELLOW}⚠{Colors.RESET} {msg}")
-
-def log_info(msg):
-    print(f"  {Colors.BLUE}ℹ{Colors.RESET} {msg}")
-
-
-async def login(email: str, password: str) -> str:
-    """Login and return access token."""
+async def login(email, password):
+    """Login and return access token"""
     async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.post(f"{API_BASE}/auth/login", json={"email": email, "password": password})
-        if r.status_code != 200:
-            raise Exception(f"Login failed: {r.status_code} {r.text}")
-        return r.json()["access_token"]
+        resp = await client.post(
+            f"{API_BASE}/auth/login",
+            json={"email": email, "password": password}
+        )
+        if resp.status_code != 200:
+            raise Exception(f"Login failed for {email}: {resp.status_code} {resp.text}")
+        data = resp.json()
+        return data["access_token"]
 
+async def re_seed_subsidio():
+    """Re-seed cliente subsidio test user"""
+    print("\n🔄 Re-seeding cliente subsidio...")
+    result = os.system("cd /app/backend && python seed_subsidio_test.py")
+    if result == 0:
+        print("✅ Re-seed successful")
+    else:
+        print("⚠️  Re-seed may have failed or user already exists")
 
-async def test_health():
-    """Test 1: Health check (regression)"""
-    log_test("GET /api/health (regression)")
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"{API_BASE}/health")
-        if r.status_code == 200:
-            data = r.json()
-            if data.get("status") == "ok" and data.get("mongo") == "ok":
-                log_success(f"Health check OK: {data}")
-                return True
-            else:
-                log_error(f"Health check returned unexpected data: {data}")
-                return False
-        else:
-            log_error(f"Health check failed: {r.status_code}")
-            return False
+def create_test_pdf():
+    """Create a small test PDF"""
+    # Minimal valid PDF
+    pdf_content = b"""%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj
+xref
+0 4
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+trailer<</Size 4/Root 1 0 R>>
+startxref
+190
+%%EOF"""
+    return pdf_content
 
-
-async def test_listado_performance(admin_token: str):
-    """Test 2: Performance of GET /api/admin/subsidio/expedientes"""
-    log_test("GET /api/admin/subsidio/expedientes - Performance (<5s)")
+async def test_1_get_documents_merge():
+    """TEST 1: GET /api/documents merge with subsidio_documents"""
+    print("\n" + "="*80)
+    print("TEST 1: GET /api/documents — merge con subsidio_documents")
+    print("="*80)
     
-    headers = {"Authorization": f"Bearer {admin_token}"}
+    # Re-seed
+    await re_seed_subsidio()
+    
+    # Login as cliente_subsidio
+    token = await login(CLIENTE_SUBSIDIO_EMAIL, CLIENTE_SUBSIDIO_PASSWORD)
+    headers = {"Authorization": f"Bearer {token}"}
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        start = time.time()
-        r = await client.get(f"{API_BASE}/admin/subsidio/expedientes", headers=headers)
-        elapsed = time.time() - start
+        # Upload 3 empresa docs
+        print("\n📤 Uploading 3 empresa documents...")
+        empresa_cats = ["ficha_ruc", "resolucion_autorizacion", "dni_representante"]
+        for cat in empresa_cats:
+            files = {"file": ("test_doc.pdf", create_test_pdf(), "application/pdf")}
+            data = {"categoria": cat}
+            resp = await client.post(
+                f"{API_BASE}/subsidio/documents",
+                headers=headers,
+                files=files,
+                data=data
+            )
+            if resp.status_code != 200:
+                log_test(f"Upload {cat}", False, f"Status {resp.status_code}: {resp.text[:200]}")
+                return
+            log_test(f"Upload {cat}", True, f"Document uploaded successfully")
         
-        if r.status_code != 200:
-            log_error(f"Request failed: {r.status_code} {r.text[:200]}")
-            return False
+        # Upload 2 flota docs
+        print("\n📤 Uploading 2 flota documents...")
+        flota_docs = [
+            ("tarjeta_habilitacion", "ABC-123"),
+            ("tarjeta_propiedad", "DEF-456")
+        ]
+        for cat, placa in flota_docs:
+            files = {"file": ("test_doc.pdf", create_test_pdf(), "application/pdf")}
+            data = {"categoria": cat, "placa": placa}
+            resp = await client.post(
+                f"{API_BASE}/subsidio/documents",
+                headers=headers,
+                files=files,
+                data=data
+            )
+            if resp.status_code != 200:
+                log_test(f"Upload {cat} for {placa}", False, f"Status {resp.status_code}: {resp.text[:200]}")
+                return
+            log_test(f"Upload {cat} for {placa}", True, f"Document uploaded successfully")
         
-        data = r.json()
+        # GET /api/documents
+        print("\n🔍 Testing GET /api/documents...")
+        resp = await client.get(f"{API_BASE}/documents", headers=headers)
         
-        # Check performance
-        if elapsed < 5.0:
-            log_success(f"Response time: {elapsed:.2f}s (< 5s target)")
+        if resp.status_code != 200:
+            log_test("GET /api/documents returns 200", False, f"Status {resp.status_code}: {resp.text[:200]}")
+            return
+        log_test("GET /api/documents returns 200", True)
+        
+        docs = resp.json()
+        if not isinstance(docs, list):
+            log_test("Response is array", False, f"Got {type(docs)}")
+            return
+        log_test("Response is array", True)
+        
+        # Check we have at least 5 docs
+        if len(docs) < 5:
+            log_test("Response has ≥5 documents", False, f"Got {len(docs)} documents")
+            return
+        log_test("Response has ≥5 documents", True, f"Got {len(docs)} documents")
+        
+        # Check empresa docs
+        empresa_docs = [d for d in docs if d.get("tipo") == "Empresa"]
+        empresa_names = {d.get("doc") for d in empresa_docs}
+        expected_empresa = {"Ficha RUC", "Resolución de autorización", "DNI del representante"}
+        
+        if len(empresa_docs) < 3:
+            log_test("3 docs with tipo=Empresa", False, f"Got {len(empresa_docs)}")
+            return
+        log_test("3 docs with tipo=Empresa", True, f"Found {len(empresa_docs)} empresa docs")
+        
+        missing_empresa = expected_empresa - empresa_names
+        if missing_empresa:
+            log_test("Empresa doc names correct", False, f"Missing: {missing_empresa}")
         else:
-            log_warning(f"Response time: {elapsed:.2f}s (> 5s target, but may be acceptable on cold start)")
+            log_test("Empresa doc names correct", True)
         
-        # Check structure
-        if "items" not in data or "total" not in data:
-            log_error(f"Missing 'items' or 'total' in response")
-            return False
+        # Check flota docs
+        flota_docs_resp = [d for d in docs if d.get("tipo") == "Vehículos"]
+        flota_names = {d.get("doc") for d in flota_docs_resp}
+        expected_flota = {"Tarjeta de habilitación", "Tarjeta de propiedad"}
         
-        log_success(f"Structure correct: items={len(data['items'])}, total={data['total']}")
+        if len(flota_docs_resp) < 2:
+            log_test("2 docs with tipo=Vehículos", False, f"Got {len(flota_docs_resp)}")
+            return
+        log_test("2 docs with tipo=Vehículos", True, f"Found {len(flota_docs_resp)} flota docs")
         
-        # Check fields in items
-        if data["items"]:
-            item = data["items"][0]
-            required_fields = ["user_id", "empresa", "ruc", "email", "expediente_status", 
-                             "docs_count", "vehicles_count", "invoices"]
-            missing = [f for f in required_fields if f not in item]
+        # Check all have placa
+        flota_with_placa = [d for d in flota_docs_resp if d.get("placa")]
+        if len(flota_with_placa) != len(flota_docs_resp):
+            log_test("All flota docs have placa", False, f"Only {len(flota_with_placa)}/{len(flota_docs_resp)} have placa")
+        else:
+            log_test("All flota docs have placa", True)
+        
+        # Check all have _origen=subsidio
+        subsidio_docs = [d for d in docs if d.get("_origen") == "subsidio"]
+        if len(subsidio_docs) < 5:
+            log_test("All docs have _origen=subsidio", False, f"Only {len(subsidio_docs)}/{len(docs)} have _origen=subsidio")
+        else:
+            log_test("All docs have _origen=subsidio", True)
+        
+        # Check required fields
+        required_fields = ["id", "filename", "est", "por"]
+        for doc in docs[:3]:  # Check first 3
+            missing = [f for f in required_fields if not doc.get(f)]
             if missing:
-                log_error(f"Missing fields in item: {missing}")
-                return False
-            log_success(f"All required fields present in items")
+                log_test(f"Doc has required fields", False, f"Missing: {missing}")
+                break
+        else:
+            log_test("Docs have required fields (id, filename, est, por)", True)
         
-        return True
+        # Check por field
+        por_values = {d.get("por") for d in docs}
+        if "Cliente (Subsidio)" not in por_values:
+            log_test("por field = 'Cliente (Subsidio)'", False, f"Got: {por_values}")
+        else:
+            log_test("por field = 'Cliente (Subsidio)'", True)
+        
+        # Test tenant isolation - login as different user
+        print("\n🔒 Testing tenant isolation...")
+        lima_token = await login(LIMA_EMAIL, LIMA_PASSWORD)
+        lima_headers = {"Authorization": f"Bearer {lima_token}"}
+        
+        resp_lima = await client.get(f"{API_BASE}/documents", headers=lima_headers)
+        if resp_lima.status_code != 200:
+            log_test("Tenant isolation - Lima user can access endpoint", False, f"Status {resp_lima.status_code}")
+            return
+        
+        lima_docs = resp_lima.json()
+        # Lima user should NOT see subsidio docs from TEST SUBSIDIO empresa
+        subsidio_empresa_docs = [d for d in lima_docs if d.get("_origen") == "subsidio" and "TEST SUBSIDIO" in str(d)]
+        if subsidio_empresa_docs:
+            log_test("Tenant isolation - Lima user cannot see TEST SUBSIDIO docs", False, f"Found {len(subsidio_empresa_docs)} docs")
+        else:
+            log_test("Tenant isolation - Lima user cannot see TEST SUBSIDIO docs", True)
+        
+        # Test without auth
+        print("\n🔓 Testing without auth...")
+        resp_no_auth = await client.get(f"{API_BASE}/documents")
+        if resp_no_auth.status_code == 401:
+            log_test("Without auth returns 401", True)
+        else:
+            log_test("Without auth returns 401", False, f"Got {resp_no_auth.status_code}")
 
-
-async def test_listado_filters(admin_token: str):
-    """Test 3: Filters on listado endpoint"""
-    log_test("GET /api/admin/subsidio/expedientes - Filters")
+async def test_2_post_documents_manual():
+    """TEST 2: POST /api/documents manual upload (multipart-form)"""
+    print("\n" + "="*80)
+    print("TEST 2: POST /api/documents — upload manual (multipart-form)")
+    print("="*80)
     
-    headers = {"Authorization": f"Bearer {admin_token}"}
+    # Login as Lima admin
+    token = await login(LIMA_EMAIL, LIMA_PASSWORD)
+    headers = {"Authorization": f"Bearer {token}"}
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Test search filter
-        r = await client.get(f"{API_BASE}/admin/subsidio/expedientes?q=TEST", headers=headers)
-        if r.status_code == 200:
-            data = r.json()
-            log_success(f"Search filter ?q=TEST works: {len(data['items'])} results")
+        # POST /api/documents with multipart form
+        print("\n📤 Uploading manual document...")
+        files = {"file": ("reporte_inspeccion.pdf", create_test_pdf(), "application/pdf")}
+        data = {
+            "tipo": "Empresa",
+            "doc": "Reporte de inspección anual",
+            "emi": "2026-07-02",
+            "ven": "2026-07-09"
+        }
+        
+        resp = await client.post(
+            f"{API_BASE}/documents",
+            headers=headers,
+            files=files,
+            data=data
+        )
+        
+        if resp.status_code != 200:
+            log_test("POST /api/documents returns 200", False, f"Status {resp.status_code}: {resp.text[:200]}")
+            return
+        log_test("POST /api/documents returns 200", True)
+        
+        doc = resp.json()
+        
+        # Validate response
+        if not doc.get("id"):
+            log_test("Response has id", False)
+            return
+        log_test("Response has id", True, f"id={doc['id']}")
+        
+        doc_id = doc["id"]
+        
+        if doc.get("tipo") != "Empresa":
+            log_test("tipo=Empresa", False, f"Got {doc.get('tipo')}")
         else:
-            log_error(f"Search filter failed: {r.status_code}")
-            return False
+            log_test("tipo=Empresa", True)
         
-        # Test estado filter
-        r = await client.get(f"{API_BASE}/admin/subsidio/expedientes?estado=uploading", headers=headers)
-        if r.status_code == 200:
-            data = r.json()
-            log_success(f"Estado filter ?estado=uploading works: {len(data['items'])} results")
+        if doc.get("doc") != "Reporte de inspección anual":
+            log_test("doc name correct", False, f"Got {doc.get('doc')}")
         else:
-            log_error(f"Estado filter failed: {r.status_code}")
-            return False
+            log_test("doc name correct", True)
         
-        return True
-
-
-async def test_listado_auth(client_token: str):
-    """Test 4: Non-admin should get 403"""
-    log_test("GET /api/admin/subsidio/expedientes - Auth (non-admin → 403)")
-    
-    headers = {"Authorization": f"Bearer {client_token}"}
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"{API_BASE}/admin/subsidio/expedientes", headers=headers)
-        if r.status_code == 403:
-            log_success("Non-admin correctly rejected with 403")
-            return True
+        if doc.get("_origen") != "manual":
+            log_test("_origen=manual", False, f"Got {doc.get('_origen')}")
         else:
-            log_error(f"Expected 403, got {r.status_code}")
-            return False
-
-
-async def test_detalle(admin_token: str, user_id: str):
-    """Test 5: Detail endpoint"""
-    log_test(f"GET /api/admin/subsidio/expedientes/{user_id} - Detail")
-    
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.get(f"{API_BASE}/admin/subsidio/expedientes/{user_id}", headers=headers)
-        if r.status_code != 200:
-            log_error(f"Request failed: {r.status_code} {r.text[:200]}")
-            return False
+            log_test("_origen=manual", True)
         
-        data = r.json()
-        required_keys = ["user", "documents", "vehicles", "invoices", "calculation"]
-        missing = [k for k in required_keys if k not in data]
-        if missing:
-            log_error(f"Missing keys in response: {missing}")
-            return False
-        
-        log_success(f"Detail structure correct: user, documents, vehicles, invoices, calculation present")
-        log_info(f"  - Vehicles: {len(data['vehicles'])}")
-        log_info(f"  - Documents: {len(data['documents'])}")
-        log_info(f"  - Invoices: {len(data['invoices'])}")
-        
-        return True
-
-
-async def test_delete_cascade(admin_token: str, user_id: str):
-    """Test 6: DELETE cascade"""
-    log_test(f"DELETE /api/admin/subsidio/expedientes/{user_id} - Cascade delete")
-    
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    
-    # Get user data before delete for verification
-    client_mongo = AsyncIOMotorClient(MONGO_URL)
-    db = client_mongo[DB_NAME]
-    
-    user_before = await db.users.find_one({"id": user_id})
-    if not user_before:
-        log_error(f"User {user_id} not found before delete")
-        return False
-    
-    empresa = user_before.get("empresa")
-    email = user_before.get("email")
-    ruc = user_before.get("ruc")
-    calc_id = user_before.get("calc_id")
-    
-    log_info(f"User before delete: empresa={empresa}, email={email}, ruc={ruc}, calc_id={calc_id}")
-    
-    # Count documents before delete
-    vehicles_before = await db.subsidio_vehicles.count_documents({"user_id": user_id})
-    docs_before = await db.subsidio_documents.count_documents({"user_id": user_id})
-    
-    log_info(f"Before delete: vehicles={vehicles_before}, documents={docs_before}")
-    
-    # Perform DELETE
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        r = await client.delete(f"{API_BASE}/admin/subsidio/expedientes/{user_id}", headers=headers)
-        if r.status_code != 200:
-            log_error(f"DELETE failed: {r.status_code} {r.text[:200]}")
-            return False
-        
-        data = r.json()
-        
-        if not data.get("ok"):
-            log_error(f"DELETE returned ok=false")
-            return False
-        
-        deleted = data.get("deleted", {})
-        log_success(f"DELETE returned ok=true with counters: {deleted}")
-        
-        # Verify counters
-        if deleted.get("user", 0) < 1:
-            log_error(f"Expected user=1, got {deleted.get('user')}")
-            return False
-        
-        if deleted.get("vehicles", 0) < 3:
-            log_warning(f"Expected vehicles>=3, got {deleted.get('vehicles')} (may be OK if test data changed)")
+        if doc.get("empresa") != "TRANSPORTES LIMA SAC":
+            log_test("empresa=TRANSPORTES LIMA SAC", False, f"Got {doc.get('empresa')}")
         else:
-            log_success(f"Vehicles deleted: {deleted.get('vehicles')}")
+            log_test("empresa=TRANSPORTES LIMA SAC", True)
         
-        # Verify MongoDB cleanup
-        await asyncio.sleep(0.5)  # Give DB time to sync
+        # GET /api/documents should include the new doc
+        print("\n🔍 Verifying document appears in GET /api/documents...")
+        resp_get = await client.get(f"{API_BASE}/documents", headers=headers)
+        if resp_get.status_code != 200:
+            log_test("GET /api/documents after upload returns 200", False, f"Status {resp_get.status_code}")
+            return
         
-        user_after = await db.users.find_one({"id": user_id})
-        if user_after:
-            log_error(f"User still exists in DB after delete!")
-            return False
-        log_success("User removed from DB")
+        docs = resp_get.json()
+        found = any(d.get("id") == doc_id for d in docs)
+        if not found:
+            log_test("Document appears in GET /api/documents", False, "Document not found in list")
+        else:
+            log_test("Document appears in GET /api/documents", True)
         
-        vehicles_after = await db.subsidio_vehicles.count_documents({"user_id": user_id})
-        if vehicles_after > 0:
-            log_error(f"Vehicles still exist in DB: {vehicles_after}")
-            return False
-        log_success("Vehicles removed from DB")
-        
-        # Check calculations
-        if calc_id:
-            calc_after = await db.calculations.find_one({"id": calc_id})
-            if calc_after:
-                log_error(f"Calculation {calc_id} still exists in DB")
-                return False
-            log_success(f"Calculation {calc_id} removed from DB")
-        
-        # Check subsidio_leads (THIS WAS THE BUG - should delete by calc_id OR email OR ruc)
-        leads_after = await db.subsidio_leads.count_documents({
-            "$or": [
-                {"calc_id": calc_id} if calc_id else {},
-                {"email": email} if email else {},
-                {"ruc": ruc} if ruc else {},
-            ]
-        })
-        if leads_after > 0:
-            log_error(f"Subsidio leads still exist in DB: {leads_after} (BUG: should delete by calc_id/email/ruc)")
-            return False
-        log_success("Subsidio leads removed from DB (calc_id/email/ruc)")
-        
-        # Check bank accounts
-        bank_after = await db.subsidio_bank_accounts.count_documents({"user_id": user_id})
-        if bank_after > 0:
-            log_error(f"Bank accounts still exist: {bank_after}")
-            return False
-        log_success("Bank accounts removed from DB")
-        
-        # Check declaraciones
-        decl_after = await db.subsidio_declaraciones.count_documents({"user_id": user_id})
-        if decl_after > 0:
-            log_error(f"Declaraciones still exist: {decl_after}")
-            return False
-        log_success("Declaraciones removed from DB")
-        
-        # Check documents
-        docs_after = await db.subsidio_documents.count_documents({"user_id": user_id})
-        if docs_after > 0:
-            log_error(f"Documents still exist: {docs_after}")
-            return False
-        log_success("Documents removed from DB")
-        
-        # Check consumos_subsidio
-        consumos_after = await db.consumos_subsidio.count_documents({"user_id": user_id})
-        if consumos_after > 0:
-            log_error(f"Consumos_subsidio still exist: {consumos_after}")
-            return False
-        log_success("Consumos_subsidio removed from DB")
-        
-        # Check empresas_config (should be deleted if no other users)
-        other_users = await db.users.count_documents({"empresa": empresa})
-        if other_users == 0:
-            empresa_config = await db.empresas_config.find_one({"empresa": empresa})
-            if empresa_config:
-                log_warning(f"Empresas_config still exists for {empresa} (no other users)")
+        # Test download
+        print("\n⬇️  Testing document download...")
+        resp_download = await client.get(f"{API_BASE}/documents/{doc_id}/download", headers=headers)
+        if resp_download.status_code != 200:
+            log_test("GET /api/documents/{id}/download returns 200", False, f"Status {resp_download.status_code}")
+        else:
+            log_test("GET /api/documents/{id}/download returns 200", True)
+            if len(resp_download.content) > 0:
+                log_test("Downloaded file has content", True, f"{len(resp_download.content)} bytes")
             else:
-                log_success(f"Empresas_config removed for {empresa} (no other users)")
-        else:
-            log_info(f"Empresas_config kept (other users exist: {other_users})")
+                log_test("Downloaded file has content", False, "Empty file")
         
-        client_mongo.close()
-        return True
-
-
-async def test_delete_404(admin_token: str, user_id: str):
-    """Test 7: Second DELETE should return 404"""
-    log_test(f"DELETE /api/admin/subsidio/expedientes/{user_id} - Second delete → 404")
-    
-    headers = {"Authorization": f"Bearer {admin_token}"}
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.delete(f"{API_BASE}/admin/subsidio/expedientes/{user_id}", headers=headers)
-        if r.status_code == 404:
-            log_success("Second DELETE correctly returns 404")
-            return True
+        # Test DELETE
+        print("\n🗑️  Testing document deletion...")
+        resp_delete = await client.delete(f"{API_BASE}/documents/{doc_id}", headers=headers)
+        if resp_delete.status_code == 200:
+            log_test("DELETE /api/documents/{id} returns 200", True)
         else:
-            log_error(f"Expected 404, got {r.status_code}")
-            return False
-
-
-async def test_delete_auth(client_token: str, user_id: str):
-    """Test 8: Non-admin DELETE should get 403"""
-    log_test(f"DELETE /api/admin/subsidio/expedientes/{user_id} - Auth (non-admin → 403)")
-    
-    headers = {"Authorization": f"Bearer {client_token}"}
-    
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.delete(f"{API_BASE}/admin/subsidio/expedientes/{user_id}", headers=headers)
-        if r.status_code == 403:
-            log_success("Non-admin DELETE correctly rejected with 403")
-            return True
+            log_test("DELETE /api/documents/{id} returns 200", False, f"Status {resp_delete.status_code}")
+        
+        # Verify deletion
+        resp_get_after = await client.get(f"{API_BASE}/documents", headers=headers)
+        if resp_get_after.status_code == 200:
+            docs_after = resp_get_after.json()
+            still_exists = any(d.get("id") == doc_id for d in docs_after)
+            if still_exists:
+                log_test("Document removed after DELETE", False, "Document still in list")
+            else:
+                log_test("Document removed after DELETE", True)
+        
+        # Test without auth
+        print("\n🔓 Testing without auth...")
+        resp_no_auth = await client.post(
+            f"{API_BASE}/documents",
+            files={"file": ("test.pdf", create_test_pdf(), "application/pdf")},
+            data={"tipo": "Empresa", "doc": "Test"}
+        )
+        if resp_no_auth.status_code == 401:
+            log_test("Without auth returns 401", True)
         else:
-            log_error(f"Expected 403, got {r.status_code}")
-            return False
+            log_test("Without auth returns 401", False, f"Got {resp_no_auth.status_code}")
 
+async def test_3_regression():
+    """TEST 3: Quick regression tests"""
+    print("\n" + "="*80)
+    print("TEST 3: Regression tests")
+    print("="*80)
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Test health endpoint
+        print("\n🏥 Testing GET /api/health...")
+        resp = await client.get(f"{API_BASE}/health")
+        if resp.status_code == 200:
+            log_test("GET /api/health returns 200", True)
+        else:
+            log_test("GET /api/health returns 200", False, f"Status {resp.status_code}")
+        
+        # Test subsidio finalize still activates servicios.plataforma
+        print("\n🔍 Testing POST /api/subsidio/finalize activates servicios...")
+        # This was already tested in previous test runs, just smoke test
+        token = await login(CLIENTE_SUBSIDIO_EMAIL, CLIENTE_SUBSIDIO_PASSWORD)
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        resp_me = await client.get(f"{API_BASE}/auth/me", headers=headers)
+        if resp_me.status_code == 200:
+            user = resp_me.json()
+            servicios = user.get("servicios", {})
+            if servicios.get("plataforma") and servicios.get("combustible"):
+                log_test("Subsidio finalize activated servicios.plataforma+combustible", True, "Already activated from previous finalize")
+            else:
+                log_test("Subsidio finalize activated servicios.plataforma+combustible", False, f"servicios={servicios}")
+        else:
+            log_test("GET /api/auth/me returns 200", False, f"Status {resp_me.status_code}")
 
 async def main():
-    print(f"\n{'='*70}")
-    print(f"  SUBSIDIO DU 004 - Admin Endpoints Bug Fix Validation")
-    print(f"{'='*70}")
-    print(f"Backend: {BACKEND_URL}")
-    print(f"MongoDB: {MONGO_URL}/{DB_NAME}")
-    
-    results = {}
+    """Run all tests"""
+    print("\n" + "="*80)
+    print("BACKEND TESTING: Documentación Module - cliente_subsidio")
+    print("="*80)
+    print(f"Backend URL: {BACKEND_URL}")
+    print(f"API Base: {API_BASE}")
     
     try:
-        # Login
-        print(f"\n{Colors.BLUE}[SETUP]{Colors.RESET} Logging in...")
-        admin_token = await login(ADMIN_EMAIL, ADMIN_PASSWORD)
-        log_success(f"Admin logged in: {ADMIN_EMAIL}")
-        
-        # Try to login as test client (may not exist yet)
-        try:
-            client_token = await login(TEST_CLIENT_EMAIL, TEST_CLIENT_PASSWORD)
-            log_success(f"Test client logged in: {TEST_CLIENT_EMAIL}")
-        except Exception as e:
-            log_warning(f"Test client login failed (may not exist): {e}")
-            client_token = None
-        
-        # Get test user_id
-        print(f"\n{Colors.BLUE}[SETUP]{Colors.RESET} Finding test user...")
-        client_mongo = AsyncIOMotorClient(MONGO_URL)
-        db = client_mongo[DB_NAME]
-        test_user = await db.users.find_one({"email": TEST_CLIENT_EMAIL})
-        if test_user:
-            test_user_id = test_user["id"]
-            log_success(f"Test user found: {test_user_id}")
-        else:
-            log_warning(f"Test user not found. Run: cd /app/backend && python seed_subsidio_test.py")
-            test_user_id = None
-        client_mongo.close()
-        
-        # Run tests
-        print(f"\n{'='*70}")
-        print(f"  RUNNING TESTS")
-        print(f"{'='*70}")
-        
-        # Test 1: Health check
-        results["health"] = await test_health()
-        
-        # Test 2: Listado performance
-        results["listado_performance"] = await test_listado_performance(admin_token)
-        
-        # Test 3: Listado filters
-        results["listado_filters"] = await test_listado_filters(admin_token)
-        
-        # Test 4: Listado auth
-        if client_token:
-            results["listado_auth"] = await test_listado_auth(client_token)
-        else:
-            log_warning("Skipping listado auth test (no client token)")
-            results["listado_auth"] = None
-        
-        # Test 5: Detail endpoint
-        if test_user_id:
-            results["detalle"] = await test_detalle(admin_token, test_user_id)
-        else:
-            log_warning("Skipping detail test (no test user)")
-            results["detalle"] = None
-        
-        # Test 6: DELETE cascade (destructive - run last)
-        if test_user_id:
-            results["delete_cascade"] = await test_delete_cascade(admin_token, test_user_id)
-            
-            # Test 7: Second DELETE → 404
-            results["delete_404"] = await test_delete_404(admin_token, test_user_id)
-        else:
-            log_warning("Skipping delete tests (no test user)")
-            results["delete_cascade"] = None
-            results["delete_404"] = None
-        
-        # Test 8: DELETE auth
-        if client_token and test_user_id:
-            # Can't test this after delete, so skip
-            log_info("DELETE auth test skipped (user already deleted)")
-            results["delete_auth"] = None
-        
+        await test_1_get_documents_merge()
+        await test_2_post_documents_manual()
+        await test_3_regression()
     except Exception as e:
-        log_error(f"Test suite failed with exception: {e}")
+        print(f"\n❌ FATAL ERROR: {e}")
         import traceback
         traceback.print_exc()
-        return 1
     
     # Summary
-    print(f"\n{'='*70}")
-    print(f"  TEST SUMMARY")
-    print(f"{'='*70}")
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    passed = sum(1 for t in test_results if t["passed"])
+    total = len(test_results)
+    print(f"Passed: {passed}/{total}")
     
-    passed = sum(1 for v in results.values() if v is True)
-    failed = sum(1 for v in results.values() if v is False)
-    skipped = sum(1 for v in results.values() if v is None)
-    total = len(results)
-    
-    for name, result in results.items():
-        if result is True:
-            print(f"  {Colors.GREEN}✓{Colors.RESET} {name}")
-        elif result is False:
-            print(f"  {Colors.RED}✗{Colors.RESET} {name}")
-        else:
-            print(f"  {Colors.YELLOW}⊘{Colors.RESET} {name} (skipped)")
-    
-    print(f"\n  Total: {total} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
-    
-    if failed > 0:
-        print(f"\n{Colors.RED}TESTS FAILED{Colors.RESET}")
-        return 1
-    elif passed == 0:
-        print(f"\n{Colors.YELLOW}NO TESTS RAN{Colors.RESET}")
-        return 1
-    else:
-        print(f"\n{Colors.GREEN}ALL TESTS PASSED{Colors.RESET}")
+    if passed == total:
+        print("\n✅ ALL TESTS PASSED")
         return 0
-
+    else:
+        print("\n❌ SOME TESTS FAILED")
+        failed = [t for t in test_results if not t["passed"]]
+        print("\nFailed tests:")
+        for t in failed:
+            print(f"  - {t['name']}")
+            if t['details']:
+                print(f"    {t['details']}")
+        return 1
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())

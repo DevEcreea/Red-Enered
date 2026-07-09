@@ -3425,188 +3425,6 @@ async def delete_empresa(empresa: str, user: dict = Depends(require_roles("admin
     return {"ok": True, "empresa": empresa, "deleted": counts}
 
 
-app.include_router(api)
-
-# ============================================================================
-# SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
-# ============================================================================
-from subsidio import subsidio_router, _set_db as _set_subsidio_db
-_set_subsidio_db(db)
-app.include_router(subsidio_router)
-
-
-# CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
-_origins_env = os.environ.get("CORS_ORIGINS", "")
-_frontend = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-_allow_origins: list[str] = []
-if _origins_env:
-    _allow_origins.extend([o.strip() for o in _origins_env.split(",") if o.strip()])
-if _frontend and _frontend not in _allow_origins:
-    _allow_origins.append(_frontend)
-if "http://localhost:3000" not in _allow_origins:
-    _allow_origins.append("http://localhost:3000")
-
-# Optionally allow regex match for Netlify preview deploys, e.g.
-# CORS_ORIGIN_REGEX="https://.*--enered\.netlify\.app"
-_cors_regex = os.environ.get("CORS_ORIGIN_REGEX")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allow_origins,
-    allow_origin_regex=_cors_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-logger.info(f"CORS allow_origins={_allow_origins} regex={_cors_regex!r}")
-
-
-# ---------- Seed ----------
-SAMPLE_COMPANIES = ["TRANSPORTES LIMA SAC", "LOGISTICA ANDINA SA", "CARGO PERU EIRL"]
-SAMPLE_CITIES = ["LIMA", "AREQUIPA", "TRUJILLO", "CUSCO", "CHICLAYO"]
-SAMPLE_STATIONS = ["PRIMAX SAN ISIDRO", "PRIMAX MIRAFLORES", "PRIMAX AREQUIPA", "PRIMAX TRUJILLO", "PRIMAX NORTE", "PRIMAX SUR"]
-SAMPLE_PRODUCTS = ["DIESEL B5", "DIESEL DB5 S-50", "GASOLINA 90", "GASOLINA 95"]
-
-
-async def seed_demo_data():
-    # Users
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@enered.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
-
-    if not await db.users.find_one({"email": admin_email}):
-        await db.users.insert_one({
-            "id": str(uuid.uuid4()),
-            "email": admin_email,
-            "name": "Admin ENERED",
-            "role": "admin_enered",
-            "empresa": None,
-            "password_hash": hash_password(admin_password),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-
-    demo_users = [
-        ("administrador@lima.com", "demo123", "Administrador Lima", "administrador", "TRANSPORTES LIMA SAC"),
-        ("logistica@lima.com", "demo123", "Logística Lima", "logistica", "TRANSPORTES LIMA SAC"),
-        ("contabilidad@lima.com", "demo123", "Contabilidad Lima", "contabilidad", "TRANSPORTES LIMA SAC"),
-        ("administrador@andina.com", "demo123", "Administrador Andina", "administrador", "LOGISTICA ANDINA SA"),
-        ("administrador@cargo.com", "demo123", "Administrador Cargo", "administrador", "CARGO PERU EIRL"),
-    ]
-    for email, pwd, name, role, empresa in demo_users:
-        if not await db.users.find_one({"email": email}):
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()),
-                "email": email,
-                "name": name,
-                "role": role,
-                "empresa": empresa,
-                "password_hash": hash_password(pwd),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-
-    # Consumptions - only if empty
-    existing_count = await db.consumptions.count_documents({})
-    if existing_count == 0:
-        random.seed(42)
-        rows = []
-        today = datetime.now(timezone.utc).date()
-        for empresa in SAMPLE_COMPANIES:
-            placas = [f"{random.choice(['A','B','T','P','V'])}{random.randint(1,9)}{random.choice(['A','B','C'])}-{random.randint(100,999)}"
-                      for _ in range(random.randint(6, 10))]
-            for days_back in range(60):
-                date = today - timedelta(days=days_back)
-                week_num = date.isocalendar().week
-                for _ in range(random.randint(1, 4)):
-                    placa = random.choice(placas)
-                    ciudad = random.choice(SAMPLE_CITIES)
-                    estacion = random.choice(SAMPLE_STATIONS)
-                    producto = random.choice(SAMPLE_PRODUCTS)
-                    cantidad = round(random.uniform(8, 35), 2)
-                    precio_pizarra = round(random.uniform(14.5, 17.2), 2)
-                    descuento = round(random.uniform(0.4, 1.2), 2)
-                    precio_unit = round(precio_pizarra - descuento, 2)
-                    importe = round(cantidad * precio_unit, 2)
-                    ahorro = round(cantidad * descuento, 2)
-                    rows.append({
-                        "id": str(uuid.uuid4()),
-                        "FECHA": date.isoformat(),
-                        "HORA": f"{random.randint(6,20):02d}:{random.randint(0,59):02d}",
-                        "CIUDAD": ciudad,
-                        "ESTACION": estacion,
-                        "NRO_DE_TARJETA": f"TAR{random.randint(10000,99999)}",
-                        "PLACA": placa,
-                        "PRODUCTO": producto,
-                        "UNIDAD": "GALON",
-                        "CANTIDAD_GL": cantidad,
-                        "PRECIO_UNITARIO": precio_unit,
-                        "IMPORTE_TOTAL": importe,
-                        "PRECIO_PIZARRA": precio_pizarra,
-                        "AHORRO": ahorro,
-                        "NOTA_DE_DESPACHO": f"ND{random.randint(100000,999999)}",
-                        "EMPRESA": empresa,
-                        "KILOMETRAJE": random.randint(1000, 250000),
-                        "MEDIO_DE_IDENTIFICACION": random.choice(["TARJETA", "APP", "QR"]),
-                        "SEMANA": f"2026-W{week_num:02d}",
-                    })
-        if rows:
-            await db.consumptions.insert_many(rows)
-            logger.info(f"Seeded {len(rows)} consumption rows")
-
-    # Invoices
-    if await db.invoices.count_documents({}) == 0:
-        invoices = []
-        for empresa in SAMPLE_COMPANIES:
-            for i in range(3):
-                fecha = (datetime.now(timezone.utc).date() - timedelta(days=30 * i)).isoformat()
-                venc = (datetime.now(timezone.utc).date() - timedelta(days=30 * i - 15)).isoformat()
-                invoices.append({
-                    "id": str(uuid.uuid4()),
-                    "empresa": empresa,
-                    "numero": f"F001-{random.randint(1000,9999)}",
-                    "fecha_emision": fecha,
-                    "fecha_vencimiento": venc,
-                    "monto": round(random.uniform(5000, 35000), 2),
-                    "estado": random.choice(["pendiente", "pagada", "vencida"]),
-                    "pdf_url": None,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
-        if invoices:
-            await db.invoices.insert_many(invoices)
-
-    # Courses
-    if await db.courses.count_documents({}) == 0:
-        await db.courses.insert_one({
-            "id": str(uuid.uuid4()),
-            "titulo": "Conducción Eficiente y Ahorro de Combustible",
-            "descripcion": "Aprende las mejores prácticas para reducir el consumo de combustible y mejorar la eficiencia de tu flota.",
-            "video_url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
-            "pdf_url": None,
-            "puntaje_minimo": 70,
-            "preguntas": [
-                {"pregunta": "¿Cuál es la velocidad óptima para ahorrar combustible?", "opciones": ["60-80 km/h", "100-120 km/h", "Mayor a 120 km/h"], "correcta": 0},
-                {"pregunta": "¿Qué hábito reduce más el consumo?", "opciones": ["Aceleraciones bruscas", "Conducción suave", "Frenados fuertes"], "correcta": 1},
-                {"pregunta": "¿Es recomendable mantener presión correcta en neumáticos?", "opciones": ["Sí", "No", "Solo en invierno"], "correcta": 0},
-            ],
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-
-    # Empresa configs (plan, RUC, línea de crédito, unidades)
-    empresa_defaults = []
-    for empresa, ruc, plan, linea, unidades in empresa_defaults:
-        if not await db.empresas_config.find_one({"empresa": empresa}):
-            await db.empresas_config.insert_one({
-                "id": str(uuid.uuid4()),
-                "empresa": empresa,
-                "ruc": ruc,
-                "plan": plan,
-                "linea_credito": linea,
-                "unidades_contratadas": unidades,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
-
-
-
-
 # ─── DOCUMENTACION MODULE ENDPOINTS ───
 
 SUB_CAT_MAP = {
@@ -3895,7 +3713,7 @@ async def download_document(
     if doc:
         if user["role"] != "admin_enered" and doc.get("empresa") != user.get("empresa"):
             raise HTTPException(status_code=403, detail="No autorizado")
-        file_bytes = storage.read_object(doc["storage_key"])
+        file_bytes = storage.get_object_bytes(doc["storage_key"])
         if not file_bytes:
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         content_type = doc.get("content_type") or "application/octet-stream"
@@ -3910,7 +3728,7 @@ async def download_document(
     if sub_doc:
         if user["role"] != "admin_enered" and sub_doc.get("empresa") != user.get("empresa"):
             raise HTTPException(status_code=403, detail="No autorizado")
-        file_bytes = storage.read_object(sub_doc["storage_key"])
+        file_bytes = storage.get_object_bytes(sub_doc["storage_key"])
         if not file_bytes:
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         content_type = sub_doc.get("content_type") or "application/octet-stream"
@@ -3920,6 +3738,188 @@ async def download_document(
             media_type=content_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
+
+app.include_router(api)
+
+# ============================================================================
+# SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
+# ============================================================================
+from subsidio import subsidio_router, _set_db as _set_subsidio_db
+_set_subsidio_db(db)
+app.include_router(subsidio_router)
+
+
+# CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
+_origins_env = os.environ.get("CORS_ORIGINS", "")
+_frontend = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+_allow_origins: list[str] = []
+if _origins_env:
+    _allow_origins.extend([o.strip() for o in _origins_env.split(",") if o.strip()])
+if _frontend and _frontend not in _allow_origins:
+    _allow_origins.append(_frontend)
+if "http://localhost:3000" not in _allow_origins:
+    _allow_origins.append("http://localhost:3000")
+
+# Optionally allow regex match for Netlify preview deploys, e.g.
+# CORS_ORIGIN_REGEX="https://.*--enered\.netlify\.app"
+_cors_regex = os.environ.get("CORS_ORIGIN_REGEX")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allow_origins,
+    allow_origin_regex=_cors_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+logger.info(f"CORS allow_origins={_allow_origins} regex={_cors_regex!r}")
+
+
+# ---------- Seed ----------
+SAMPLE_COMPANIES = ["TRANSPORTES LIMA SAC", "LOGISTICA ANDINA SA", "CARGO PERU EIRL"]
+SAMPLE_CITIES = ["LIMA", "AREQUIPA", "TRUJILLO", "CUSCO", "CHICLAYO"]
+SAMPLE_STATIONS = ["PRIMAX SAN ISIDRO", "PRIMAX MIRAFLORES", "PRIMAX AREQUIPA", "PRIMAX TRUJILLO", "PRIMAX NORTE", "PRIMAX SUR"]
+SAMPLE_PRODUCTS = ["DIESEL B5", "DIESEL DB5 S-50", "GASOLINA 90", "GASOLINA 95"]
+
+
+async def seed_demo_data():
+    # Users
+    admin_email = os.environ.get("ADMIN_EMAIL", "admin@enered.com")
+    admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+
+    if not await db.users.find_one({"email": admin_email}):
+        await db.users.insert_one({
+            "id": str(uuid.uuid4()),
+            "email": admin_email,
+            "name": "Admin ENERED",
+            "role": "admin_enered",
+            "empresa": None,
+            "password_hash": hash_password(admin_password),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    demo_users = [
+        ("administrador@lima.com", "demo123", "Administrador Lima", "administrador", "TRANSPORTES LIMA SAC"),
+        ("logistica@lima.com", "demo123", "Logística Lima", "logistica", "TRANSPORTES LIMA SAC"),
+        ("contabilidad@lima.com", "demo123", "Contabilidad Lima", "contabilidad", "TRANSPORTES LIMA SAC"),
+        ("administrador@andina.com", "demo123", "Administrador Andina", "administrador", "LOGISTICA ANDINA SA"),
+        ("administrador@cargo.com", "demo123", "Administrador Cargo", "administrador", "CARGO PERU EIRL"),
+    ]
+    for email, pwd, name, role, empresa in demo_users:
+        if not await db.users.find_one({"email": email}):
+            await db.users.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": email,
+                "name": name,
+                "role": role,
+                "empresa": empresa,
+                "password_hash": hash_password(pwd),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    # Consumptions - only if empty
+    existing_count = await db.consumptions.count_documents({})
+    if existing_count == 0:
+        random.seed(42)
+        rows = []
+        today = datetime.now(timezone.utc).date()
+        for empresa in SAMPLE_COMPANIES:
+            placas = [f"{random.choice(['A','B','T','P','V'])}{random.randint(1,9)}{random.choice(['A','B','C'])}-{random.randint(100,999)}"
+                      for _ in range(random.randint(6, 10))]
+            for days_back in range(60):
+                date = today - timedelta(days=days_back)
+                week_num = date.isocalendar().week
+                for _ in range(random.randint(1, 4)):
+                    placa = random.choice(placas)
+                    ciudad = random.choice(SAMPLE_CITIES)
+                    estacion = random.choice(SAMPLE_STATIONS)
+                    producto = random.choice(SAMPLE_PRODUCTS)
+                    cantidad = round(random.uniform(8, 35), 2)
+                    precio_pizarra = round(random.uniform(14.5, 17.2), 2)
+                    descuento = round(random.uniform(0.4, 1.2), 2)
+                    precio_unit = round(precio_pizarra - descuento, 2)
+                    importe = round(cantidad * precio_unit, 2)
+                    ahorro = round(cantidad * descuento, 2)
+                    rows.append({
+                        "id": str(uuid.uuid4()),
+                        "FECHA": date.isoformat(),
+                        "HORA": f"{random.randint(6,20):02d}:{random.randint(0,59):02d}",
+                        "CIUDAD": ciudad,
+                        "ESTACION": estacion,
+                        "NRO_DE_TARJETA": f"TAR{random.randint(10000,99999)}",
+                        "PLACA": placa,
+                        "PRODUCTO": producto,
+                        "UNIDAD": "GALON",
+                        "CANTIDAD_GL": cantidad,
+                        "PRECIO_UNITARIO": precio_unit,
+                        "IMPORTE_TOTAL": importe,
+                        "PRECIO_PIZARRA": precio_pizarra,
+                        "AHORRO": ahorro,
+                        "NOTA_DE_DESPACHO": f"ND{random.randint(100000,999999)}",
+                        "EMPRESA": empresa,
+                        "KILOMETRAJE": random.randint(1000, 250000),
+                        "MEDIO_DE_IDENTIFICACION": random.choice(["TARJETA", "APP", "QR"]),
+                        "SEMANA": f"2026-W{week_num:02d}",
+                    })
+        if rows:
+            await db.consumptions.insert_many(rows)
+            logger.info(f"Seeded {len(rows)} consumption rows")
+
+    # Invoices
+    if await db.invoices.count_documents({}) == 0:
+        invoices = []
+        for empresa in SAMPLE_COMPANIES:
+            for i in range(3):
+                fecha = (datetime.now(timezone.utc).date() - timedelta(days=30 * i)).isoformat()
+                venc = (datetime.now(timezone.utc).date() - timedelta(days=30 * i - 15)).isoformat()
+                invoices.append({
+                    "id": str(uuid.uuid4()),
+                    "empresa": empresa,
+                    "numero": f"F001-{random.randint(1000,9999)}",
+                    "fecha_emision": fecha,
+                    "fecha_vencimiento": venc,
+                    "monto": round(random.uniform(5000, 35000), 2),
+                    "estado": random.choice(["pendiente", "pagada", "vencida"]),
+                    "pdf_url": None,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+        if invoices:
+            await db.invoices.insert_many(invoices)
+
+    # Courses
+    if await db.courses.count_documents({}) == 0:
+        await db.courses.insert_one({
+            "id": str(uuid.uuid4()),
+            "titulo": "Conducción Eficiente y Ahorro de Combustible",
+            "descripcion": "Aprende las mejores prácticas para reducir el consumo de combustible y mejorar la eficiencia de tu flota.",
+            "video_url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+            "pdf_url": None,
+            "puntaje_minimo": 70,
+            "preguntas": [
+                {"pregunta": "¿Cuál es la velocidad óptima para ahorrar combustible?", "opciones": ["60-80 km/h", "100-120 km/h", "Mayor a 120 km/h"], "correcta": 0},
+                {"pregunta": "¿Qué hábito reduce más el consumo?", "opciones": ["Aceleraciones bruscas", "Conducción suave", "Frenados fuertes"], "correcta": 1},
+                {"pregunta": "¿Es recomendable mantener presión correcta en neumáticos?", "opciones": ["Sí", "No", "Solo en invierno"], "correcta": 0},
+            ],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    # Empresa configs (plan, RUC, línea de crédito, unidades)
+    empresa_defaults = []
+    for empresa, ruc, plan, linea, unidades in empresa_defaults:
+        if not await db.empresas_config.find_one({"empresa": empresa}):
+            await db.empresas_config.insert_one({
+                "id": str(uuid.uuid4()),
+                "empresa": empresa,
+                "ruc": ruc,
+                "plan": plan,
+                "linea_credito": linea,
+                "unidades_contratadas": unidades,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+
+
 
 
 @app.get("/api/temp-backfill-invoices-881")
