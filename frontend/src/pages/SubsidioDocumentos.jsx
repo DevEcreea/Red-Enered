@@ -25,6 +25,7 @@ export default function SubsidioDocumentos() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const pad = (num) => String(num).padStart(2, '0');
 
   useEffect(() => {
     const updateTime = () => {
@@ -123,11 +124,44 @@ export default function SubsidioDocumentos() {
               <div className="font-cabinet font-black text-xl text-brand">S/ {Number(ahorro_reconocido).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
             </div>
             {/* Reloj con cuenta regresiva resaltado en rojo */}
-            <div className="px-4 py-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2.5 shadow-[0_0_10px_rgba(244,63,94,0.08)]">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="text-rose-600 animate-pulse flex-shrink-0"><circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="2.2"/><path d="M12 9v4l2.5 2M9 3h6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
-              <div>
-                <div className="text-[10px] uppercase tracking-widest font-bold text-rose-600">Cierre solicitud</div>
-                <div className="font-cabinet font-black text-xl text-rose-700 leading-tight">{timeLeft.days}d {timeLeft.hours}h {timeLeft.minutes}m</div>
+            <div className="bg-[#B91C1C] border border-red-500/25 rounded-[14px] p-[8px_16px] flex items-center shadow-[0_4px_20px_rgba(185,28,28,0.45)] text-white select-none">
+              {/* Left Side: icon and deadline */}
+              <div className="flex items-center gap-[6px]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-white">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.2" />
+                  <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+                <span className="text-[11px] font-black tracking-wider uppercase">28 JUL</span>
+              </div>
+              
+              {/* Divider */}
+              <div className="w-[1.5px] h-[26px] bg-white/20 mx-3.5" />
+              
+              {/* Countdown Numbers */}
+              <div className="flex items-center gap-[5px]">
+                {/* Days */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.days)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">D</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Hours */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.hours)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">H</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Minutes */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.minutes)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">M</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Seconds */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none text-rose-300 animate-pulse">{pad(timeLeft.seconds)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">S</span>
+                </div>
               </div>
             </div>
           </div>

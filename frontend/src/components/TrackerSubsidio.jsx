@@ -20,6 +20,7 @@ export default function TrackerSubsidio() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+  const pad = (num) => String(num).padStart(2, '0');
 
   useEffect(() => {
     api.get("/subsidio/dashboard-data")
@@ -86,7 +87,8 @@ export default function TrackerSubsidio() {
       badge: 'doc', pill: ['bg-violet-50 text-violet-600', 'En curso'],
       title: 'Revisión interna',
       copy: 'Estamos validando tus comprobantes y el expediente completo. Nos aseguramos de que todo esté perfecto <b>antes</b> de presentarlo a la ATU, para que no te rebote.',
-      cta: ['ghost', 'Ver checklist de validación', false]
+      cta: ['ghost', 'Ver checklist de validación', false],
+      isCountdown: true
     },
     atu: {
       current: 1, fill: 33, done: [0],
@@ -198,14 +200,57 @@ export default function TrackerSubsidio() {
             <div className="text-[10.5px] font-bold tracking-[0.13em] uppercase text-white/70">Ahorro</div>
             <div className="font-cabinet text-[22px] font-bold text-white mt-[2px]">{pctAhorro}%</div>
           </div>
-          <div className="bg-white/10 border border-white/20 rounded-[13px] p-[9px_13px] text-center min-w-[118px]">
-            <div className="flex items-center justify-center gap-[5px] text-[10.5px] font-bold text-white/80 tracking-[0.04em]">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="#fff" strokeWidth="1.8"/><path d="M12 9v4l2.5 2M9 3h6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
-              <span>{s.dlLabel}</span>
+          {s.isCountdown ? (
+            <div className="bg-[#B91C1C] border border-red-500/25 rounded-[14px] p-[8px_16px] flex items-center shadow-[0_4px_20px_rgba(185,28,28,0.45)] text-white select-none">
+              {/* Left Side: icon and deadline */}
+              <div className="flex items-center gap-[6px]">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" className="text-white">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.2" />
+                  <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+                <span className="text-[11px] font-black tracking-wider uppercase">28 JUL</span>
+              </div>
+              
+              {/* Divider */}
+              <div className="w-[1.5px] h-[26px] bg-white/20 mx-3.5" />
+              
+              {/* Countdown Numbers */}
+              <div className="flex items-center gap-[5px]">
+                {/* Days */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.days)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">D</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Hours */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.hours)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">H</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Minutes */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none">{pad(timeLeft.minutes)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">M</span>
+                </div>
+                <span className="text-[14px] font-bold text-white/50 relative top-[-3px]">:</span>
+                {/* Seconds */}
+                <div className="flex flex-col items-center min-w-[20px]">
+                  <span className="font-cabinet text-[16px] font-black leading-none text-rose-300 animate-pulse">{pad(timeLeft.seconds)}</span>
+                  <span className="text-[9px] font-bold text-white/50 tracking-wider mt-[3px]">S</span>
+                </div>
+              </div>
             </div>
-            <div className="font-cabinet text-[17px] font-bold text-white mt-[3px] tracking-[0.02em]">{s.dlClock}</div>
-            <div className="text-[9px] font-bold tracking-[0.16em] text-white/50 mt-[1px]">28 JUL</div>
-          </div>
+          ) : (
+            <div className="bg-white/10 border border-white/20 rounded-[13px] p-[9px_13px] text-center min-w-[118px]">
+              <div className="flex items-center justify-center gap-[5px] text-[10.5px] font-bold text-white/80 tracking-[0.04em]">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="#fff" strokeWidth="1.8"/><path d="M12 9v4l2.5 2M9 3h6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                <span>{s.dlLabel}</span>
+              </div>
+              <div className="font-cabinet text-[17px] font-bold text-white mt-[3px] tracking-[0.02em]">{s.dlClock}</div>
+              <div className="text-[9px] font-bold tracking-[0.16em] text-white/50 mt-[1px]">28 JUL</div>
+            </div>
+          )}
         </div>
       </div>
 
