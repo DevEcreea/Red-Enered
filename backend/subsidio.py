@@ -379,6 +379,13 @@ async def register_from_calculator(payload: RegisterFromCalculator, response: Re
     response.headers["X-Access-Token"] = access
 
     pub = {k: v for k, v in user_doc.items() if k != "password_hash"}
+    pub["servicios"] = {
+        "plataforma": False,
+        "combustible": False,
+        "gps": False,
+        "subsidio": True,
+    }
+    pub["tipo_cliente"] = "subsidio"
     return {"user": pub, "access_token": access}
 
 
