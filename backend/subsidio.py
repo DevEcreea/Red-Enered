@@ -1523,23 +1523,23 @@ async def admin_list_expedientes(
     if not users:
         return {"items": [], "total": 0}
 
-    uids = [u["id"] for u in users]
-    calc_ids = [u["calc_id"] for u in users if u.get("calc_id")]
+    uids = [u.get("id") for u in users if u.get("id")]
+    calc_ids = [u.get("calc_id") for u in users if u.get("calc_id")]
 
     # Bulk queries
-    calcs = await db.calculations.find({"id": {"$in": calc_ids}}, {"_id": 0}).to_list(limit)
+    calcs = await db.calculations.find({"id": {"$in": calc_ids}}, {"_id": 0}).to_list(10000)
     calcs_map = {c["id"]: c for c in calcs}
 
     docs_agg = await db.subsidio_documents.aggregate([
         {"$match": {"user_id": {"$in": uids}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
-    ]).to_list(None)
+    ]).to_list(10000)
     docs_map = {d["_id"]: d["count"] for d in docs_agg}
 
     veh_agg = await db.subsidio_vehicles.aggregate([
         {"$match": {"user_id": {"$in": uids}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
-    ]).to_list(None)
+    ]).to_list(10000)
     veh_map = {d["_id"]: d["count"] for d in veh_agg}
 
     inv_agg = await db.consumos_subsidio.aggregate([
@@ -1550,7 +1550,7 @@ async def admin_list_expedientes(
             "gal": {"$sum": "$galones"},
             "imp": {"$sum": "$importe_total"}
         }}
-    ]).to_list(None)
+    ]).to_list(10000)
     
     inv_map = {}
     for r in inv_agg:
@@ -1565,12 +1565,12 @@ async def admin_list_expedientes(
             inv_map[uid]["gal"] += r.get("gal", 0) or 0
             inv_map[uid]["imp"] += r.get("imp", 0) or 0
 
-    decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(None)
-    decl_map = {d["user_id"]: d for d in decl_list}
+    decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
+    decl_map = {d.get("user_id"): d for d in decl_list if d.get("user_id")}
 
     out = []
     for u in users:
-        uid = u["id"]
+        uid = u.get("id")
         calc = calcs_map.get(u.get("calc_id"), {})
         docs_count = docs_map.get(uid, 0)
         vehicles_count = veh_map.get(uid, 0)
