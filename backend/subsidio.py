@@ -1520,23 +1520,63 @@ async def admin_list_expedientes(
         filt["expediente_status"] = estado
 
     users = await db.users.find(filt, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(limit)
+    if not users:
+        return {"items": [], "total": 0}
+
+    uids = [u["id"] for u in users]
+    calc_ids = [u["calc_id"] for u in users if u.get("calc_id")]
+
+    # Bulk queries
+    calcs = await db.calculations.find({"id": {"$in": calc_ids}}, {"_id": 0}).to_list(limit)
+    calcs_map = {c["id"]: c for c in calcs}
+
+    docs_agg = await db.subsidio_documents.aggregate([
+        {"$match": {"user_id": {"$in": uids}}},
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+    ]).to_list(None)
+    docs_map = {d["_id"]: d["count"] for d in docs_agg}
+
+    veh_agg = await db.subsidio_vehicles.aggregate([
+        {"$match": {"user_id": {"$in": uids}}},
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+    ]).to_list(None)
+    veh_map = {d["_id"]: d["count"] for d in veh_agg}
+
+    inv_agg = await db.consumos_subsidio.aggregate([
+        {"$match": {"user_id": {"$in": uids}}},
+        {"$group": {
+            "_id": {"user_id": "$user_id", "status": "$status"},
+            "count": {"$sum": 1},
+            "gal": {"$sum": "$galones"},
+            "imp": {"$sum": "$importe_total"}
+        }}
+    ]).to_list(None)
+    
+    inv_map = {}
+    for r in inv_agg:
+        uid = r["_id"]["user_id"]
+        status = r["_id"]["status"]
+        if uid not in inv_map:
+            inv_map[uid] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
+        if status == "draft":
+            inv_map[uid]["draft"] += r["count"]
+        elif status == "confirmed":
+            inv_map[uid]["conf"] += r["count"]
+            inv_map[uid]["gal"] += r.get("gal", 0) or 0
+            inv_map[uid]["imp"] += r.get("imp", 0) or 0
+
+    decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(None)
+    decl_map = {d["user_id"]: d for d in decl_list}
 
     out = []
     for u in users:
         uid = u["id"]
-        calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
-        docs_count = await db.subsidio_documents.count_documents({"user_id": uid})
-        vehicles_count = await db.subsidio_vehicles.count_documents({"user_id": uid})
-        invoices_draft = await db.consumos_subsidio.count_documents({"user_id": uid, "status": "draft"})
-        invoices_conf = await db.consumos_subsidio.count_documents({"user_id": uid, "status": "confirmed"})
-        decl = await db.subsidio_declaraciones.find_one({"user_id": uid}, {"_id": 0, "accepted_at": 1, "representante": 1})
-        # Suma galones confirmados → ahorro reconocido
-        agg = await db.consumos_subsidio.aggregate([
-            {"$match": {"user_id": uid, "status": "confirmed"}},
-            {"$group": {"_id": None, "gal": {"$sum": "$galones"}, "imp": {"$sum": "$importe_total"}}},
-        ]).to_list(1)
-        galones_conf = (agg[0]["gal"] if agg else 0) or 0
-        importe_conf = (agg[0]["imp"] if agg else 0) or 0
+        calc = calcs_map.get(u.get("calc_id"), {})
+        docs_count = docs_map.get(uid, 0)
+        vehicles_count = veh_map.get(uid, 0)
+        
+        inv = inv_map.get(uid, {"draft": 0, "conf": 0, "gal": 0, "imp": 0})
+        decl = decl_map.get(uid)
 
         out.append({
             "user_id": uid,
@@ -1551,13 +1591,13 @@ async def admin_list_expedientes(
             "expediente_stage_updated_at": u.get("expediente_stage_updated_at"),
             "documentos_completos": bool(u.get("documentos_completos")),
             "expediente_submitted_at": u.get("expediente_submitted_at"),
-            "ahorro_estimado": (calc or {}).get("subsidio_estimado", 0),
-            "ahorro_reconocido": round(float(galones_conf) * 1.5, 2),
-            "galones_confirmados": round(float(galones_conf), 2),
-            "importe_confirmado": round(float(importe_conf), 2),
+            "ahorro_estimado": calc.get("subsidio_estimado", 0),
+            "ahorro_reconocido": round(float(inv["gal"]) * 1.5, 2),
+            "galones_confirmados": round(float(inv["gal"]), 2),
+            "importe_confirmado": round(float(inv["imp"]), 2),
             "docs_count": docs_count,
             "vehicles_count": vehicles_count,
-            "invoices": {"draft": invoices_draft, "confirmed": invoices_conf},
+            "invoices": {"draft": inv["draft"], "confirmed": inv["conf"]},
             "declaracion_firmada": bool(decl),
             "declaracion_at": (decl or {}).get("accepted_at"),
         })
@@ -1855,3 +1895,64 @@ async def admin_update_invoice(
     await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": patch})
     return {"ok": True}
 
+
+@subsidio_router.delete("/admin/subsidio/expedientes/{user_id}")
+async def admin_delete_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+    calc_id = u.get("calc_id")
+    if calc_id:
+        await db.calculations.delete_one({"id": calc_id})
+        await db.subsidio_leads.delete_one({"calc_id": calc_id})
+        
+    await db.users.delete_one({"id": user_id})
+    await db.subsidio_bank_accounts.delete_many({"user_id": user_id})
+    await db.subsidio_vehicles.delete_many({"user_id": user_id})
+    await db.subsidio_declaraciones.delete_many({"user_id": user_id})
+    
+    docs = await db.subsidio_documents.find({"user_id": user_id}).to_list(1000)
+    for d in docs:
+        if d.get("storage_key"):
+            try: storage.delete_object(d["storage_key"])
+            except: pass
+    await db.subsidio_documents.delete_many({"user_id": user_id})
+    
+    invs = await db.consumos_subsidio.find({"user_id": user_id}).to_list(1000)
+    for i in invs:
+        if i.get("factura_storage_key"):
+            try: storage.delete_object(i["factura_storage_key"])
+            except: pass
+    await db.consumos_subsidio.delete_many({"user_id": user_id})
+    
+    return {"ok": True}
+
+
+@subsidio_router.post("/admin/subsidio/expedientes/{user_id}/migrate")
+async def admin_migrate_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
+    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado o ya migrado")
+        
+    empresa_name = u.get("empresa")
+    if empresa_name:
+        await db.empresas_config.update_one(
+            {"empresa": empresa_name},
+            {"$set": {
+                "tipo_cliente": "enered",
+                "servicios.plataforma": True,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "role": "administrador",
+            "expediente_status": "migrated",
+            "expediente_stage": "abonado_en_cuenta"
+        }}
+    )
+    
+    return {"ok": True}

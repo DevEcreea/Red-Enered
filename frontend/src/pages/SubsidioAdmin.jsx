@@ -49,8 +49,19 @@ export default function SubsidioAdmin() {
 
   const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
 
+  const deleteExpediente = async (e, userId, empresa) => {
+    e.stopPropagation();
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente el expediente de ${empresa || 'este cliente'}? Esta acción no se puede deshacer y borrará documentos, facturas y configuraciones.`)) return;
+    try {
+      await api.delete(`/admin/subsidio/expedientes/${userId}`);
+      load();
+    } catch (err) {
+      alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
   if (selectedId) {
-    return <ExpedienteDetalle userId={selectedId} onBack={() => setSelectedId(null)} />;
+    return <ExpedienteDetalle userId={selectedId} onBack={() => { setSelectedId(null); load(); }} />;
   }
 
   return (
@@ -159,7 +170,10 @@ export default function SubsidioAdmin() {
                     <td className="px-4 py-3 text-center">
                       {it.declaracion_firmada ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <Clock className="w-4 h-4 text-neutral-300 inline" />}
                     </td>
-                    <td className="px-2 py-3 text-right">
+                    <td className="px-2 py-3 text-right whitespace-nowrap">
+                      <button onClick={(e) => deleteExpediente(e, it.user_id, it.empresa || it.ruc)} className="text-red-500 hover:text-red-700 p-1 mr-2 transition-colors" title="Eliminar expediente">
+                        <Trash2 className="w-4 h-4 inline" />
+                      </button>
                       <span className="text-brand text-xs font-bold">Ver →</span>
                     </td>
                   </tr>
@@ -242,6 +256,17 @@ function ExpedienteDetalle({ userId, onBack }) {
     }
   };
 
+  const migrateToPlatform = async () => {
+    if (!window.confirm("¿Confirmas la migración de este cliente a Empresas y Servicios (plataforma Enered)? Esto le dará rol de administrador y acceso total.")) return;
+    try {
+      await api.post(`/admin/subsidio/expedientes/${userId}/migrate`);
+      alert("¡Cliente migrado exitosamente!");
+      onBack(); // Go back to the list and reload
+    } catch (err) {
+      alert(`Error al migrar: ${err.response?.data?.detail || err.message}`);
+    }
+  };
+
   const tabs = [
     { id: "general", label: "Datos generales", icon: Building2 },
     { id: "banco", label: "Cuenta bancaria", icon: Banknote },
@@ -270,6 +295,12 @@ function ExpedienteDetalle({ userId, onBack }) {
             <span className={`px-3 py-1.5 rounded-full text-xs font-bold border ${badge.color}`}>{badge.label}</span>
             <Kpi label="Ahorro recalculado" value={`S/ ${num(stats.galones_confirmados * 4)}`} color="emerald" />
             <Kpi label="Galones confirm." value={num(stats.galones_confirmados)} color="violet" />
+            <button
+              onClick={migrateToPlatform}
+              className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-bold rounded-lg transition-colors shadow-sm"
+            >
+              Migrar a Plataforma
+            </button>
           </div>
         </div>
 
