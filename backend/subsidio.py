@@ -686,6 +686,53 @@ async def download_document(doc_id: str, user: dict = Depends(_require_subsidio)
     return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
 
 
+@subsidio_router.get("/subsidio/my-docs-summary")
+async def my_docs_summary(user: dict = Depends(_require_subsidio)):
+    """Resumen de documentos subidos en Mi Flota, listos para consumirse
+    desde los módulos Vehículos y Documentación una vez desbloqueados.
+    Retorna:
+      - empresa: [{id, categoria, label, filename, uploaded_at, download_url}]
+      - por_placa: { "ABC-123": [{...docs de esa placa...}], ... }
+      - combustible: [{...docs comprobantes...}]
+    """
+    docs = await db.subsidio_documents.find(
+        {"user_id": user["id"]}, {"_id": 0, "storage_key": 0}
+    ).sort("uploaded_at", -1).to_list(2000)
+
+    empresa = []
+    por_placa = {}
+    combustible = []
+    for d in docs:
+        d = _normalize_doc(d)
+        cat = d.get("categoria")
+        item = {
+            "id": d.get("id"),
+            "categoria": cat,
+            "label": DOCUMENT_LABELS.get(cat, cat),
+            "filename": d.get("filename"),
+            "content_type": d.get("content_type"),
+            "size": d.get("size"),
+            "placa": d.get("placa"),
+            "uploaded_at": d.get("uploaded_at"),
+            "download_url": f"/api/subsidio/documents/{d.get('id')}/download",
+        }
+        if cat in EMPRESA_CATEGORIES:
+            empresa.append(item)
+        elif cat in FLOTA_CATEGORIES:
+            placa = (d.get("placa") or "").upper().strip()
+            por_placa.setdefault(placa, []).append(item)
+        elif cat in COMBUSTIBLE_CATEGORIES:
+            combustible.append(item)
+
+    return {
+        "empresa": empresa,
+        "por_placa": por_placa,
+        "combustible": combustible,
+        "total": len(docs),
+    }
+
+
+
 @subsidio_router.put("/subsidio/bank-account")
 async def update_bank_account(payload: BankAccountIn, user: dict = Depends(_require_subsidio)):
     if not payload.es_banco_nacion and not payload.cci:
@@ -851,6 +898,19 @@ async def finalize(user: dict = Depends(_require_subsidio)):
             "documentos_completados_at": datetime.now(timezone.utc).isoformat(),
         }}
     )
+    # Al terminar Mi Flota, desbloqueamos los módulos operativos:
+    # Combustible, Cuenta, Vehículos y Documentación pasan a estar disponibles.
+    # El resto (Analytics BI, Monitoreo, Calendario, etc.) siguen mostrando la vista Demo.
+    empresa_name = user.get("empresa")
+    if empresa_name:
+        await db.empresas_config.update_one(
+            {"empresa": empresa_name},
+            {"$set": {
+                "servicios.plataforma": True,
+                "servicios.combustible": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }}
+        )
     return {"ok": True}
 
 

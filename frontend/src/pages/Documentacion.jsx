@@ -194,6 +194,30 @@ export default function Documentacion() {
     }
   }, [user]);
 
+  // ── Docs de Subsidio (empresa) ──
+  const [subDocs, setSubDocs] = useState({ empresa: [], por_placa: {}, combustible: [] });
+  useEffect(() => {
+    const enabled = user && (user.role === "cliente_subsidio" || user?.servicios?.subsidio);
+    if (!enabled) return;
+    api.get("/subsidio/my-docs-summary")
+      .then(r => setSubDocs(r.data || { empresa: [], por_placa: {}, combustible: [] }))
+      .catch(() => {});
+  }, [user?.id, user?.role, user?.servicios?.subsidio]);
+
+  const downloadSubDoc = async (docId, filename) => {
+    try {
+      const r = await api.get(`/subsidio/documents/${docId}/download`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([r.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `doc-${docId}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("No se pudo descargar el documento");
+    }
+  };
+
   function showToast(msg) {
     setToast(msg);
     clearTimeout(toastRef.current);
@@ -337,6 +361,40 @@ export default function Documentacion() {
           </button>
         ))}
       </div>
+
+      {/* Documentos de empresa cargados desde Mi Flota (Subsidio) */}
+      {subDocs.empresa && subDocs.empresa.length > 0 && (
+        <div style={{ background:"#fff",border:"1px solid #F0F0F3",borderRadius:16,padding:20,marginBottom:22,boxShadow:"0 1px 2px rgba(0,0,0,.04)" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14 }}>
+            <div style={{ width:36,height:36,borderRadius:10,background:"#F3ECFF",display:"flex",alignItems:"center",justifyContent:"center" }}>
+              <FileText style={{ width:18,height:18,color:"#8B3DFF" }}/>
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:15,fontWeight:700,color:"#1f2937" }}>Documentos de la empresa</div>
+              <div style={{ fontSize:12,color:"#6B7280" }}>Cargados desde Mi Flota · Subsidio DU 004-2026</div>
+            </div>
+            <span style={{ fontSize:11,color:"#8B3DFF",background:"#F3ECFF",padding:"4px 10px",borderRadius:12,fontWeight:600 }}>{subDocs.empresa.length} documento{subDocs.empresa.length !== 1 ? "s" : ""}</span>
+          </div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12 }}>
+            {subDocs.empresa.map(d => (
+              <div key={d.id} style={{ display:"flex",alignItems:"center",gap:12,border:"1px solid #E5E7EB",borderRadius:10,padding:"12px 14px",background:"#FAFAFB" }}>
+                <FileText style={{ width:20,height:20,color:"#6B7280",flexShrink:0 }}/>
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ fontSize:13,fontWeight:600,color:"#1f2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{d.label}</div>
+                  <div style={{ fontSize:11,color:"#9CA3AF",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{d.filename}</div>
+                </div>
+                <button
+                  onClick={() => downloadSubDoc(d.id, d.filename)}
+                  title="Descargar"
+                  style={{ background:"#8B3DFF",color:"#fff",border:"none",borderRadius:8,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0 }}
+                >
+                  <Download style={{ width:16,height:16 }}/>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPIs */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginBottom:22 }}>

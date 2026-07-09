@@ -273,6 +273,30 @@ export default function Vehiculos() {
 
   useEffect(()=>{ loadAll(); }, []);
 
+  // ── Docs de Subsidio (Mi Flota) por placa ──
+  const [subDocs, setSubDocs] = useState({ por_placa: {}, empresa: [], combustible: [] });
+  useEffect(() => {
+    const enabled = user && (user.role === "cliente_subsidio" || user?.servicios?.subsidio);
+    if (!enabled) return;
+    api.get("/subsidio/my-docs-summary")
+      .then(r => setSubDocs(r.data || { por_placa: {}, empresa: [], combustible: [] }))
+      .catch(() => {});
+  }, [user?.id, user?.role, user?.servicios?.subsidio]);
+
+  const downloadSubDoc = async (docId, filename) => {
+    try {
+      const r = await api.get(`/subsidio/documents/${docId}/download`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([r.data]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `doc-${docId}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("No se pudo descargar el documento");
+    }
+  };
+
   // ── Filtered list ──
   const lista = useMemo(()=>{
     const qq = q.trim().toLowerCase();
@@ -606,6 +630,39 @@ export default function Vehiculos() {
                               </div>
                             </div>
                           </div>
+                          {/* PANEL DOCS SUBSIDIO por placa */}
+                          {(() => {
+                            const placaKey = (v.placa || v.veh || "").toUpperCase();
+                            const docsPlaca = (subDocs.por_placa && subDocs.por_placa[placaKey]) || [];
+                            if (!docsPlaca.length) return null;
+                            return (
+                              <div style={{ borderTop:"1px solid #E5E7EB", padding:"16px 24px", background:"#FFFFFF" }}>
+                                <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:10 }}>
+                                  <FileText style={{ width:16,height:16,color:"#8B3DFF" }}/>
+                                  <b style={{ fontSize:14,color:"#1f2937" }}>Documentos del vehículo</b>
+                                  <span style={{ fontSize:11,color:"#8B3DFF",background:"#F3ECFF",padding:"2px 8px",borderRadius:12,fontWeight:600 }}>Subsidio DU 004</span>
+                                </div>
+                                <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10 }}>
+                                  {docsPlaca.map(d => (
+                                    <div key={d.id} style={{ display:"flex",alignItems:"center",gap:10,border:"1px solid #E5E7EB",borderRadius:10,padding:"10px 12px",background:"#F9FAFB" }}>
+                                      <FileText style={{ width:18,height:18,color:"#6B7280",flexShrink:0 }}/>
+                                      <div style={{ flex:1,minWidth:0 }}>
+                                        <div style={{ fontSize:12.5,fontWeight:600,color:"#1f2937",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{d.label}</div>
+                                        <div style={{ fontSize:11,color:"#9CA3AF",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{d.filename}</div>
+                                      </div>
+                                      <button
+                                        onClick={() => downloadSubDoc(d.id, d.filename)}
+                                        title="Descargar"
+                                        style={{ background:"#8B3DFF",color:"#fff",border:"none",borderRadius:8,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer" }}
+                                      >
+                                        <Download style={{ width:15,height:15 }}/>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td></tr>
                       )}
                     </React.Fragment>
