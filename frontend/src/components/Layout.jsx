@@ -226,6 +226,14 @@ export default function Layout({ children }) {
   if (!user) return null;
 
   const items = MENU.filter((i) => {
+    // Si la empresa no tiene el servicio de plataforma activo (es solo cliente_subsidio puro),
+    // ocultamos todos los módulos clásicos de la plataforma excepto los de subsidio.
+    if (user.role !== "admin_enered" && user?.servicios && !user.servicios.plataforma) {
+      if (i.to !== "/subsidio/documentos" && i.to !== "/dashboard-subsidio") {
+        return false;
+      }
+    }
+
     if (!i.roles.includes(user.role)) {
       // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
       if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;

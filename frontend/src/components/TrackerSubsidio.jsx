@@ -72,12 +72,12 @@ export default function TrackerSubsidio() {
     currentState = "atu";
   }
 
-  // Hardcode amounts based on the prototype logic (using KPIs if available)
-  const galones = kpis.galones_reconocidos || 4560;
-  const monto = kpis.gasto_total ? (galones * 4) : 18240; 
+  // Actual amounts based on backend KPIs
+  const galones = kpis.galones_reconocidos ?? 0;
+  const monto = kpis.gasto_total ? (galones * 4) : 0; 
   const formattedMonto = `S/ ${formatNumber(monto, 0)}`;
   const formattedGalones = `${formatNumber(galones, 0)} gal`;
-  const pctAhorro = kpis.gasto_total > 0 ? ((monto / kpis.gasto_total) * 100).toFixed(1) : "19.0";
+  const pctAhorro = kpis.gasto_total > 0 ? ((monto / kpis.gasto_total) * 100).toFixed(1) : "0.0";
 
   const STATES = {
     revision: {

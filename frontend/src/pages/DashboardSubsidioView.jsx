@@ -151,15 +151,15 @@ export default function DashboardSubsidioView() {
       });
     }
 
-    const totalVehiclesCount = kpis.unidades_incluidas || 12;
-    const inReglaCount = totalVehiclesCount - 1;
+    const totalVehiclesCount = kpis.unidades_incluidas ?? 0;
+    const inReglaCount = totalVehiclesCount > 0 ? totalVehiclesCount - 1 : 0;
     res.push({
-      title: `Resto de flota - ${inReglaCount > 0 ? inReglaCount : 11} unidades`,
-      desc: "habilitaciones y propiedad vigentes",
-      badge: "EN REGLA",
-      bg: "bg-emerald-50/60 border-emerald-200 text-emerald-700",
-      dot: "bg-emerald-500",
-      badgeColor: "text-emerald-600",
+      title: `Resto de flota - ${inReglaCount} unidades`,
+      desc: totalVehiclesCount > 0 ? "habilitaciones y propiedad vigentes" : "No se han registrado vehículos aún",
+      badge: totalVehiclesCount > 0 ? "EN REGLA" : "SIN DATOS",
+      bg: totalVehiclesCount > 0 ? "bg-emerald-50/60 border-emerald-200 text-emerald-700" : "bg-neutral-50/60 border-neutral-200 text-neutral-500",
+      dot: totalVehiclesCount > 0 ? "bg-emerald-500" : "bg-neutral-400",
+      badgeColor: totalVehiclesCount > 0 ? "text-emerald-600" : "text-neutral-500",
     });
 
     return res;
@@ -269,16 +269,16 @@ export default function DashboardSubsidioView() {
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Gasto total diésel</span>
-                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.gasto_total || 129400)}</div>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.gasto_total ?? 0)}</div>
                 <span className="text-xs text-neutral-400 font-medium block mt-1">
-                  {kpis.num_meses || 2} meses • {fmt(kpis.galones_reconocidos || 12400)} gal
+                  {kpis.num_meses ?? 0} meses • {fmt(kpis.galones_reconocidos ?? 0)} gal
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Precio prom./galón</span>
-                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.precio_promedio_galon || 10.43)}</div>
+                <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.precio_promedio_galon ?? 0)}</div>
                 <span className="text-xs text-emerald-600 font-bold block mt-1 flex items-center gap-0.5">
-                  ▼ {fmt(Math.abs(kpis.precio_promedio_diff || 0.22))} vs mes ant.
+                  {kpis.precio_promedio_diff ? `▼ ${fmt(Math.abs(kpis.precio_promedio_diff))} vs mes ant.` : "Sin datos de mes anterior"}
                 </span>
               </div>
             </div>
@@ -409,17 +409,17 @@ export default function DashboardSubsidioView() {
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Unidades incluidas</span>
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
-                  {kpis.unidades_incluidas || 12}/{kpis.unidades_incluidas || 12}
+                  {kpis.unidades_incluidas ?? 0}/{kpis.unidades_incluidas ?? 0}
                 </div>
                 <span className="text-xs text-neutral-400 font-medium block mt-1">en el expediente</span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Habilitadas y activas</span>
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
-                  {kpis.unidades_validas || 12}/{kpis.unidades_incluidas || 12}
+                  {kpis.unidades_validas ?? 0}/{kpis.unidades_incluidas ?? 0}
                 </div>
                 <span className="text-xs text-emerald-600 font-bold block mt-1">
-                  {kpis.unidades_validas_pct || 100}% operativas
+                  {kpis.unidades_validas_pct ?? 0}% operativas
                 </span>
               </div>
             </div>
@@ -429,19 +429,19 @@ export default function DashboardSubsidioView() {
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Galones reconocidos</span>
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
-                  {fmt(kpis.galones_reconocidos || 4560)}
+                  {fmt(kpis.galones_reconocidos ?? 0)}
                 </div>
                 <span className="text-xs text-neutral-400 font-medium block mt-1">
-                  de {kpis.invoices_confirmed || 184} comprobantes
+                  de {kpis.invoices_confirmed ?? 0} comprobantes
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Costo prom./unidad</span>
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
-                  S/ {fmt(kpis.costo_promedio_unidad || 10783)}
+                  S/ {fmt(kpis.costo_promedio_unidad ?? 0)}
                 </div>
                 <span className="text-xs text-neutral-400 font-medium block mt-1">
-                  {kpis.num_meses || 2} meses
+                  {kpis.num_meses ?? 0} meses
                 </span>
               </div>
             </div>
@@ -452,12 +452,12 @@ export default function DashboardSubsidioView() {
             <div className="flex justify-between items-start">
               <span className="text-sm font-bold text-neutral-500">Antigüedad de flota</span>
               <div className="text-right">
-                <div className="text-4xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 || 3}</div>
+                <div className="text-4xl font-cabinet font-black text-amber-600 leading-none">{kpis.older_than_10 ?? 0}</div>
                 <div className="text-xs font-bold text-neutral-500 mt-1">unidades +10 años</div>
               </div>
             </div>
             <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-4xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age || 7.2)}</span>
+              <span className="text-4xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age ?? 0)}</span>
               <span className="text-sm font-semibold text-neutral-500">años prom.</span>
             </div>
             <p className="text-sm font-bold text-amber-950 mt-3 leading-tight">
@@ -483,10 +483,10 @@ export default function DashboardSubsidioView() {
                   <circle cx="28" cy="28" r="24" stroke="#E5E7EB" strokeWidth="4" fill="transparent" />
                   <circle cx="28" cy="28" r="24" stroke="#10B981" strokeWidth="4" fill="transparent"
                     strokeDasharray={150.8}
-                    strokeDashoffset={150.8 * (1 - (kpis.pct_docs || 92) / 100)}
+                    strokeDashoffset={150.8 * (1 - (kpis.pct_docs ?? 0) / 100)}
                     strokeLinecap="round" />
                 </svg>
-                <span className="absolute text-xs font-cabinet font-black text-neutral-800">{kpis.pct_docs || 92}%</span>
+                <span className="absolute text-xs font-cabinet font-black text-neutral-800">{kpis.pct_docs ?? 0}%</span>
               </div>
               <div>
                 <div className="font-bold text-neutral-800 text-sm md:text-base">Documentos en regla</div>
@@ -527,7 +527,7 @@ export default function DashboardSubsidioView() {
           </div>
           <div>
             <h3 className="font-cabinet font-black text-sm md:text-base text-white leading-tight">
-              Tus {kpis.unidades_incluidas || 12} unidades ya viven en ENERED. Conviértelas en control total.
+              Tus {kpis.unidades_incluidas ?? 0} unidades ya viven en ENERED. Conviértelas en control total.
             </h3>
             <div className="flex flex-wrap gap-1.5 mt-2.5">
               <span className="px-2 py-0.5 rounded-full bg-white/10 text-xs font-bold whitespace-nowrap">📍 Ubicación en vivo</span>

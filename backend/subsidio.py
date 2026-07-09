@@ -331,6 +331,13 @@ async def register_from_calculator(payload: RegisterFromCalculator, response: Re
             "empresa": empresa_name,
             "ruc": payload.ruc,
             "plan": "subsidio",
+            "tipo_cliente": "subsidio",
+            "servicios": {
+                "plataforma": False,
+                "combustible": False,
+                "gps": False,
+                "subsidio": True,
+            },
             "linea_credito": 0,
             "unidades_contratadas": 0,
             "dias_credito": 0,
