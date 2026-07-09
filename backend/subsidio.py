@@ -1908,32 +1908,75 @@ async def admin_delete_expediente(user_id: str, _: dict = Depends(_require_admin
     u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
+
+    empresa_name = u.get("empresa")
+    email = (u.get("email") or "").lower().strip()
+    ruc = u.get("ruc")
     calc_id = u.get("calc_id")
+
+    deleted = {
+        "user": 0, "calculations": 0, "leads": 0, "bank_accounts": 0,
+        "vehicles": 0, "declaraciones": 0, "documents": 0, "invoices": 0,
+        "empresas_config": 0, "storage_objects": 0,
+    }
+
+    # 1) Cálculo asociado (por calc_id) y leads por múltiples claves
     if calc_id:
-        await db.calculations.delete_one({"id": calc_id})
-        await db.subsidio_leads.delete_one({"calc_id": calc_id})
-        
-    await db.users.delete_one({"id": user_id})
-    await db.subsidio_bank_accounts.delete_many({"user_id": user_id})
-    await db.subsidio_vehicles.delete_many({"user_id": user_id})
-    await db.subsidio_declaraciones.delete_many({"user_id": user_id})
-    
-    docs = await db.subsidio_documents.find({"user_id": user_id}).to_list(1000)
+        r = await db.calculations.delete_one({"id": calc_id})
+        deleted["calculations"] += r.deleted_count or 0
+    lead_filter = {"$or": []}
+    if calc_id: lead_filter["$or"].append({"calc_id": calc_id})
+    if email:   lead_filter["$or"].append({"email": email})
+    if ruc:     lead_filter["$or"].append({"ruc": ruc})
+    if lead_filter["$or"]:
+        r = await db.subsidio_leads.delete_many(lead_filter)
+        deleted["leads"] += r.deleted_count or 0
+
+    # 2) Datos accesorios del cliente
+    r = await db.subsidio_bank_accounts.delete_many({"user_id": user_id})
+    deleted["bank_accounts"] += r.deleted_count or 0
+    r = await db.subsidio_vehicles.delete_many({"user_id": user_id})
+    deleted["vehicles"] += r.deleted_count or 0
+    r = await db.subsidio_declaraciones.delete_many({"user_id": user_id})
+    deleted["declaraciones"] += r.deleted_count or 0
+
+    # 3) Documentos + storage
+    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 1}).to_list(5000)
     for d in docs:
         if d.get("storage_key"):
-            try: storage.delete_object(d["storage_key"])
-            except: pass
-    await db.subsidio_documents.delete_many({"user_id": user_id})
-    
-    invs = await db.consumos_subsidio.find({"user_id": user_id}).to_list(1000)
+            try:
+                storage.delete_object(d["storage_key"])
+                deleted["storage_objects"] += 1
+            except Exception:
+                pass
+    r = await db.subsidio_documents.delete_many({"user_id": user_id})
+    deleted["documents"] += r.deleted_count or 0
+
+    # 4) Facturas/consumos + storage
+    invs = await db.consumos_subsidio.find({"user_id": user_id}, {"_id": 0, "factura_storage_key": 1}).to_list(5000)
     for i in invs:
         if i.get("factura_storage_key"):
-            try: storage.delete_object(i["factura_storage_key"])
-            except: pass
-    await db.consumos_subsidio.delete_many({"user_id": user_id})
-    
-    return {"ok": True}
+            try:
+                storage.delete_object(i["factura_storage_key"])
+                deleted["storage_objects"] += 1
+            except Exception:
+                pass
+    r = await db.consumos_subsidio.delete_many({"user_id": user_id})
+    deleted["invoices"] += r.deleted_count or 0
+
+    # 5) Usuario
+    r = await db.users.delete_one({"id": user_id})
+    deleted["user"] += r.deleted_count or 0
+
+    # 6) empresas_config (solo si NO queda ningún otro usuario en esa empresa)
+    if empresa_name:
+        remaining = await db.users.count_documents({"empresa": empresa_name})
+        if remaining == 0:
+            r = await db.empresas_config.delete_one({"empresa": empresa_name})
+            deleted["empresas_config"] += r.deleted_count or 0
+
+    logger.info(f"[admin_delete_expediente] user_id={user_id} empresa={empresa_name} deleted={deleted}")
+    return {"ok": True, "deleted": deleted}
 
 
 @subsidio_router.post("/admin/subsidio/expedientes/{user_id}/migrate")

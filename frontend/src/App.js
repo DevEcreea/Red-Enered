@@ -3,6 +3,7 @@ import "@/index.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "./context/AuthContext";
+import { startKeepAlive } from "./lib/api";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
 import SubsidioGate from "./components/SubsidioGate";
@@ -87,6 +88,7 @@ function DashboardRoute() {
 }
 
 function App() {
+  React.useEffect(() => { startKeepAlive(); }, []);
   return (
     <AuthProvider>
       <BrowserRouter>

@@ -2937,33 +2937,33 @@ async def consulta_sunarp_placa(req: Request, placa: str):
         res_data = json.loads(raw_res)
         
         if res_data.get("success") and "data" in res_data:
-                v = res_data["data"].get("vehiculo", {})
-                props = res_data["data"].get("propietarios", [])
+            v = res_data["data"].get("vehiculo", {})
+            props = res_data["data"].get("propietarios", [])
+            
+            titular = ""
+            if props:
+                titular = props[0].get("propietario", "")
+            
+            año = None
+            try:
+                año_str = v.get("ano_fab") or v.get("an_mode")
+                if año_str:
+                    año = int(año_str)
+            except:
+                pass
                 
-                titular = ""
-                if props:
-                    titular = props[0].get("propietario", "")
-                
-                año = None
-                try:
-                    año_str = v.get("ano_fab") or v.get("an_mode")
-                    if año_str:
-                        año = int(año_str)
-                except:
-                    pass
-                    
-                return {
-                    "placa": v.get("num_placa", placa_clean),
-                    "marca": v.get("marca", ""),
-                    "modelo": v.get("modelo", ""),
-                    "chasis": v.get("no_vin") or v.get("num_serie", ""),
-                    "año": año,
-                    "titular": titular,
-                    "tipo": v.get("desc_tipo_carr", "")
-                }
-            else:
-                msg = res_data.get("message", "No se encontró información para esta placa")
-                raise HTTPException(404, msg)
+            return {
+                "placa": v.get("num_placa", placa_clean),
+                "marca": v.get("marca", ""),
+                "modelo": v.get("modelo", ""),
+                "chasis": v.get("no_vin") or v.get("num_serie", ""),
+                "año": año,
+                "titular": titular,
+                "tipo": v.get("desc_tipo_carr", "")
+            }
+        else:
+            msg = res_data.get("message", "No se encontró información para esta placa")
+            raise HTTPException(404, msg)
     except urllib.error.HTTPError as e:
         try:
             err_body = e.read().decode('utf-8')
@@ -3988,6 +3988,16 @@ async def startup():
         await db.consumos_subsidio.create_index([("user_id", 1), ("status", 1)])
         await db.consumos_subsidio.create_index([("user_id", 1), ("fecha", -1)])
         await db.empresas_config.create_index("empresa", unique=True)
+        # Índices para acelerar el listado admin de expedientes de subsidio
+        await db.subsidio_documents.create_index("user_id")
+        await db.subsidio_vehicles.create_index("user_id")
+        await db.subsidio_declaraciones.create_index("user_id")
+        await db.subsidio_bank_accounts.create_index("user_id")
+        await db.subsidio_leads.create_index("calc_id")
+        await db.subsidio_leads.create_index("email")
+        await db.subsidio_leads.create_index("ruc")
+        await db.users.create_index([("role", 1), ("created_at", -1)])
+        await db.calculations.create_index("id")
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)

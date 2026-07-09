@@ -52,10 +52,19 @@ export default function SubsidioAdmin() {
   const deleteExpediente = async (e, userId, empresa) => {
     e.stopPropagation();
     if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente el expediente de ${empresa || 'este cliente'}? Esta acción no se puede deshacer y borrará documentos, facturas y configuraciones.`)) return;
+    // Update optimista: quitamos el ítem de la lista al instante
+    const prev = items;
+    setItems((cur) => cur.filter((it) => it.user_id !== userId));
     try {
-      await api.delete(`/admin/subsidio/expedientes/${userId}`);
+      const { data } = await api.delete(`/admin/subsidio/expedientes/${userId}`);
+      // Refrescamos en segundo plano para confirmar
       load();
+      if (data && data.deleted) {
+        console.log("[deleteExpediente] borrado:", data.deleted);
+      }
     } catch (err) {
+      // Restauramos la lista si falló
+      setItems(prev);
       alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
     }
   };

@@ -214,6 +214,7 @@ export default function Layout({ children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [overview, setOverview] = useState(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [wakingUp, setWakingUp] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -222,6 +223,18 @@ export default function Layout({ children }) {
       api.get("/dashboard/overview").then((r) => setOverview(r.data)).catch(() => {});
     }
   }, [user?.id]);
+
+  // Escucha los eventos que emite api.js cuando un request tarda >5s (cold-start Render).
+  useEffect(() => {
+    const onSlow = () => setWakingUp(true);
+    const onIdle = () => setWakingUp(false);
+    window.addEventListener("api:slow", onSlow);
+    window.addEventListener("api:idle", onIdle);
+    return () => {
+      window.removeEventListener("api:slow", onSlow);
+      window.removeEventListener("api:idle", onIdle);
+    };
+  }, []);
 
   if (!user) return null;
 
@@ -326,6 +339,13 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-[#F6F7FB]">
+      {/* Banner "Reactivando servidor..." — se muestra si un request tarda >5s (cold-start Render free) */}
+      {wakingUp && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-500 text-white text-xs font-semibold py-2 px-4 text-center shadow-lg flex items-center justify-center gap-2">
+          <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          Reactivando servidor… puede tardar hasta 60 segundos la primera vez.
+        </div>
+      )}
       {/* Desktop sidebar */}
       <aside
         onMouseEnter={() => setIsHovered(true)}

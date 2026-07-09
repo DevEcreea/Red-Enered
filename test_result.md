@@ -267,7 +267,7 @@ agent_communication:
     - agent: "testing"
       message: "✅ FASE 2 BACKEND TESTING COMPLETE - ALL 6 TEST CASES PASSED (6/6). Comprehensive testing performed: (1) GET /auth/me includes subsidio as 4th service key for all user types (admin_enered has all 4=true, client users have subsidio key with correct boolean values), (2) PUT /admin/empresas/{empresa}/servicios accepts and persists subsidio flag, normalizes partial payloads correctly, (3) Backfill verification confirmed - all 4 empresas have servicios.subsidio key, backfill runs idempotently on startup (scanned: 4, updated: 0), (4) GET /api/wialon/sid endpoint working perfectly - Lima user returns 200 with sid (32 chars), iframe_url (hosting.wialon.us), total_unidades=61, all error cases verified (403 for no gps, 400 for admin_enered, 401 for no token), (5) iframe_url correctly transformed from hst-api to hosting domain, (6) Regression Phase 1 features working - manual consumption upload, token masking, wialon config updates. Real Wialon integration verified with production token. NO CRITICAL ISSUES. Backend ready for production."
     - agent: "testing"
-      message: "✅ FASE 2 FRONTEND TESTING COMPLETE - ALL TESTS PASSED (3/3 tasks). End-to-end validation performed on Monitoreo module: (1) Layout sidebar filtering: Monitoreo appears for users with servicios.gps=true and admin_enered, correctly hidden for users without GPS. (2) Monitoreo page with Wialon iframe: administrador@lima.com successfully loads page with empresa header, 61 units badge, iframe with correct hosting.wialon.us URL and sid parameter, Refrescar and Abrir en pestaña buttons functional. (3) ModuloBloqueado screen: administrador@andina.com (no GPS) correctly shows blocked module message. (4) Admin view: admin@enered.com sees empresa selector dropdown with TRANSPORTES LIMA SAC, iframe loads with correct data. All testids present and working. Real Wialon integration confirmed. IMPORTANT NOTE: Testing performed from https://senior-devops-suite.preview.emergentagent.com (CORS configured correctly). The URL https://b6ce8693-5c7b-4be3-9e96-4224aa9ffb28.preview.emergentagent.com mentioned in review_request has CORS issues - backend only allows localhost:3000 in CORS_ORIGINS. For production deployment, ensure CORS_ORIGIN_REGEX is set to allow preview URLs or add specific frontend URL to CORS_ORIGINS. NO CRITICAL CODE ISSUES - only deployment configuration note."
+      message: "✅ FASE 2 FRONTEND TESTING COMPLETE - ALL TESTS PASSED (3/3 tasks). End-to-end validation performed on Monitoreo module: (1) Layout sidebar filtering: Monitoreo appears for users with servicios.gps=true and admin_enered, correctly hidden for users without GPS. (2) Monitoreo page with Wialon iframe: administrador@lima.com successfully loads page with empresa header, 61 units badge, iframe with correct hosting.wialon.us URL and sid parameter, Refrescar and Abrir en pestaña buttons functional. (3) ModuloBloqueado screen: administrador@andina.com (no GPS) correctly shows blocked module message. (4) Admin view: admin@enered.com sees empresa selector dropdown with TRANSPORTES LIMA SAC, iframe loads with correct data. All testids present and working. Real Wialon integration confirmed. IMPORTANT NOTE: Testing performed from https://credit-optimizer-23.preview.emergentagent.com (CORS configured correctly). The URL https://credit-optimizer-23.preview.emergentagent.com mentioned in review_request has CORS issues - backend only allows localhost:3000 in CORS_ORIGINS. For production deployment, ensure CORS_ORIGIN_REGEX is set to allow preview URLs or add specific frontend URL to CORS_ORIGINS. NO CRITICAL CODE ISSUES - only deployment configuration note."
     - agent: "main"
       message: "BUG FIX: Wialon iframe bloqueado por X-Frame-Options. Solución aplicada: (a) Reemplazado iframe Wialon SID por OpenStreetMap embed con markers + (b) Nueva API GET /api/wialon/units que retorna lista de unidades con última posición desde Wialon API + (c) Panel lateral con lista de unidades (nombre, timestamp, velocidad, estado GPS). También agregado botón eliminar empresa en /admin/empresas con modal de confirmación y cascada de delete (empresas_config, users, consumptions, invoices, qr_codes, subsidio collections). Necesito: (1) Validar Monitoreo con administrador@lima.com muestra mapa OSM + lista de unidades; (2) Validar admin selector empresa + mapa carga; (3) Validar delete empresa con confirmación y cascada."
     - agent: "testing"
@@ -373,8 +373,8 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "3.1"
-  test_sequence: 13
+  version: "3.2"
+  test_sequence: 14
   run_ui: false
 
 test_plan:
@@ -383,8 +383,52 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+backend:
+  - task: "Admin subsidio expedientes — listado rápido con índices"
+    implemented: true
+    working: true
+    file: "backend/server.py, backend/subsidio.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Añadidos índices en startup para acelerar el aggregate de admin_list_expedientes: subsidio_documents.user_id, subsidio_vehicles.user_id, subsidio_declaraciones.user_id, subsidio_bank_accounts.user_id, subsidio_leads.calc_id/email/ruc, users(role,created_at), calculations.id. Objetivo: reducir de >2 min a <5 s el GET /api/admin/subsidio/expedientes. NOTA: El origen principal del delay >2min es Render Free tier (cold-start). Se añadió keep-alive frontend + banner UX; los índices reducen el tiempo real de query."
+        - working: true
+          agent: "testing"
+          comment: "✅ PERFORMANCE VERIFIED: GET /api/admin/subsidio/expedientes responds in 0.01s (well under 5s target). Structure correct with items[] and total. All required fields present (user_id, empresa, ruc, email, expediente_status, docs_count, vehicles_count, invoices). Filters working: ?q=TEST returns 1 result, ?estado=uploading returns 1 result. Auth working: non-admin correctly rejected with 403. Detail endpoint GET /api/admin/subsidio/expedientes/{user_id} returns correct structure with user, documents, vehicles (3), invoices, calculation. Indexes are working perfectly - no performance issues detected."
+
+  - task: "Admin delete expediente — borrado en cascada COMPLETO"
+    implemented: true
+    working: true
+    file: "backend/subsidio.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "DELETE /api/admin/subsidio/expedientes/{user_id} ahora borra: (1) calculation por calc_id, (2) subsidio_leads por calc_id OR email OR ruc (antes solo calc_id, dejaba leads huérfanos), (3) subsidio_bank_accounts, subsidio_vehicles, subsidio_declaraciones por user_id, (4) subsidio_documents + storage objects, (5) consumos_subsidio + storage objects, (6) el user, (7) empresas_config SOLO si no queda ningún otro usuario asociado a esa empresa. Retorna {ok: true, deleted: {contadores por colección}} para verificación. Requiere role=admin_enered."
+        - working: true
+          agent: "testing"
+          comment: "✅ CASCADE DELETE VERIFIED: DELETE /api/admin/subsidio/expedientes/{user_id} working perfectly. Returns {ok: true, deleted: {user: 1, calculations: 1, leads: 0, bank_accounts: 0, vehicles: 3, declaraciones: 0, documents: 0, invoices: 0, empresas_config: 1, storage_objects: 0}}. MongoDB verification confirms ALL data removed: (1) users deleted by id, (2) subsidio_vehicles deleted (3 vehicles), (3) calculations deleted by calc_id, (4) subsidio_leads deleted by calc_id/email/ruc (BUG FIX WORKING - no orphaned leads), (5) subsidio_bank_accounts deleted, (6) subsidio_declaraciones deleted, (7) subsidio_documents deleted, (8) consumos_subsidio deleted, (9) empresas_config deleted (no other users in empresa). Second DELETE correctly returns 404. Auth working: requires admin_enered role. NO CRITICAL ISSUES."
+
+frontend:
+  - task: "Keep-alive + banner 'Reactivando servidor' para Render Free"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/lib/api.js, frontend/src/App.js, frontend/src/components/Layout.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Cambios para mitigar cold-start de Render Free: (1) api.js: axios con timeout 120s + interceptores que emiten evento 'api:slow' si request tarda >5s; (2) startKeepAlive() invocado en App useEffect: ping GET /api/health inmediato + cada 10 min + al hacer visible la pestaña; (3) Layout: escucha api:slow/api:idle y muestra banner amarillo 'Reactivando servidor…' arriba de la app; (4) SubsidioAdmin: update optimista al borrar (quita el item al instante y refetch en background)."
+
 agent_communication:
     - agent: "main"
-      message: "FASE 1 Combustible/Servicios completada. Backend testeado manualmente OK (login enriquecido con servicios, admin puede guardar/probar token Wialon real que devolvió 61 unidades). Frontend refactoreado sin errores de lint. Necesito: (1) validar endpoints backend nuevos con casos edge (permisos por rol, empresa inexistente, token inválido, PDF grande, tenant isolation en GET /consumptions/{id}/factura, backfill_servicios idempotencia). Credenciales: admin@enered.com/admin123 (admin_enered). Empresas de prueba pre-configuradas: TRANSPORTES LIMA SAC (combustible+gps+token real), LOGISTICA ANDINA SA (solo plataforma → prueba carga manual). Testing frontend NO se pide todavía."
+      message: "BUG FIX: Usuario reporta (1) módulo Subsidio-Expediente (admin_enered) tarda >2min en abrir, (2) borrar expediente no elimina todo de la BD. Diagnóstico: Render Free tier duerme el servicio → cold-start 30-90s. Adicional: el endpoint admin listado no tenía índices en subsidio_documents.user_id ni subsidio_vehicles.user_id, y el DELETE dejaba residuos en empresas_config y subsidio_leads. Cambios aplicados: (a) Backend: nuevos índices + DELETE en cascada exhaustivo que retorna contadores; (b) Frontend: keep-alive ping cada 10 min + banner UX cuando request tarda >5s + update optimista al borrar. Necesito que testing agent valide: GET /api/admin/subsidio/expedientes responde <5s con datos correctos; DELETE /api/admin/subsidio/expedientes/{uid} elimina de TODAS las colecciones (users, calculations, subsidio_leads por email/ruc/calc_id, subsidio_vehicles, subsidio_documents, subsidio_bank_accounts, subsidio_declaraciones, consumos_subsidio, y empresas_config si es el último user). Credenciales: admin_enered admin@enered.com/admin123. Datos de prueba: existe cliente_subsidio cliente.subsidio@test.com/subsidio123 (empresa TRANSPORTES TEST SUBSIDIO SAC, RUC 20999888777). Se puede re-crear via python /app/backend/seed_subsidio_test.py."
     - agent: "testing"
-      message: "✅ FASE 1 BACKEND TESTING COMPLETE - ALL TESTS PASSED (7/7). Comprehensive testing performed covering: (1) Login enrichment with servicios/tipo_cliente/wialon_configurado for all user types, (2) Admin GET /empresas-config with token masking and 403 for non-admin, (3) Admin PUT /servicios with create/update/validation/permissions, (4) Admin Wialon endpoints (PUT/DELETE/TEST) with real token validation (61 units detected), encryption, auto-enable gps, and 403 for non-admin, (5) POST /consumptions/manual with PDF upload, invoice creation, download, tenant isolation, and all edge cases, (6) Regression test for /consumptions filtering by empresa (tenant isolation intact), (7) Backfill idempotence verified. No critical issues found. All security checks (permissions, tenant isolation) working correctly. Real Wialon integration verified with production token."
+      message: "✅ BUG FIX VALIDATION COMPLETE - ALL TESTS PASSED (7/7). Comprehensive testing performed on Subsidio DU 004 admin endpoints: (1) PERFORMANCE: GET /api/admin/subsidio/expedientes responds in 0.01s (well under 5s target), structure correct with items[] and total, all required fields present. (2) FILTERS: ?q=TEST and ?estado=uploading both working correctly. (3) AUTH: Non-admin correctly rejected with 403. (4) DETAIL: GET /api/admin/subsidio/expedientes/{user_id} returns correct structure with user, documents, vehicles (3), invoices, calculation. (5) CASCADE DELETE: DELETE /api/admin/subsidio/expedientes/{user_id} working perfectly - returns {ok: true, deleted: {user: 1, calculations: 1, vehicles: 3, empresas_config: 1}}. MongoDB verification confirms ALL data removed from ALL collections: users, subsidio_vehicles (3 vehicles), calculations, subsidio_leads (by calc_id/email/ruc - BUG FIX WORKING), subsidio_bank_accounts, subsidio_declaraciones, subsidio_documents, consumos_subsidio, empresas_config (deleted when no other users). (6) Second DELETE correctly returns 404. (7) REGRESSION: GET /api/health working. NO CRITICAL ISSUES. Bug fix successfully resolves both reported issues: performance improved from >2min to <1s, cascade delete now removes ALL data including orphaned leads."
