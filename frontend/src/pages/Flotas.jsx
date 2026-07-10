@@ -321,7 +321,16 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <tbody>
               {filteredRows.slice(0,50).map((r,i)=>{
                 const fecha = r.FECHA ? `${r.FECHA}${r.HORA?" "+r.HORA:""}` : "—";
-                               <td style={tdSt}>
+                const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
+                const galones = parseFloat(r.CANTIDAD_GL||0);
+                const precio = parseFloat(r.PRECIO_UNITARIO||0);
+                const importe = parseFloat(r.IMPORTE_TOTAL||0);
+                const ahorro = parseFloat(r.AHORRO||0);
+                return (
+                  <tr key={r.id||i} style={{ borderBottom:"1px solid #E9EBEF" }}>
+                    <td style={tdSt}><input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/></td>
+                    <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{r.PLACA||"—"}</td>
+                    <td style={tdSt}>
                       {(() => {
                         const isDemo = user?.email === "soporte@enered.pe";
                         
