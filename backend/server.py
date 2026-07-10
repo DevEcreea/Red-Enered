@@ -427,10 +427,21 @@ async def list_consumptions(
     semana: Optional[str] = None,
     limit: int = 2000,
 ):
-    # cliente_subsidio: leer de consumos_subsidio confirmados y mapear al schema /consumptions
-    if user.get("role") == "cliente_subsidio":
+    # cliente_subsidio OR users whose empresa has servicios.subsidio: merge consumos_subsidio confirmados
+    is_subsidio_user = user.get("role") == "cliente_subsidio"
+    if not is_subsidio_user and user.get("empresa"):
+        cfg = await db.empresas_config.find_one({"empresa": user["empresa"]}, {"_id": 0, "servicios": 1})
+        if cfg and cfg.get("servicios", {}).get("subsidio"):
+            is_subsidio_user = True
+
+    if is_subsidio_user:
+        uid_filter = {"status": "confirmed"}
+        if user.get("role") == "cliente_subsidio":
+            uid_filter["user_id"] = user["id"]
+        else:
+            uid_filter["empresa"] = user.get("empresa")
         raw = await db.consumos_subsidio.find(
-            {"user_id": user["id"], "status": "confirmed"},
+            uid_filter,
             {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
         ).sort("fecha", -1).to_list(limit)
         mapped = [_subsidio_row_to_consumption(r) for r in raw]
@@ -780,10 +791,21 @@ async def download_consumption_pdf(cid: str, user: dict = Depends(get_current_us
 
 @api.get("/dashboard/filter-options")
 async def dashboard_filter_options(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
-    # cliente_subsidio: opciones desde consumos_subsidio confirmados
-    if user.get("role") == "cliente_subsidio":
+    # cliente_subsidio or users with servicios.subsidio: opciones desde consumos_subsidio confirmados
+    is_subsidio_fo = user.get("role") == "cliente_subsidio"
+    if not is_subsidio_fo and user.get("empresa"):
+        cfg_fo = await db.empresas_config.find_one({"empresa": user["empresa"]}, {"_id": 0, "servicios": 1})
+        if cfg_fo and cfg_fo.get("servicios", {}).get("subsidio"):
+            is_subsidio_fo = True
+
+    if is_subsidio_fo:
+        fo_filter = {"status": "confirmed"}
+        if user.get("role") == "cliente_subsidio":
+            fo_filter["user_id"] = user["id"]
+        else:
+            fo_filter["empresa"] = user.get("empresa")
         raw = await db.consumos_subsidio.find(
-            {"user_id": user["id"], "status": "confirmed"},
+            fo_filter,
             {"_id": 0, "placa": 1, "estacion": 1, "producto": 1, "fecha": 1},
         ).to_list(100000)
         from datetime import date as _date

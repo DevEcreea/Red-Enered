@@ -1577,13 +1577,26 @@ async def admin_list_expedientes(
     limit: int = 200,
 ):
     """Lista todos los clientes de subsidio con resumen del expediente."""
-    filt = {"role": "cliente_subsidio"}
+    # Include both cliente_subsidio users AND users whose empresa has servicios.subsidio enabled
+    empresas_subsidio = []
+    async for cfg in db.empresas_config.find({"servicios.subsidio": True}, {"_id": 0, "empresa": 1}):
+        if cfg.get("empresa"):
+            empresas_subsidio.append(cfg["empresa"])
+
+    role_or = [{"role": "cliente_subsidio"}]
+    if empresas_subsidio:
+        role_or.append({"empresa": {"$in": empresas_subsidio}, "role": {"$ne": "admin_enered"}})
+    filt = {"$or": role_or} if len(role_or) > 1 else role_or[0]
+
     if q:
-        filt["$or"] = [
-            {"empresa": {"$regex": q, "$options": "i"}},
-            {"ruc": {"$regex": q}},
-            {"email": {"$regex": q, "$options": "i"}},
-        ]
+        filt = {"$and": [
+            filt,
+            {"$or": [
+                {"empresa": {"$regex": q, "$options": "i"}},
+                {"ruc": {"$regex": q}},
+                {"email": {"$regex": q, "$options": "i"}},
+            ]}
+        ]}
     if estado:
         filt["expediente_status"] = estado
 
@@ -1674,8 +1687,8 @@ async def admin_list_expedientes(
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
 async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
-    """Detalle completo de un cliente_subsidio: cálculo, banco, docs, flota, facturas, declaración."""
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+    """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración."""
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
@@ -1730,7 +1743,7 @@ async def admin_update_stage(
     """Admin cambia la etapa del expediente del cliente_subsidio.
     Etapas: solicitud_enviada → evaluacion_atu → aprobada → abonado_en_cuenta
     """
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     now = datetime.now(timezone.utc).isoformat()
@@ -1787,7 +1800,7 @@ async def admin_update_representante(
     payload: RepresentanteUpdateIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     await db.users.update_one(
@@ -1806,7 +1819,7 @@ async def admin_add_vehicle(
     payload: VehicleAdminIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     placa = payload.placa.upper().strip()
@@ -1898,7 +1911,7 @@ async def admin_add_invoice(
     payload: InvoiceAdminCreateIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
@@ -1966,7 +1979,7 @@ async def admin_update_invoice(
 
 @subsidio_router.delete("/admin/subsidio/expedientes/{user_id}")
 async def admin_delete_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
@@ -2042,7 +2055,7 @@ async def admin_delete_expediente(user_id: str, _: dict = Depends(_require_admin
 
 @subsidio_router.post("/admin/subsidio/expedientes/{user_id}/migrate")
 async def admin_migrate_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
-    u = await db.users.find_one({"id": user_id, "role": "cliente_subsidio"})
+    u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado o ya migrado")
         
