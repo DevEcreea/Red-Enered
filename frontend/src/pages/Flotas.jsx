@@ -406,6 +406,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                             </span>
                           </span>
                         );
+                      })()}
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
