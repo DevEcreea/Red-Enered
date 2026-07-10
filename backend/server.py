@@ -2917,7 +2917,7 @@ async def consulta_sunarp_placa(req: Request, placa: str):
     if not placa_clean:
         raise HTTPException(400, "Placa no válida")
         
-    token = "tr_6e6e5d380db1da4432d0c3e57851396a"
+    token = "tr_4f9d763ed120de2849b99dd05e61c67e"
     url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
     
     import urllib.request
