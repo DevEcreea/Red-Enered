@@ -11,11 +11,26 @@ export default function AdminUsers() {
   const [form, setForm] = useState({ email: "", password: "", name: "", role: "administrador", empresa: "" });
   const [err, setErr] = useState("");
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const [a, b] = await Promise.all([api.get("/users"), api.get("/empresas")]);
+        setUsers(a.data);
+        setEmpresas(b.data);
+      } catch (err) {
+        console.error("Error loading AdminUsers:", err);
+      }
+    })();
+  }, []);
+
   const load = async () => {
-    const [a, b] = await Promise.all([api.get("/users"), api.get("/empresas")]);
-    setUsers(a.data); setEmpresas(b.data);
+    try {
+      const [a, b] = await Promise.all([api.get("/users"), api.get("/empresas")]);
+      setUsers(a.data); setEmpresas(b.data);
+    } catch (err) {
+      console.error("Error loading AdminUsers data:", err);
+    }
   };
-  useEffect(() => { load(); }, []);
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");

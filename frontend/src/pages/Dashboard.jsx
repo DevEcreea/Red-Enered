@@ -525,6 +525,8 @@ export default function Dashboard() {
         setData(k.data);
         setAlerts(a.data);
         setOverview(o.data);
+      } catch (err) {
+        console.error("Error loading Dashboard:", err);
       } finally {
         setLoading(false);
       }

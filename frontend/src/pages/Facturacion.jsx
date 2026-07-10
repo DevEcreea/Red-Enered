@@ -55,6 +55,7 @@ export default function Facturacion() {
       api.get("/invoices", { params }),
     ])
       .then(([s, i]) => { setState(s.data); setInvoices(i.data); setPage(1); })
+      .catch((err) => console.error("Error loading Facturacion:", err))
       .finally(() => setLoading(false));
   }, [empresa]);
 

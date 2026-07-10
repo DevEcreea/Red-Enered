@@ -101,8 +101,9 @@ async def _get_current_user(request: Request) -> dict:
 
 async def _require_subsidio(request: Request) -> dict:
     user = await _get_current_user(request)
-    if user["role"] != "cliente_subsidio":
-        raise HTTPException(status_code=403, detail="Solo clientes de subsidio")
+    allowed = ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]
+    if user["role"] not in allowed:
+        raise HTTPException(status_code=403, detail="No tienes acceso al módulo de subsidio")
     return user
 
 

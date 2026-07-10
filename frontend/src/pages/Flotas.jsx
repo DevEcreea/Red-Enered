@@ -7,8 +7,9 @@ import {
   FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
   ChevronDown, Download, Share2, Printer, Columns3, Upload,
   Filter, Calendar, User, Car, ArrowUpDown, Search, X,
-  CheckCircle2, Trash2, Edit2
+  CheckCircle2, Trash2, Edit2, Eye
 } from "lucide-react";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -24,6 +25,15 @@ const CTRL_TYPES = [
 
 
 
+
+const TankIcon = ({ style }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <path d="M4 10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10z"/>
+    <path d="M8 8V4c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v4"/>
+    <path d="M12 2v6"/>
+    <path d="M7 15h10"/>
+  </svg>
+);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function Pill({ label, color, bg }) {
@@ -76,13 +86,19 @@ const inputSt = { width:"100%",height:44,border:"1px solid #E5E7EB",borderRadius
 const selSt = { appearance:"none",backgroundImage:`url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%239ca3af' stroke-width='2'><path d='M4 6l4 4 4-4'/></svg>")`,backgroundRepeat:"no-repeat",backgroundPosition:"right 14px center" };
 
 // ─── Filter selector component ────────────────────────────────────────────────
-function FSel({ label, icon:Icon, grow, children }) {
+function FSel({ label, icon:Icon, grow, value, onChange, options = [] }) {
   return (
-    <div style={{ position:"relative",height:42,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",padding:"0 34px 0 14px",fontSize:14,color:"#4b5563",minWidth:grow?undefined:120,flex:grow?"1":undefined,cursor:"pointer",userSelect:"none" }}>
-      {Icon && <Icon style={{ width:15,height:15,color:"#9ca3af",marginRight:6 }}/>}
-      {label}
-      {children}
-      <ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:16,height:16,color:"#9ca3af" }}/>
+    <div style={{ position:"relative",height:42,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",padding:"0",fontSize:14,minWidth:grow?undefined:120,flex:grow?"1":undefined,cursor:"pointer" }}>
+      {Icon && <Icon style={{ width:15,height:15,color:"#9ca3af",marginLeft:14,marginRight:4 }}/>}
+      <select 
+        value={value} 
+        onChange={onChange}
+        style={{ width:"100%", height:"100%", border:"none", background:"transparent", padding: Icon ? "0 34px 0 6px" : "0 34px 0 14px", appearance:"none", outline:"none", color: value ? "#111827" : "#6b7280", fontWeight: value ? 600 : 400, cursor:"pointer" }}
+      >
+        <option value="">{label}</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:16,height:16,color:"#9ca3af", pointerEvents:"none" }}/>
     </div>
   );
 }
@@ -106,16 +122,22 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
       </button>
       {open && (
         <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
-          {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
-            <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA); }}
-              style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
-              <FileText style={{ width:14,height:14,color:"#8B3DFF" }}/> Descargar Factura
-            </button>
-          )}
           <button onClick={() => { setOpen(false); onEdit(row); }} data-testid={`row-edit-${row.id||row.PLACA}`}
             style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
             <Edit2 style={{ width:14,height:14,color:"#3B82F6" }}/> Editar
           </button>
+          {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
+            <>
+              <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA, row.NUMERO_DOCUMENTO, false); }}
+                style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
+                <Eye style={{ width:14,height:14,color:"#10B981" }}/> Visualizar
+              </button>
+              <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA, row.NUMERO_DOCUMENTO, true); }}
+                style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
+                <Download style={{ width:14,height:14,color:"#8B3DFF" }}/> Descargar
+              </button>
+            </>
+          )}
           <button onClick={()=>{setOpen(false); onDelete(row.id || row._id);}} data-testid={`row-delete-${row.id||row.PLACA}`}
             style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
             <Trash2 style={{ width:14,height:14 }}/> Eliminar
@@ -127,8 +149,40 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
 }
 
 // ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
-function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete, onDownloadPdf }) {
+function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit, onDelete, onDownloadPdf }) {
   const showAhorro = services?.combustible === true;
+  const [filtros, setFiltros] = useState({ empresa:"", placa:"", estacion:"", producto:"" });
+
+  const opts = useMemo(() => {
+    const empresas = new Set();
+    const placas = new Set();
+    const estaciones = new Set();
+    const productos = new Set();
+    rows.forEach(r => {
+      if (r.EMPRESA) empresas.add(r.EMPRESA);
+      if (r.PLACA) placas.add(r.PLACA);
+      if (r.ESTACION) estaciones.add(r.ESTACION);
+      if (r.PRODUCTO) productos.add(r.PRODUCTO);
+    });
+    return {
+      empresa: Array.from(empresas).sort(),
+      placa: Array.from(placas).sort(),
+      estacion: Array.from(estaciones).sort(),
+      producto: Array.from(productos).sort(),
+    };
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter(r => {
+      if (filtros.empresa && r.EMPRESA !== filtros.empresa) return false;
+      if (filtros.placa && r.PLACA !== filtros.placa) return false;
+      if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
+      if (filtros.producto && r.PRODUCTO !== filtros.producto) return false;
+      return true;
+    });
+  }, [rows, filtros]);
+
+  const updFiltro = (k) => (e) => setFiltros(p => ({ ...p, [k]: e.target.value }));
 
   const invalidas = useMemo(() => {
     const list = rows.filter(r => {
@@ -194,11 +248,10 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
           <span style={{ display:"flex",alignItems:"center",gap:8,color:"#6b7280",fontWeight:600,fontSize:13 }}>
             <Filter style={{ width:16,height:16 }}/>FILTROS
           </span>
-          <FSel label="Empresa" grow/>
-          <FSel label="Placa"/>
-          <FSel label="Semana"/>
-          <FSel label="Estación"/>
-          <FSel label="Producto"/>
+          {isAdmin && <FSel label="Empresa" grow value={filtros.empresa} onChange={updFiltro("empresa")} options={opts.empresa} />}
+          <FSel label="Placa" value={filtros.placa} onChange={updFiltro("placa")} options={opts.placa} />
+          <FSel label="Estación" value={filtros.estacion} onChange={updFiltro("estacion")} options={opts.estacion} />
+          <FSel label="Producto" value={filtros.producto} onChange={updFiltro("producto")} options={opts.producto} />
           <div style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:16,color:"#9ca3af" }}>
             {[Share2, Printer, Columns3, Download].map((Ic,i)=>(
               <Ic key={i} style={{ width:18,height:18,cursor:"pointer" }}/>
@@ -218,20 +271,20 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
 
       {/* Table */}
       <div style={{ marginTop:18 }}>
-        <div style={{ overflowX:"auto",borderRadius:14 }}>
+        <div style={{ overflowX:"auto",borderRadius:14, minHeight: 280 }}>
           <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1500 }}>
             <thead>
               <tr style={{ background:HEADER_BG }}>
                 {(showAhorro
-                  ? ["","Placa","Controles","Empresa","Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""]
-                  : ["","Placa","Controles","Empresa","Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Factura","Conductor",""]
-                ).map((h,i,arr)=>(
+                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""]
+                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Factura","Conductor",""]
+                ).filter(h => h !== null).map((h,i,arr)=>(
                   <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0,50).map((r,i)=>{
+              {filteredRows.slice(0,50).map((r,i)=>{
                 const fecha = r.FECHA ? `${r.FECHA}${r.HORA?" "+r.HORA:""}` : "—";
                 const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
                 const galones = parseFloat(r.CANTIDAD_GL||0);
@@ -243,20 +296,40 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
                     <td style={tdSt}><input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/></td>
                     <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{r.PLACA||"—"}</td>
                     <td style={tdSt}>
-                      <span style={{ display:"flex",alignItems:"center",gap:6 }}>
-                        <MapPin style={{ width:15,height:15,color:"#14B8A6" }}/>
-                        <Camera style={{ width:15,height:15,color:"#EF4444" }}/>
-                        {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
-                          <button onClick={() => onDownloadPdf(r.id, r.PLACA, r.NUMERO_DOCUMENTO)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center" }} title={`Descargar Factura ${r.NUMERO_DOCUMENTO || ""}`}>
-                            <Receipt style={{ width:15,height:15,color:"#8B3DFF" }}/>
-                          </button>
-                        ) : (
-                          <Receipt style={{ width:15,height:15,color:"#cbd5e1" }}/>
-                        )}
-                        <CreditCard style={{ width:15,height:15,color:"#3B82F6" }}/>
+                      <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+                        <HoverCard>
+                          <HoverCardTrigger asChild>
+                            <span title="Validación de Ubicación GPS (Estación)" style={{ display:"inline-flex", cursor:"pointer" }}>
+                              <MapPin style={{ width:16,height:16,color:"#10B981" }}/>
+                            </span>
+                          </HoverCardTrigger>
+                          <HoverCardContent side="top" align="center" style={{ width: 400, padding: 16, borderRadius: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.15)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
+                            <div style={{ fontSize: 13, color: "#4b5563", marginBottom: 12, lineHeight: 1.4 }}>
+                              Ubicación informada a <strong>1.16 kilómetros</strong> de la posición obtenida por el GPS (AVL).
+                            </div>
+                            <div style={{ width: "100%", height: 220, borderRadius: 10, background: "#e5e7eb", overflow: "hidden", position: "relative" }}>
+                              <iframe 
+                                title="Mapa"
+                                width="100%" 
+                                height="100%" 
+                                style={{ border:0, pointerEvents:"none" }} 
+                                src={`https://maps.google.com/maps?q=${encodeURIComponent((r.CIUDAD || "Lima") + ", Peru")}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
+                              />
+                            </div>
+                          </HoverCardContent>
+                        </HoverCard>
+                        <span title="Validación de Capacidad de Tanque" style={{ display:"inline-flex", cursor:"pointer" }}>
+                          <TankIcon style={{ width:16,height:16,color:"#EF4444" }}/>
+                        </span>
+                        <span title="Validación de Producto (Combustible)" style={{ display:"inline-flex", cursor:"pointer" }}>
+                          <Fuel style={{ width:16,height:16,color:"#EF4444" }}/>
+                        </span>
+                        <span title="Validación de Transacción / Pago" style={{ display:"inline-flex", cursor:"pointer" }}>
+                          <CreditCard style={{ width:16,height:16,color:"#9ca3af" }}/>
+                        </span>
                       </span>
                     </td>
-                    <td style={tdSt}>{r.EMPRESA||"—"}</td>
+                    {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{ciudadEstacion}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
@@ -273,9 +346,9 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
                     ) : (
                       <td style={tdSt}>
                         {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
-                          <button onClick={() => onDownloadPdf(r.id, r.PLACA, r.NUMERO_DOCUMENTO)} style={{ background: "none", border: "none", color:"#8B3DFF", fontSize:13, textDecoration:"none", fontWeight:600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Descargar"}
-                          </button>
+                          <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Doc Adjunto"}
+                          </span>
                         ) : "—"}
                       </td>
                     )}
@@ -297,7 +370,7 @@ function TabResumen({ rows, totals, services, onOpenNuevaCarga, onEdit, onDelete
           </table>
         </div>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 6px",fontSize:14,color:"#6b7280" }}>
-          <span>Mostrando {Math.min(rows.length,50)} de {rows.length}</span>
+          <span>Mostrando {Math.min(filteredRows.length,50)} de {filteredRows.length}</span>
         </div>
       </div>
     </div>
@@ -694,16 +767,20 @@ export default function Flotas() {
     }
   };
 
-  const handleDownloadPdf = async (id, placa, numDoc) => {
+  const handleDownloadPdf = async (id, placa, numDoc, download = true) => {
     try {
       const r = await api.get(`/consumptions/${id}/download/pdf`, { responseType: "blob" });
       const blob = new Blob([r.data], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Factura_${numDoc || placa || "Combustible"}.pdf`;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      if (download) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Factura_${numDoc || placa || "Combustible"}.pdf`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      } else {
+        window.open(url, "_blank");
+      }
     } catch (err) {
       alert("No se pudo descargar el comprobante para esta carga.");
     }
@@ -733,6 +810,7 @@ export default function Flotas() {
           rows={rows} 
           totals={totals} 
           services={services} 
+          isAdmin={user?.role === "admin_enered"}
           onOpenNuevaCarga={()=>{ setEditCargaData(null); setNuevaCargaOpen(true); }}
           onEdit={handleEdit}
           onDelete={handleDelete}

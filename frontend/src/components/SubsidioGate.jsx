@@ -3,9 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuloBloqueado from "../pages/ModuloBloqueado";
 
 /**
- * Wrapper que muestra un overlay "Completa tu expediente" para usuarios
- * cliente_subsidio que aún no han terminado de subir sus documentos.
- * Para los demás roles deja pasar el contenido sin tocar.
+ * Wrapper que muestra overlays de bloqueo o upsell (Demo).
  */
 export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   const { user } = useAuth();
@@ -15,23 +13,11 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   const expedienteOk = user.expediente_status === "confirmed" || user.expediente_status === "submitted" || user.documentos_completos === true;
   const isAdminEnered = user.role === "admin_enered";
 
-  // Si no es admin_enered y la empresa no tiene activa la plataforma de gestión de flotas,
-  // se le bloquea el acceso a cualquier módulo clásico (excepto el Dashboard / Panel Subsidio).
-  if (!isAdminEnered && user.servicios && !user.servicios.plataforma && titulo !== "Dashboard") {
-    return (
-      <ModuloBloqueado
-        variant="subsidio"
-        titulo={titulo}
-        descripcion="Este módulo de gestión de flotas no está disponible para tu plan de solo subsidio. Contáctanos para migrar al control total."
-        ctaTexto="Ver mi expediente"
-        ctaTo="/subsidio/documentos"
-      />
-    );
-  }
+  if (isAdminEnered) return children;
 
-  // Se reactivó la protección para los clientes con expediente pendiente,
-  // permitiendo únicamente al rol admin_enered saltarse este bloqueo para ver el contenido.
-  if (!isAdminEnered && esSubsidio && !expedienteOk) {
+  // 1. Bloqueo de Expediente Incompleto (Solo para Subsidio)
+  // Si no ha terminado el expediente, NO puede ver nada excepto el Dashboard (y "Mi Flota" que no usa Gated).
+  if (esSubsidio && !expedienteOk && titulo !== "Dashboard") {
     return (
       <ModuloBloqueado
         variant="subsidio"
@@ -41,6 +27,32 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
         ctaTo="/subsidio/documentos"
       />
     );
+  }
+
+  // 2. Lógica de Módulos Premium (Upsell a Demo)
+  // Módulos liberados por defecto si el expediente está OK:
+  const modulosLiberados = ["Dashboard", "Combustible", "Cuenta", "Vehículos", "Documentación"];
+  
+  if (!modulosLiberados.includes(titulo)) {
+    // Verificamos si tiene el servicio específico
+    let tieneAcceso = false;
+
+    if (titulo === "Monitoreo") {
+      tieneAcceso = user.servicios?.gps === true;
+    } else {
+      // Para el resto de módulos (Analytics, Calendario, etc.), requiere "plataforma"
+      tieneAcceso = user.servicios?.plataforma === true;
+    }
+
+    if (!tieneAcceso) {
+      return (
+        <ModuloBloqueado
+          variant="demo"
+          titulo={titulo}
+          descripcion="Este módulo no está incluido en tu plan actual. Descubre todo el potencial de ENERED agendando una demostración gratuita."
+        />
+      );
+    }
   }
 
   return children;

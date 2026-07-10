@@ -22,6 +22,7 @@ import Checklist from "./pages/Checklist";
 import Viajes from "./pages/Viajes";
 import Capacitacion from "./pages/Capacitacion";
 import Soporte from "./pages/Soporte";
+import GestionGastos from "./pages/GestionGastos";
 // Analytics BI submódulos
 import AnalyticsIndex from "./pages/analytics/index";
 import AnalyticsCombustible from "./pages/analytics/Combustible";
@@ -132,7 +133,8 @@ function App() {
           <Route path="/viajes" element={<Gated titulo="Viajes"><Viajes /></Gated>} />
           <Route path="/infracciones" element={<Gated titulo="Infracciones"><Infracciones /></Gated>} />
           <Route path="/vehiculos" element={<Gated titulo="Vehículos"><Vehiculos /></Gated>} />
-          <Route path="/soporte" element={<Shell><Soporte /></Shell>} />
+          <Route path="/gestion-gastos" element={<Gated titulo="Gestión Gastos"><GestionGastos /></Gated>} />
+          <Route path="/soporte" element={<Gated titulo="Soporte"><Soporte /></Gated>} />
           <Route path="/admin/users" element={<Shell roles={["admin_enered"]}><AdminUsers /></Shell>} />
           <Route path="/admin/upload" element={<Shell roles={["admin_enered"]}><AdminUpload /></Shell>} />
           <Route path="/admin/qr" element={<Shell roles={["admin_enered"]}><AdminQRUpload /></Shell>} />

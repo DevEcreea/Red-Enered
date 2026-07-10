@@ -10,6 +10,7 @@ import {
   PieChart, Pie,
 } from "recharts";
 import { api } from "../lib/api";
+import TrackerSubsidio from "../components/TrackerSubsidio";
 
 const STAGE_ICONS = {
   solicitud_enviada:   FileCheck2,
@@ -32,6 +33,8 @@ export default function DashboardSubsidioView() {
     try {
       const { data } = await api.get("/subsidio/dashboard-data");
       setData(data);
+    } catch (err) {
+      console.error("Error loading Subsidio Dashboard:", err);
     } finally {
       if (silent) setRefreshing(false);
       setLoading(false);
@@ -67,19 +70,11 @@ export default function DashboardSubsidioView() {
 
   const donutData = useMemo(() => {
     if (!top_estaciones || top_estaciones.length === 0) {
-      return [
-        { name: "Trujillo", value: 61, color: "#8039F4" },
-        { name: "Chiclayo", value: 24, color: "#A78BFA" },
-        { name: "Otras", value: 15, color: "#E9D5FF" },
-      ];
+      return [];
     }
     const total = top_estaciones.reduce((sum, item) => sum + (item.importe || 0), 0);
     if (total === 0) {
-      return [
-        { name: "Trujillo", value: 61, color: "#8039F4" },
-        { name: "Chiclayo", value: 24, color: "#A78BFA" },
-        { name: "Otras", value: 15, color: "#E9D5FF" },
-      ];
+      return [];
     }
     const sorted = [...top_estaciones].sort((a, b) => b.importe - a.importe);
     const first = sorted[0];
@@ -250,7 +245,7 @@ export default function DashboardSubsidioView() {
       )}
 
       {/* FILA 1 — Stages */}
-      <StagesRow stages={stages} user={data.user} kpis={kpis} />
+      <TrackerSubsidio />
 
       {/* MAIN 3-COLUMN CONTENT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -345,11 +340,9 @@ export default function DashboardSubsidioView() {
             <div>
               <span className="text-sm font-bold text-neutral-600 block mb-2">Unidades que más gastan</span>
               <div className="space-y-2">
-                {(top_unidades.length > 0 ? top_unidades : [
-                  { placa: "V18-209", importe: 14820 },
-                  { placa: "T2H-841", importe: 12440 },
-                  { placa: "T2H-842", importe: 10510 }
-                ]).slice(0, 3).map((item, idx) => {
+                {top_unidades.length === 0 ? (
+                  <div className="text-xs text-neutral-400 py-2">Sin datos</div>
+                ) : top_unidades.slice(0, 3).map((item, idx) => {
                   const getMeta = (p, i) => {
                     if (p === "V18-209") return "N3·2014";
                     if (p === "T2H-841") return "N3·2015";
@@ -373,11 +366,9 @@ export default function DashboardSubsidioView() {
             <div>
               <span className="text-sm font-bold text-neutral-600 block mb-2">Estaciones donde más cargas</span>
               <div className="space-y-2">
-                {(top_estaciones.length > 0 ? top_estaciones : [
-                  { estacion: "Repsol - Av. Industrial", importe: 48200 },
-                  { estacion: "Primax - Paname. N.", importe: 29900 },
-                  { estacion: "Petroperú - S. Lima", importe: 23100 }
-                ]).slice(0, 3).map((item, idx) => {
+                {top_estaciones.length === 0 ? (
+                  <div className="text-xs text-neutral-400 py-2">Sin datos</div>
+                ) : top_estaciones.slice(0, 3).map((item, idx) => {
                   const cleanEst = item.estacion.length > 16 ? item.estacion.slice(0, 16) + "…" : item.estacion;
                   return (
                     <div key={idx} className="flex items-center justify-between py-1.5 border-b border-neutral-50/50">

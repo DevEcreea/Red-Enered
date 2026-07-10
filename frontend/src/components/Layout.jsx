@@ -21,23 +21,22 @@ const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contab
 
 const MENU = [
   { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
-  { to: "/dashboard", label: "Dashboard", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
-  { to: "/dashboard-subsidio", label: "Panel Subsidio", iconImg: `${ICON_BASE}/dashboard.png`, icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
-  { to: "/analitica", label: "Analytics BI", iconImg: `${ICON_BASE}/analitica.png`, icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
-  { to: "/monitoreo", label: "Monitoreo", iconImg: `${ICON_BASE}/centro-monitoreo.png`, icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
-  { to: "/flotas", label: "Combustible", iconImg: `${ICON_BASE}/flotas.png`, icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
-  { to: "/facturacion", label: "Cuenta", iconImg: `${ICON_BASE}/estado-cuenta.png`, icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
-  { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ALL_REGULAR_ROLES, testid: "nav-gestion-gastos", disabled: true },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
+  { to: "/dashboard-subsidio", label: "Panel Subsidio", icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
+  { to: "/analitica", label: "Analytics BI", icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
+  { to: "/monitoreo", label: "Monitoreo", icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
+  { to: "/flotas", label: "Combustible", icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
+  { to: "/facturacion", label: "Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
+  { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ALL_REGULAR_ROLES, testid: "nav-gestion-gastos" },
   { to: "/calendario", label: "Calendario", icon: Calendar, roles: ALL_REGULAR_ROLES, testid: "nav-calendario" },
   { to: "/tickets", label: "Tickets", icon: Ticket, roles: ALL_REGULAR_ROLES, testid: "nav-tickets" },
-  { to: "/mantenimiento", label: "Mantenimiento", iconImg: `${ICON_BASE}/mantenimiento.png`, icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
+  { to: "/mantenimiento", label: "Mantenimiento", icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
   { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist" },
-  { to: "/infracciones", label: "Infracciones", iconImg: `${ICON_BASE}/infracciones.png`, icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
+  { to: "/infracciones", label: "Infracciones", icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
   { to: "/vehiculos", label: "Vehículos", icon: Car, roles: ALL_REGULAR_ROLES, testid: "nav-vehiculos" },
-  { to: "/neumaticos", label: "Neumáticos", iconImg: `${ICON_BASE}/neumaticos.png`, icon: Disc, roles: ALL_REGULAR_ROLES, testid: "nav-neumaticos" },
+  { to: "/neumaticos", label: "Neumáticos", icon: Disc, roles: ALL_REGULAR_ROLES, testid: "nav-neumaticos" },
   { to: "/viajes", label: "Viajes", icon: Route, roles: ALL_REGULAR_ROLES, testid: "nav-viajes" },
-  { to: "/documentacion", label: "Documentación", iconImg: `${ICON_BASE}/documentacion.png`, icon: FileText, roles: ALL_REGULAR_ROLES, testid: "nav-documentacion" },
-  { to: "/soporte", label: "Soporte", iconImg: `${ICON_BASE}/soporte.png`, icon: LifeBuoy, roles: ALL_REGULAR_ROLES, testid: "nav-soporte" },
+  { to: "/documentacion", label: "Documentación", icon: FileText, roles: ALL_REGULAR_ROLES, testid: "nav-documentacion" },
 ];
 
 const ADMIN_ITEMS = [
@@ -93,7 +92,7 @@ function SidebarLink({ item, onClick, isCollapsed }) {
           style={active ? { filter: "brightness(0) saturate(100%) invert(78%) sepia(60%) saturate(427%) hue-rotate(135deg) brightness(102%) contrast(98%)" } : { filter: "brightness(0) invert(1)", opacity: 0.9 }}
         />
       ) : (
-        <Ic className={`w-5 h-5 flex-shrink-0 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={1.75} />
+        <Ic className={`w-5 h-5 flex-shrink-0 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={2} />
       )}
       <span className={`text-sm font-semibold flex-1 transition-all duration-300 whitespace-nowrap overflow-hidden ${
         isCollapsed ? "opacity-0 w-0 pointer-events-none" : "opacity-100"
@@ -239,13 +238,8 @@ export default function Layout({ children }) {
   if (!user) return null;
 
   const items = MENU.filter((i) => {
-    // Si la empresa no tiene el servicio de plataforma activo (es solo cliente_subsidio puro),
-    // ocultamos todos los módulos clásicos de la plataforma excepto los de subsidio.
-    if (user.role !== "admin_enered" && user?.servicios && !user.servicios.plataforma) {
-      if (i.to !== "/subsidio/documentos" && i.to !== "/dashboard-subsidio") {
-        return false;
-      }
-    }
+    // Eliminamos la restricción de ocultar items del menú para que todos los clientes 
+    // (incluso los de solo subsidio) vean la plataforma completa y puedan recibir los upsells (Demos).
 
     if (!i.roles.includes(user.role)) {
       // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
@@ -260,6 +254,14 @@ export default function Layout({ children }) {
     }
     // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
     if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
+
+    // Condición: Ningún usuario de empresa ve Dashboard a menos que tengan el servicio plataforma
+    if (i.to === "/dashboard" && user.role !== "admin_enered") {
+      if (!user?.servicios?.plataforma) {
+        return false;
+      }
+    }
+
     return true;
   });
   const isAdmin = user.role === "admin_enered";
@@ -289,9 +291,17 @@ export default function Layout({ children }) {
           }`}
         />
         {isCollapsed && (
-          <span className="absolute text-white font-cabinet font-black text-2xl tracking-wider animate-fade-in">
-            E
-          </span>
+          <svg viewBox="0 0 24 24" fill="currentColor" className="absolute w-7 h-7 text-white animate-fade-in">
+            <rect x="4" y="4" width="4" height="4" rx="1" />
+            <rect x="10" y="4" width="4" height="4" rx="1" />
+            <rect x="16" y="4" width="4" height="4" rx="1" />
+            <rect x="4" y="10" width="4" height="4" rx="1" />
+            <rect x="10" y="10" width="4" height="4" rx="1" />
+            <rect x="16" y="10" width="4" height="4" rx="1" />
+            <rect x="4" y="16" width="4" height="4" rx="1" />
+            <rect x="10" y="16" width="4" height="4" rx="1" />
+            <rect x="16" y="16" width="4" height="4" rx="1" />
+          </svg>
         )}
       </div>
 

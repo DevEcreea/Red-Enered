@@ -58,6 +58,8 @@ export default function SubsidioDocumentos() {
         const next = pickNextEtapa(data);
         if (next) setActiveEtapa(next);
       }
+    } catch (err) {
+      console.error("Error loading SubsidioDocumentos:", err);
     } finally {
       setLoading(false);
     }
@@ -511,12 +513,14 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
   const load = async () => {
     try {
       const [{ data: prev }, { data: conf }] = await Promise.all([
-        api.get("/subsidio/invoices/preview"),
+        api.get("/subsidio/invoices/preview").catch(() => ({ data: { items: [], vehicles: [] } })),
         api.get("/subsidio/invoices/confirmed").catch(() => ({ data: { items: [] } })),
       ]);
       setItems(prev.items || []);
       setVehicles(prev.vehicles || []);
       setConfirmedList(conf.items || []);
+    } catch (err) {
+      console.error("Error loading invoices data:", err);
     } finally {
       setLoading(false);
     }

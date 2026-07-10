@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 
 const SERVICE_META = {
-  plataforma:  { label: "Plataforma", color: "#8B3DFF", icon: Server,     desc: "Acceso a la plataforma web (siempre activo)" },
+  plataforma:  { label: "Plataforma", color: "#8B3DFF", icon: Server,     desc: "Acceso a la plataforma web" },
   combustible: { label: "Combustible", color: "#10B981", icon: Fuel,      desc: "Consume combustible con ENERED (data automática, ahorro real)" },
   gps:         { label: "GPS · Wialon", color: "#3B82F6", icon: MapPin,   desc: "Monitoreo satelital con Wialon (mapa + KM + sensores)" },
   subsidio:    { label: "Subsidio DU 004", color: "#F59E0B", icon: ShieldCheck, desc: "Expediente DU 004-2026: Mi Flota + Dashboard Subsidio" },
@@ -21,6 +21,7 @@ export default function AdminEmpresas() {
   const [wialonEmpresa, setWialonEmpresa] = useState(null); // wialon modal
   const [deleteEmpresa, setDeleteEmpresa] = useState(null); // delete confirm modal
   const [finanzasEmpresa, setFinanzasEmpresa] = useState(null); // finanzas modal
+  const [createEmpresa, setCreateEmpresa] = useState(false); // crear modal
 
   async function load() {
     setLoading(true);
@@ -46,7 +47,10 @@ export default function AdminEmpresas() {
             Configura qué servicios (Plataforma / Combustible / GPS) tiene cada empresa cliente, y el tipo de cliente.
           </div>
         </div>
-        <button onClick={load} style={btn.secondary}><RefreshCw style={{ width: 15, height: 15 }} />Refrescar</button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={load} style={btn.secondary}><RefreshCw style={{ width: 15, height: 15 }} />Refrescar</button>
+          <button onClick={() => setCreateEmpresa(true)} style={btn.primary}><Plus style={{ width: 15, height: 15 }} />Crear Empresa</button>
+        </div>
       </div>
 
       <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 8px rgba(0,0,0,.05)", overflow: "hidden" }}>
@@ -154,6 +158,12 @@ export default function AdminEmpresas() {
           empresa={finanzasEmpresa}
           onClose={() => setFinanzasEmpresa(null)}
           onSaved={() => { setFinanzasEmpresa(null); load(); }}
+        />
+      )}
+      {createEmpresa && (
+        <CrearEmpresaModal
+          onClose={() => setCreateEmpresa(false)}
+          onSaved={() => { setCreateEmpresa(false); load(); }}
         />
       )}
     </div>
@@ -300,7 +310,7 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
         <label style={styles.label}>Servicios activos</label>
         {Object.entries(SERVICE_META).map(([key, meta]) => {
           const Icon = meta.icon;
-          const disabled = key === "plataforma";  // plataforma siempre true
+          const disabled = false;
           const active = servicios[key];
           return (
             <div key={key} data-testid={`servicio-${key}`}
@@ -316,7 +326,7 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
                 <Icon style={{ width: 20, height: 20, color: meta.color }} />
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, color: "#111827" }}>{meta.label}{disabled && <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>(siempre activo)</span>}</div>
+                <div style={{ fontWeight: 700, color: "#111827" }}>{meta.label}</div>
                 <div style={{ fontSize: 12.5, color: "#6b7280" }}>{meta.desc}</div>
               </div>
               <div style={{
@@ -643,3 +653,101 @@ const btn = {
 const pill = {
   base: { display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 11.5, fontWeight: 600 },
 };
+
+// --- MODAL CREAR EMPRESA ---
+function CrearEmpresaModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({ empresa: "", ruc: "", tipo_cliente: "enered", plan: "tracking" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save() {
+    if (!form.empresa.trim()) return setErr("El nombre de la empresa es requerido");
+    setSaving(true);
+    setErr("");
+    try {
+      await api.post("/empresas-config", form);
+      toast.success("Empresa creada con éxito");
+      onSaved();
+    } catch (e) {
+      setErr(e.response?.data?.detail || "Error al crear la empresa");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose} testid="modal-crear-empresa">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".08em", color: "#8B3DFF", textTransform: "uppercase" }}>Nueva Empresa</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#111827" }}>Crear Empresa</div>
+        </div>
+        <button onClick={onClose} style={btn.close}><X style={{ width: 22, height: 22 }} /></button>
+      </div>
+
+      <div style={{ display: "grid", gap: 14 }}>
+        <div>
+          <label style={styles.label}>Nombre de la Empresa</label>
+          <input
+            type="text"
+            value={form.empresa}
+            onChange={(e) => setForm({ ...form, empresa: e.target.value })}
+            style={styles.input}
+            placeholder="Ej. Mi Empresa S.A.C."
+          />
+        </div>
+        <div>
+          <label style={styles.label}>RUC (Opcional)</label>
+          <input
+            type="text"
+            value={form.ruc}
+            onChange={(e) => setForm({ ...form, ruc: e.target.value })}
+            style={styles.input}
+            placeholder="Ej. 20123456789"
+          />
+        </div>
+        <div>
+          <label style={styles.label}>Tipo de Cliente</label>
+          <select
+            value={form.tipo_cliente}
+            onChange={(e) => setForm({ ...form, tipo_cliente: e.target.value })}
+            style={{ ...styles.input, cursor: "pointer" }}
+          >
+            <option value="enered">ENERED (Regular)</option>
+            <option value="subsidio">Subsidio DU 004</option>
+          </select>
+        </div>
+        <div>
+          <label style={styles.label}>Plan</label>
+          <select
+            value={form.plan}
+            onChange={(e) => setForm({ ...form, plan: e.target.value })}
+            style={{ ...styles.input, cursor: "pointer" }}
+          >
+            <option value="tracking">Tracking</option>
+            <option value="advanced">Advanced</option>
+            <option value="integral">Integral</option>
+          </select>
+        </div>
+      </div>
+
+      {err && (
+        <div style={{ marginTop: 12, padding: "10px 14px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 13, color: "#991B1B" }}>
+          {err}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+        <button onClick={onClose} style={btn.secondary}>Cancelar</button>
+        <button
+          onClick={save}
+          disabled={saving}
+          style={{ ...btn.primary, opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} /> : <Save style={{ width: 16, height: 16 }} />}
+          Crear
+        </button>
+      </div>
+    </Modal>
+  );
+}

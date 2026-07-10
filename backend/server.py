@@ -362,8 +362,10 @@ async def delete_user(uid: str, user: dict = Depends(require_roles("admin_enered
 
 @api.get("/empresas")
 async def list_empresas(user: dict = Depends(get_current_user)):
-    empresas = await db.consumptions.distinct("EMPRESA")
-    return sorted([e for e in empresas if e])
+    consumptions_empresas = await db.consumptions.distinct("EMPRESA")
+    config_empresas = await db.empresas_config.distinct("empresa")
+    todas = set((consumptions_empresas or []) + (config_empresas or []))
+    return sorted([e for e in todas if e])
 
 
 # ---------- Consumptions ----------
@@ -872,6 +874,11 @@ async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(requir
         doc["created_at"] = doc["updated_at"]
         if "servicios" not in doc:
             doc["servicios"] = dict(_svc.DEFAULT_SERVICIOS)
+            # Default "solo subsidio" clients without plataforma
+            if doc.get("tipo_cliente") == "subsidio":
+                doc["servicios"]["plataforma"] = False
+                doc["servicios"]["combustible"] = False
+                doc["servicios"]["subsidio"] = True
         if "tipo_cliente" not in doc:
             doc["tipo_cliente"] = _svc.DEFAULT_TIPO_CLIENTE
         await db.empresas_config.insert_one(doc)
