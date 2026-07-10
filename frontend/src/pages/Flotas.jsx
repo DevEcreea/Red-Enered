@@ -150,6 +150,7 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
 
 // ── TAB: RESUMEN ──────────────────────────────────────────────────────────────
 function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit, onDelete, onDownloadPdf }) {
+  const { user } = useAuth();
   const showAhorro = services?.combustible === true;
   const [filtros, setFiltros] = useState({ empresa:"", placa:"", estacion:"", producto:"" });
 
