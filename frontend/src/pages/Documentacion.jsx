@@ -140,6 +140,8 @@ export default function Documentacion() {
   const [loading, setLoading]   = useState(true);
   const [empresaFiltro, setEmpresaFiltro] = useState("");
   const [empresas, setEmpresas] = useState([]);
+  const [vehiculos, setVehiculos] = useState([]);
+  const [expandedVeh, setExpandedVeh] = useState({});
 
   const [templates, setTemplates] = useState(TEMPLATES_INIT);
   const [verArch, setVerArch]   = useState(false);
@@ -177,6 +179,17 @@ export default function Documentacion() {
         mergedDocs = [...mergedDocs, ...SEED.Viajes];
       }
       setDocs(mergedDocs);
+
+      // Fetch global vehiculos to populate the Vehículos tab accordion
+      try {
+        const urlVeh = user?.role === "admin_enered" && empresaFiltro
+          ? `/vehiculos?empresa=${encodeURIComponent(empresaFiltro)}`
+          : "/vehiculos";
+        const resVeh = await api.get(urlVeh);
+        setVehiculos(resVeh.data || []);
+      } catch (errVeh) {
+        console.error("Error loading vehicles:", errVeh);
+      }
     } catch (err) {
       console.error("Error loading documents:", err);
     } finally {
@@ -414,7 +427,269 @@ export default function Documentacion() {
       {/* TABLE */}
       <div style={{ background:"#fff",border:"1px solid #F0F0F3",borderRadius:16,boxShadow:"0 1px 2px rgba(0,0,0,.04)",overflow:"hidden" }}>
         <div style={{ overflowX:"auto" }}>
-          {!isTemplate ? (
+          {!isTemplate && tab === "Vehículos" ? (() => {
+            // ── VEHÍCULOS ACCORDION ────────────────────────────────────────
+            const SLOTS = [
+              "Tarjeta de propiedad",
+              "SOAT",
+              "Revisión técnica",
+              "TUC",
+              "Póliza",
+            ];
+
+            // Build a lookup: placa → { slotName → doc }
+            const docsByPlaca = {};
+            docs.filter(d => d.tipo === "Vehículos").forEach(d => {
+              const pl = (d.placa || "").toUpperCase();
+              if (!pl) return;
+              if (!docsByPlaca[pl]) docsByPlaca[pl] = {};
+              // match slot by doc name (case-insensitive fuzzy)
+              SLOTS.forEach(slot => {
+                const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g,"");
+                if (norm(d.doc || "").includes(norm(slot))) {
+                  docsByPlaca[pl][slot] = d;
+                }
+              });
+            });
+
+            // List of vehicles: from vehiculos state, fallback to placas from docs
+            let vehList = vehiculos.length > 0 ? vehiculos : [];
+            if (vehList.length === 0) {
+              const placas = [...new Set(docs.filter(d => d.tipo === "Vehículos" && d.placa).map(d => d.placa.toUpperCase()))];
+              vehList = placas.map(pl => ({ id: pl, placa: pl, empresa: "", tipo: "" }));
+            }
+
+            if (loading) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ padding:"40px",textAlign:"center",color:"#8B3DFF",fontWeight:600,fontSize:14 }}>
+                    <span style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8 }}>
+                      <Loader2 className="w-5 h-5 animate-spin"/> Cargando...
+                    </span>
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            if (vehList.length === 0) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ textAlign:"center",padding:"40px",fontSize:13,color:"#9ca3af" }}>
+                    No hay vehículos registrados. Agrega unidades en el módulo de Flotas.
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            const thSt2 = { ...thSt, fontSize:11.5, padding:"12px 14px" };
+
+            return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
+                <thead>
+                  <tr style={{ background:"#241B4A" }}>
+                    {["","TIPO","PLACA","EMPRESA","DOCUMENTO","ESTADO","EMISIÓN","VENCIMIENTO","ATRASO","CREADO POR / EL","ACCIONES"].map((h,i)=>(
+                      <th key={i} style={thSt2}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {vehList.map((v, vi) => {
+                    const pl = (v.placa || "").toUpperCase();
+                    const isOpen = !!expandedVeh[pl];
+                    const slotDocs = docsByPlaca[pl] || {};
+                    const vigentes = SLOTS.filter(s => slotDocs[s]).length;
+                    const pendientes = SLOTS.length - vigentes;
+
+                    return (
+                      <React.Fragment key={pl}>
+                        {/* ── VEHICLE HEADER ROW ── */}
+                        <tr
+                          style={{
+                            borderTop: vi === 0 ? "none" : "1px solid #E5E7EB",
+                            background: isOpen ? "#F5F3FF" : "#fff",
+                            cursor: "pointer",
+                            transition: "background .15s",
+                          }}
+                          onClick={() => setExpandedVeh(p => ({ ...p, [pl]: !p[pl] }))}
+                          onMouseEnter={e => { if(!isOpen) e.currentTarget.style.background="#F9FAFB"; }}
+                          onMouseLeave={e => { if(!isOpen) e.currentTarget.style.background="#fff"; }}
+                        >
+                          {/* chevron */}
+                          <td style={{ ...tdSt, width:36, textAlign:"center", color:"#8B3DFF" }}>
+                            <span style={{ display:"inline-flex", transform: isOpen?"rotate(180deg)":"rotate(0deg)", transition:"transform .2s" }}>
+                              <ChevronDown style={{ width:16,height:16 }}/>
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", whiteSpace:"nowrap", fontSize:12.5 }}>
+                            {v.tipo || "Vehículo"}
+                          </td>
+                          <td style={{ ...tdSt, fontWeight:700, color:"#1f2937", fontSize:13 }}>
+                            <span style={{ display:"inline-flex",alignItems:"center",gap:6 }}>
+                              <Car style={{ width:14,height:14,color:"#8B3DFF" }}/>
+                              {pl}
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{v.empresa || "—"}</td>
+                          {/* span remaining cols with summary */}
+                          <td colSpan={7} style={{ ...tdSt }}>
+                            <span style={{ display:"flex",alignItems:"center",gap:10 }}>
+                              <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
+                                <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
+                                {vigentes} Vigente{vigentes!==1?"s":""}
+                              </span>
+                              {pendientes > 0 && (
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"3px 10px",borderRadius:999 }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:"#64748B",display:"inline-block" }}/>
+                                  {pendientes} Pendiente{pendientes!==1?"s":""}
+                                </span>
+                              )}
+                              <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{SLOTS.length} documentos</span>
+                            </span>
+                          </td>
+                        </tr>
+
+                        {/* ── DOCUMENT SLOT ROWS (accordion) ── */}
+                        {isOpen && SLOTS.map((slot, si) => {
+                          const d = slotDocs[slot];
+                          const hasdoc = !!d;
+                          const menuKey = `${pl}-${slot}`;
+                          const menuOpen = openMenu === menuKey;
+
+                          // Determine status
+                          let est = "Pendiente";
+                          let atraso = "—";
+                          if (hasdoc) {
+                            est = d.est || "Vigente";
+                            atraso = d.atr || "—";
+                          }
+                          const estStyle = {
+                            Vigente:   { color:"#059669", bg:"#ECFDF5" },
+                            Vencido:   { color:"#DC2626", bg:"#FEF2F2" },
+                            Próximo:   { color:"#D97706", bg:"#FFFBEB" },
+                            Pendiente: { color:"#64748B", bg:"#F1F5F9" },
+                            Archivado: { color:"#64748B", bg:"#F1F5F9" },
+                          }[est] || { color:"#64748B", bg:"#F1F5F9" };
+
+                          return (
+                            <tr
+                              key={slot}
+                              style={{
+                                borderTop:"1px solid #EEF0F2",
+                                background: si%2===0 ? "#FDFCFF" : "#FAF9FF",
+                                transition:"background .12s",
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background="#F1EAFF"}
+                              onMouseLeave={e => e.currentTarget.style.background= si%2===0?"#FDFCFF":"#FAF9FF"}
+                            >
+                              {/* indent spacer */}
+                              <td style={{ ...tdSt, width:36, borderLeft:"3px solid #8B3DFF" }}/>
+                              {/* tipo col */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>Vehículos</td>
+                              {/* placa */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{pl}</td>
+                              {/* empresa */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{v.empresa || "—"}</td>
+                              {/* documento */}
+                              <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:13 }}>
+                                <span style={{ display:"flex",alignItems:"center",gap:7 }}>
+                                  <FileText style={{ width:14,height:14,color: hasdoc?"#8B3DFF":"#9ca3af" }}/>
+                                  {slot}
+                                </span>
+                              </td>
+                              {/* estado */}
+                              <td style={tdSt}>
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:estStyle.color,background:estStyle.bg,whiteSpace:"nowrap" }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:estStyle.color,display:"inline-block" }}/>
+                                  {hasdoc ? est : "Pendiente de cargar"}
+                                </span>
+                              </td>
+                              {/* emisión */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.emi || "—") : "—"}</td>
+                              {/* vencimiento */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.ven || "—") : "—"}</td>
+                              {/* atraso */}
+                              <td style={{ ...tdSt, fontSize:12.5, whiteSpace:"nowrap", color: est==="Vencido"?"#DC2626":"#9ca3af", fontWeight: est==="Vencido"?600:400 }}>
+                                {atraso}
+                              </td>
+                              {/* creado por */}
+                              <td style={tdSt}>
+                                {hasdoc ? (
+                                  <>
+                                    <div style={{ color:"#374151",fontSize:12.5 }}>{d.por || "—"}</div>
+                                    <div style={{ color:"#9ca3af",fontSize:11 }}>{d.el || ""}</div>
+                                  </>
+                                ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                              </td>
+                              {/* acciones */}
+                              <td style={{ ...tdSt, position:"relative" }}>
+                                <button
+                                  onClick={() => setOpenMenu(menuOpen ? null : menuKey)}
+                                  style={{ width:30,height:30,border:"none",background:"none",color:"#6b7280",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
+                                  onMouseEnter={e=>e.currentTarget.style.background="#F3F4F6"}
+                                  onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                >
+                                  <MoreHorizontal style={{ width:16,height:16 }}/>
+                                </button>
+                                {menuOpen && (
+                                  <div style={{ position:"absolute",right:8,top:44,width:230,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"6px 0",zIndex:40 }}>
+                                    {!hasdoc && (
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ placa: pl, doc: slot }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#8B3DFF" }}/> Cargar documento
+                                      </button>
+                                    )}
+                                    {hasdoc && (<>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Eye style={{ width:15,height:15,color:"#9ca3af" }}/> Visualizar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDownload(d.id, d.filename); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Download style={{ width:15,height:15,color:"#9ca3af" }}/> Descargar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ placa: pl, doc: slot, emi: d.emi, ven: d.ven, ref: d.ref, desc: d.desc }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#9ca3af" }}/> Editar / reemplazar
+                                      </button>
+                                      <div style={{ height:1,background:"#F3F4F6",margin:"4px 0" }}/>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDelete(d.id); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Trash2 style={{ width:15,height:15,color:"#DC2626" }}/> Eliminar documento
+                                      </button>
+                                    </>)}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })() : !isTemplate ? (
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1120 }}>
               <thead>
                 <tr style={{ background:TH }}>
@@ -427,7 +702,7 @@ export default function Documentacion() {
                 {loading ? (
                   <tr>
                     <td colSpan={10} style={{ padding: "40px 16px", textAlign: "center" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "center", gap: 8, color: "#8B3DFF", fontWeight: 600, fontSize: 14 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "#8B3DFF", fontWeight: 600, fontSize: 14 }}>
                         <Loader2 className="w-5 h-5 animate-spin" /> Cargando documentos...
                       </div>
                     </td>
@@ -450,9 +725,7 @@ export default function Documentacion() {
                       <td style={{ ...tdSt,fontWeight:600,color:"#374151",whiteSpace:"nowrap" }}>{d.id.substring(0,8)}</td>
                       <td style={{ ...tdSt,color:"#6b7280",whiteSpace:"nowrap" }}>{d.tipo}</td>
                       <td style={{ ...tdSt,color:"#374151",fontWeight:600 }}>{d.placa || "—"}</td>
-                      <td style={{ ...tdSt,color:"#374151",fontWeight:500 }}>
-                        {d.doc}
-                      </td>
+                      <td style={{ ...tdSt,color:"#374151",fontWeight:500 }}>{d.doc}</td>
                       <td style={tdSt}>
                         <div style={{ color:"#374151",fontSize:12.5 }}>{d.por}</div>
                         <div style={{ color:"#9ca3af",fontSize:11 }}>{d.el}</div>
@@ -512,8 +785,7 @@ export default function Documentacion() {
                 })}
               </tbody>
             </table>
-          ) : (
-            /* PLANTILLAS TABLE */
+          ) : isTemplate ? (
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:760 }}>
               <thead>
                 <tr style={{ background:TH }}>
@@ -546,7 +818,7 @@ export default function Documentacion() {
                 ))}
               </tbody>
             </table>
-          )}
+          ) : null}
         </div>
         {/* Pager */}
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",height:48,borderTop:"1px solid #F3F4F6",fontSize:12.5,color:"#6B7280" }}>

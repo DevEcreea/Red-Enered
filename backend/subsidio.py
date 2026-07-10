@@ -771,7 +771,7 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
         import ssl
         import asyncio
         
-        token = "tr_6e6e5d380db1da4432d0c3e57851396a"
+        token = "tr_4f9d763ed120de2849b99dd05e61c67e"
         placa_clean = placa.replace("-", "").upper()
         url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
         
