@@ -195,10 +195,44 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
     return { count: list.length, monto };
   }, [rows]);
 
+  const kmGalVal = useMemo(() => {
+    const byPlaca = {};
+    rows.forEach(r => {
+      const placa = (r.PLACA || "").toUpperCase().trim();
+      if (!placa) return;
+      const km = parseFloat(r.KILOMETRAJE || 0);
+      const gl = parseFloat(r.CANTIDAD_GL || 0);
+      if (km > 0 && gl > 0) {
+        if (!byPlaca[placa]) byPlaca[placa] = { kms: [], galones: 0 };
+        byPlaca[placa].kms.push(km);
+        byPlaca[placa].galones += gl;
+      }
+    });
+
+    let totalDist = 0;
+    let totalGal = 0;
+    Object.values(byPlaca).forEach(d => {
+      if (d.kms.length >= 2) {
+        const maxKm = Math.max(...d.kms);
+        const minKm = Math.min(...d.kms);
+        const dist = maxKm - minKm;
+        if (dist > 0) {
+          totalDist += dist;
+          totalGal += d.galones;
+        }
+      }
+    });
+
+    if (totalGal > 0) {
+      return `${(totalDist / totalGal).toFixed(2)}`;
+    }
+    return "—";
+  }, [rows]);
+
   const kpiValues = {
     gasto:    `S/ ${(totals.gasto || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     galones:  `${Math.round(totals.gal || 0).toLocaleString("es-PE")}`,
-    kmGal:    "—",   // TODO: cuando haya kilometraje entre cargas consecutivas por placa
+    kmGal:    kmGalVal,
     costoGal: totals.gal > 0 ? `S/ ${(totals.gasto / totals.gal).toFixed(2)}` : "—",
   };
 
