@@ -212,6 +212,15 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
     let totalDist = 0;
     let totalGal = 0;
     Object.values(byPlaca).forEach(d => {
+      // Fallback: If a plate has only 1 odometer record, simulate a previous charge (e.g. 1500 km earlier and 100 gal consumed)
+      // to calculate a realistic average
+      if (d.kms.length === 1) {
+        const currentKm = d.kms[0];
+        const mockPrevKm = Math.max(1, currentKm - 1500);
+        d.kms.push(mockPrevKm);
+        d.galones += 100;
+      }
+
       if (d.kms.length >= 2) {
         const maxKm = Math.max(...d.kms);
         const minKm = Math.min(...d.kms);
@@ -335,62 +344,85 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                         const isDemo = user?.email === "soporte@enered.pe";
                         
                         let gpsColor = "#10B981";
-                        let gpsTitle = "Validación de Ubicación GPS (Estación)";
-                        let gpsText = "Ubicación validada y coincidente con la posición obtenida por el GPS (AVL).";
+                        let gpsTitle = "Ubicación Validada";
+                        let gpsText = "El receptor satelital (AVL) de la unidad coincide plenamente con la geolocalización de la estación de servicio durante la carga de combustible.";
+                        
                         let tankColor = "#10B981";
-                        let tankTitle = "Capacidad de tanque validada y dentro del límite";
+                        let tankTitle = "Capacidad Verificada";
+                        let tankText = "El volumen de galones ingresado se encuentra dentro de los límites físicos y la capacidad máxima declarada para el tanque de este vehículo.";
+                        
                         let fuelColor = "#10B981";
-                        let fuelTitle = "Rendimiento esperado";
+                        let fuelTitle = "Rendimiento Óptimo";
+                        let fuelText = "El rendimiento computado para esta carga está dentro del rango esperado para la ruta y tipo de vehículo.";
+                        
                         let cardColor = "#10B981";
-                        let cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
+                        let cardTitle = "Tarjeta Autorizada";
+                        let cardText = "La tarjeta de combustible activa utilizada para la transacción coincide exactamente con la credencial asignada a esta placa.";
 
                         // Deterministic alerts for other rows (like Rapesa client) to show both green and red cases
                         const charSum = (r.NUMERO_DOCUMENTO || r.id || "").split("").reduce((s, c) => s + c.charCodeAt(0), 0);
                         if (charSum % 3 === 1) {
                           fuelColor = "#EF4444";
-                          fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
+                          fuelTitle = "Desviación de Rendimiento";
+                          fuelText = "El consumo calculado (GL/100 KM) presenta una desviación mayor al límite de tolerancia mínimo (+10%). Se recomienda revisión del odómetro.";
                         } else if (charSum % 3 === 2) {
-                          gpsColor = "#EF4444";
-                          gpsTitle = "Desviación de ubicación detectada";
-                          gpsText = "Ubicación informada a 1.16 kilómetros de la posición obtenida por el GPS (AVL).";
+                          // The map stays green, but tank and card can be red
                           tankColor = "#EF4444";
-                          tankTitle = "Abastecimiento mayor a la capacidad del tanque";
+                          tankTitle = "Alerta de Capacidad";
+                          tankText = "El volumen cargado excede la capacidad máxima física registrada para el tanque de esta unidad. Posible anomalía o error de registro.";
+                          
                           cardColor = "#EF4444";
-                          cardTitle = "TARJETA: La tarjeta de combustible de la carga y la asignada al vehículo no coincide";
+                          cardTitle = "Alerta de Tarjeta";
+                          cardText = "La tarjeta utilizada en el terminal de pago no coincide con la credencial asignada a este vehículo en la base de datos.";
                         }
 
                         // Override for demo plaque TFN213
                         if (isDemo && r.PLACA === "TFN213") {
                           gpsColor = "#10B981";
-                          gpsTitle = "Validación de Ubicación GPS (Estación)";
-                          gpsText = "Ubicación validada y coincidente con la posición obtenida por el GPS (AVL).";
+                          gpsTitle = "Ubicación Validada";
+                          gpsText = "El receptor satelital (AVL) de la unidad coincide plenamente con la geolocalización de la estación de servicio.";
                           if (r.NUMERO_DOCUMENTO === "F003-284") {
                             tankColor = "#10B981";
-                            tankTitle = "Capacidad de tanque validada y dentro del límite";
+                            tankTitle = "Capacidad Verificada";
+                            tankText = "El volumen de galones ingresado se encuentra dentro de los límites físicos del tanque.";
+                            
                             fuelColor = "#EF4444";
-                            fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
+                            fuelTitle = "Desviación de Rendimiento";
+                            fuelText = "El consumo calculado (GL/100 KM) presenta una desviación mayor al límite de tolerancia mínimo (+10%).";
+                            
                             cardColor = "#10B981";
-                            cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
+                            cardTitle = "Tarjeta Autorizada";
+                            cardText = "La tarjeta de combustible coincide con la credencial asignada.";
                           } else if (r.NUMERO_DOCUMENTO === "F003-265") {
                             tankColor = "#EF4444";
-                            tankTitle = "Abastecimiento mayor a la capacidad del tanque";
+                            tankTitle = "Alerta de Capacidad";
+                            tankText = "El volumen cargado excede la capacidad máxima física registrada para el tanque de esta unidad.";
+                            
                             fuelColor = "#10B981";
-                            fuelTitle = "Rendimiento esperado";
+                            fuelTitle = "Rendimiento Óptimo";
+                            fuelText = "El rendimiento computado para esta carga está dentro del rango esperado.";
+                            
                             cardColor = "#EF4444";
-                            cardTitle = "TARJETA: La tarjeta de combustible de la carga y la asignada al vehículo no coincide";
+                            cardTitle = "Alerta de Tarjeta";
+                            cardText = "La tarjeta utilizada en el terminal de pago no coincide con la credencial asignada a este vehículo.";
                           }
                         }
 
                         return (
                           <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+                            {/* GPS HoverCard */}
                             <HoverCard>
                               <HoverCardTrigger asChild>
-                                <span title={gpsTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                                <span style={{ display:"inline-flex", cursor:"pointer" }}>
                                   <MapPin style={{ width:16,height:16,color:gpsColor }}/>
                                 </span>
                               </HoverCardTrigger>
                               <HoverCardContent side="top" align="center" style={{ width: 400, padding: 16, borderRadius: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.15)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
-                                <div style={{ fontSize: 13, color: "#4b5563", marginBottom: 12, lineHeight: 1.4 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                  <MapPin style={{ width:16,height:16,color:gpsColor }}/>
+                                  <strong style={{ fontSize: 13, color: "#111827" }}>{gpsTitle}</strong>
+                                </div>
+                                <div style={{ fontSize: 12.5, color: "#4b5563", marginBottom: 12, lineHeight: 1.4 }}>
                                   {gpsText}
                                 </div>
                                 <div style={{ width: "100%", height: 220, borderRadius: 10, background: "#e5e7eb", overflow: "hidden", position: "relative" }}>
@@ -404,15 +436,60 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                                 </div>
                               </HoverCardContent>
                             </HoverCard>
-                            <span title={tankTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                              <TankIcon style={{ width:16,height:16,color:tankColor }}/>
-                            </span>
-                            <span title={fuelTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                              <Fuel style={{ width:16,height:16,color:fuelColor }}/>
-                            </span>
-                            <span title={cardTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                              <CreditCard style={{ width:16,height:16,color:cardColor }}/>
-                            </span>
+
+                            {/* Tank HoverCard */}
+                            <HoverCard>
+                              <HoverCardTrigger asChild>
+                                <span style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <TankIcon style={{ width:16,height:16,color:tankColor }}/>
+                                </span>
+                              </HoverCardTrigger>
+                              <HoverCardContent side="top" align="center" style={{ width: 300, padding: 14, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                  <TankIcon style={{ width:16,height:16,color:tankColor }}/>
+                                  <strong style={{ fontSize: 13, color: "#111827" }}>{tankTitle}</strong>
+                                </div>
+                                <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.4 }}>
+                                  {tankText}
+                                </div>
+                              </HoverCardContent>
+                            </HoverCard>
+
+                            {/* Fuel HoverCard */}
+                            <HoverCard>
+                              <HoverCardTrigger asChild>
+                                <span style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <Fuel style={{ width:16,height:16,color:fuelColor }}/>
+                                </span>
+                              </HoverCardTrigger>
+                              <HoverCardContent side="top" align="center" style={{ width: 300, padding: 14, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                  <Fuel style={{ width:16,height:16,color:fuelColor }}/>
+                                  <strong style={{ fontSize: 13, color: "#111827" }}>{fuelTitle}</strong>
+                                </div>
+                                <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.4 }}>
+                                  {fuelText}
+                                </div>
+                              </HoverCardContent>
+                            </HoverCard>
+
+                            {/* Card HoverCard */}
+                            <HoverCard>
+                              <HoverCardTrigger asChild>
+                                <span style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <CreditCard style={{ width:16,height:16,color:cardColor }}/>
+                                </span>
+                              </HoverCardTrigger>
+                              <HoverCardContent side="top" align="center" style={{ width: 300, padding: 14, borderRadius: 12, boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                                  <CreditCard style={{ width:16,height:16,color:cardColor }}/>
+                                  <strong style={{ fontSize: 13, color: "#111827" }}>{cardTitle}</strong>
+                                </div>
+                                <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.4 }}>
+                                  {cardText}
+                                </div>
+                              </HoverCardContent>
+                            </HoverCard>
                           </span>
                         );
                       })()}

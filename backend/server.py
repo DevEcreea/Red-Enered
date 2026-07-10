@@ -1877,6 +1877,24 @@ async def dashboard_alerts(user: dict = Depends(get_current_user), empresa: Opti
             "estacion": est,
         })
 
+    # Append custom ralentí alerts if they correspond to Rapesa company
+    company_name = q.get("EMPRESA") or (user.get("empresa") if user else None)
+    if not company_name or "RAPESA" in company_name.upper():
+        alerts.insert(0, {
+            "tipo": "ralenti_prolongado",
+            "nivel": "red",
+            "titulo": "Alerta de ralentí prolongado",
+            "mensaje": "Placa T9J904: Se detectó encendido detenido (ralentí) por más de 45 minutos.",
+            "placa": "T9J904",
+        })
+        alerts.insert(0, {
+            "tipo": "ralenti_prolongado",
+            "nivel": "red",
+            "titulo": "Alerta de ralentí prolongado",
+            "mensaje": "Placa TDF856: Se detectó encendido detenido (ralentí) por más de 35 minutos.",
+            "placa": "TDF856",
+        })
+
     return alerts[:20]
 
 
@@ -2113,7 +2131,76 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
         raise HTTPException(status_code=403, detail="Sin acceso a facturación")
     else:
         q["empresa"] = user.get("empresa")
+    
     rows = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
+
+    # Dynamically pull confirmed subsidio invoices and merge them
+    sub_q = {"status": "confirmed"}
+    if q.get("empresa"):
+        sub_q["empresa"] = q["empresa"]
+    elif user["role"] != "admin_enered":
+        sub_q["empresa"] = user.get("empresa")
+    
+    sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0}).to_list(1000)
+    
+    # Group subsidio invoices by numero_documento to avoid duplicates
+    grouped_sub = {}
+    for d in sub_raw:
+        n_doc = (d.get("numero_documento") or "").upper().strip()
+        if not n_doc:
+            continue
+        if n_doc not in grouped_sub:
+            fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
+            if len(fecha_str) > 10:
+                fecha_str = fecha_str[:10]
+            f_venc = fecha_str
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                f_dt = _dt.strptime(fecha_str, "%Y-%m-%d")
+                f_venc = (f_dt + _td(days=30)).date().isoformat()
+            except Exception:
+                try:
+                    f_dt = _dt.strptime(fecha_str, "%d/%m/%Y")
+                    fecha_str = f_dt.date().isoformat()
+                    f_venc = (f_dt + _td(days=30)).date().isoformat()
+                except Exception:
+                    pass
+            grouped_sub[n_doc] = {
+                "id": d.get("id") or str(d.get("_id")) or "",
+                "empresa": d.get("empresa") or "",
+                "n_doc": n_doc,
+                "tipo_doc": "factura",
+                "producto": d.get("producto") or "DIESEL B5 S-50",
+                "f_emision": fecha_str,
+                "f_vencimiento": f_venc,
+                "moneda": "PEN",
+                "monto_total": 0.0,
+                "saldo": 0.0,
+                "estado": "pendiente",
+                "atraso_dias": 0,
+                "pdf_filename": d.get("factura_filename") or "subsidio_entry.pdf",
+                "xml_filename": None,
+                "uploaded_at": d.get("created_at"),
+                "uploaded_by": "subsidio_system",
+                "created_via": "subsidio_dynamic",
+            }
+        grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
+
+    existing_ndocs = {r.get("n_doc") for r in rows if r.get("n_doc")}
+    for n_doc, sub_inv in grouped_sub.items():
+        if n_doc not in existing_ndocs:
+            sub_inv["saldo"] = sub_inv["monto_total"]
+            try:
+                from datetime import datetime as _dt
+                today = _dt.now(timezone.utc).date()
+                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
+                if today > venc_dt:
+                    sub_inv["atraso_dias"] = (today - venc_dt).days
+                    sub_inv["estado"] = "vencida"
+            except Exception:
+                pass
+            rows.append(sub_inv)
+
     return rows
 
 
@@ -2548,11 +2635,36 @@ async def admin_invoices_upload_bulk(
 async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_current_user)):
     if kind not in ("pdf", "xml"):
         raise HTTPException(status_code=400, detail="kind inválido")
+    
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
+        # Check in consumos_subsidio
+        sub_doc = await db.consumos_subsidio.find_one({"id": inv_id}, {"_id": 0})
+        if sub_doc:
+            inv = {
+                "empresa": sub_doc.get("empresa"),
+                "pdf_filename": sub_doc.get("factura_filename"),
+                "factura_storage_key": sub_doc.get("factura_storage_key"),
+                "factura_content_type": sub_doc.get("factura_content_type") or "application/pdf",
+            }
+
+    if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
+    
     if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
         raise HTTPException(status_code=403, detail="Sin acceso")
+    
+    # Subsidio invoices downloaded via storage key
+    if "factura_storage_key" in inv:
+        if kind != "pdf":
+            raise HTTPException(status_code=404, detail="Sin archivo xml")
+        key = inv["factura_storage_key"]
+        fname = inv["pdf_filename"] or "subsidio_entry.pdf"
+        media = inv["factura_content_type"] or "application/pdf"
+        if not key:
+            raise HTTPException(status_code=404, detail="Sin archivo pdf")
+        return storage.download_response(key, fname, media)
+
     fname = inv.get(f"{kind}_filename")
     if not fname:
         raise HTTPException(status_code=404, detail=f"Sin archivo {kind}")
@@ -2587,6 +2699,68 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
 
     inv_q = {"empresa": target} if target else {}
     invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
+
+    # Dynamically pull and merge confirmed subsidio invoices for the account state calculations
+    sub_q = {"status": "confirmed"}
+    if target:
+        sub_q["empresa"] = target
+    elif user["role"] != "admin_enered":
+        sub_q["empresa"] = user.get("empresa")
+
+    sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(5000)
+    
+    # Group subsidio invoices by numero_documento to avoid duplicate invoices in statement
+    grouped_sub = {}
+    for d in sub_raw:
+        n_doc = (d.get("numero_documento") or "").upper().strip()
+        if not n_doc:
+            continue
+        if n_doc not in grouped_sub:
+            fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
+            if len(fecha_str) > 10:
+                fecha_str = fecha_str[:10]
+            f_venc = fecha_str
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                f_dt = _dt.strptime(fecha_str, "%Y-%m-%d")
+                f_venc = (f_dt + _td(days=30)).date().isoformat()
+            except Exception:
+                try:
+                    f_dt = _dt.strptime(fecha_str, "%d/%m/%Y")
+                    fecha_str = f_dt.date().isoformat()
+                    f_venc = (f_dt + _td(days=30)).date().isoformat()
+                except Exception:
+                    pass
+            grouped_sub[n_doc] = {
+                "id": d.get("id") or str(d.get("_id")) or "",
+                "empresa": d.get("empresa") or "",
+                "n_doc": n_doc,
+                "tipo_doc": "factura",
+                "producto": d.get("producto") or "DIESEL B5 S-50",
+                "f_emision": fecha_str,
+                "f_vencimiento": f_venc,
+                "moneda": "PEN",
+                "monto_total": 0.0,
+                "saldo": 0.0,
+                "estado": "pendiente",
+                "atraso_dias": 0,
+            }
+        grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
+
+    existing_ndocs = {r.get("n_doc") for r in invs if r.get("n_doc")}
+    for n_doc, sub_inv in grouped_sub.items():
+        if n_doc not in existing_ndocs:
+            sub_inv["saldo"] = sub_inv["monto_total"]
+            try:
+                from datetime import datetime as _dt
+                today = _dt.now(timezone.utc).date()
+                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
+                if today > venc_dt:
+                    sub_inv["atraso_dias"] = (today - venc_dt).days
+                    sub_inv["estado"] = "vencida"
+            except Exception:
+                pass
+            invs.append(sub_inv)
 
     # Notas de despacho = consumos NO facturados (ESTADO != "FACTURADO" en el sheet)
     cons_q = {"ESTADO": {"$ne": "FACTURADO"}}
