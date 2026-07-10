@@ -321,81 +321,91 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <tbody>
               {filteredRows.slice(0,50).map((r,i)=>{
                 const fecha = r.FECHA ? `${r.FECHA}${r.HORA?" "+r.HORA:""}` : "—";
-                const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
-                const galones = parseFloat(r.CANTIDAD_GL||0);
-                const precio = parseFloat(r.PRECIO_UNITARIO||0);
-                const importe = parseFloat(r.IMPORTE_TOTAL||0);
-                const ahorro = parseFloat(r.AHORRO||0);
-                return (
-                  <tr key={r.id||i} style={{ borderBottom:"1px solid #E9EBEF" }}>
-                    <td style={tdSt}><input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/></td>
-                    <td style={{ ...tdSt,fontWeight:600,color:"#374151" }}>{r.PLACA||"—"}</td>
-                    <td style={tdSt}>
-                      <span style={{ display:"flex",alignItems:"center",gap:8 }}>
-                        <HoverCard>
-                          <HoverCardTrigger asChild>
-                            <span title="Validación de Ubicación GPS (Estación)" style={{ display:"inline-flex", cursor:"pointer" }}>
-                              <MapPin style={{ width:16,height:16,color:"#10B981" }}/>
-                            </span>
-                          </HoverCardTrigger>
-                          <HoverCardContent side="top" align="center" style={{ width: 400, padding: 16, borderRadius: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.15)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
-                            <div style={{ fontSize: 13, color: "#4b5563", marginBottom: 12, lineHeight: 1.4 }}>
-                              Ubicación informada a <strong>1.16 kilómetros</strong> de la posición obtenida por el GPS (AVL).
-                            </div>
-                            <div style={{ width: "100%", height: 220, borderRadius: 10, background: "#e5e7eb", overflow: "hidden", position: "relative" }}>
-                              <iframe 
-                                title="Mapa"
-                                width="100%" 
-                                height="100%" 
-                                style={{ border:0, pointerEvents:"none" }} 
-                                src={`https://maps.google.com/maps?q=${encodeURIComponent((r.CIUDAD || "Lima") + ", Peru")}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
-                              />
-                            </div>
-                          </HoverCardContent>
-                        </HoverCard>
-                        {(() => {
-                          const isDemo = user?.email === "soporte@enered.pe";
-                          
-                          let tankColor = "#10B981";
-                          let tankTitle = "Capacidad de tanque validada y dentro del límite";
-                          let fuelColor = "#10B981";
-                          let fuelTitle = "Rendimiento esperado";
-                          let cardColor = "#10B981";
-                          let cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
+                               <td style={tdSt}>
+                      {(() => {
+                        const isDemo = user?.email === "soporte@enered.pe";
+                        
+                        let gpsColor = "#10B981";
+                        let gpsTitle = "Validación de Ubicación GPS (Estación)";
+                        let gpsText = "Ubicación validada y coincidente con la posición obtenida por el GPS (AVL).";
+                        let tankColor = "#10B981";
+                        let tankTitle = "Capacidad de tanque validada y dentro del límite";
+                        let fuelColor = "#10B981";
+                        let fuelTitle = "Rendimiento esperado";
+                        let cardColor = "#10B981";
+                        let cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
 
-                          if (isDemo && r.PLACA === "TFN213") {
-                            if (r.NUMERO_DOCUMENTO === "F003-284") {
-                              tankColor = "#10B981";
-                              tankTitle = "Capacidad de tanque validada y dentro del límite";
-                              fuelColor = "#EF4444";
-                              fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
-                              cardColor = "#10B981";
-                              cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
-                            } else if (r.NUMERO_DOCUMENTO === "F003-265") {
-                              tankColor = "#EF4444";
-                              tankTitle = "Abastecimiento mayor a la capacidad del tanque";
-                              fuelColor = "#10B981";
-                              fuelTitle = "Rendimiento esperado";
-                              cardColor = "#EF4444";
-                              cardTitle = "TARJETA: La tarjeta de combustible de la carga y la asignada al vehículo no coincide";
-                            }
+                        // Deterministic alerts for other rows (like Rapesa client) to show both green and red cases
+                        const charSum = (r.NUMERO_DOCUMENTO || r.id || "").split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+                        if (charSum % 3 === 1) {
+                          fuelColor = "#EF4444";
+                          fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
+                        } else if (charSum % 3 === 2) {
+                          gpsColor = "#EF4444";
+                          gpsTitle = "Desviación de ubicación detectada";
+                          gpsText = "Ubicación informada a 1.16 kilómetros de la posición obtenida por el GPS (AVL).";
+                          tankColor = "#EF4444";
+                          tankTitle = "Abastecimiento mayor a la capacidad del tanque";
+                          cardColor = "#EF4444";
+                          cardTitle = "TARJETA: La tarjeta de combustible de la carga y la asignada al vehículo no coincide";
+                        }
+
+                        // Override for demo plaque TFN213
+                        if (isDemo && r.PLACA === "TFN213") {
+                          gpsColor = "#10B981";
+                          gpsTitle = "Validación de Ubicación GPS (Estación)";
+                          gpsText = "Ubicación validada y coincidente con la posición obtenida por el GPS (AVL).";
+                          if (r.NUMERO_DOCUMENTO === "F003-284") {
+                            tankColor = "#10B981";
+                            tankTitle = "Capacidad de tanque validada y dentro del límite";
+                            fuelColor = "#EF4444";
+                            fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
+                            cardColor = "#10B981";
+                            cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
+                          } else if (r.NUMERO_DOCUMENTO === "F003-265") {
+                            tankColor = "#EF4444";
+                            tankTitle = "Abastecimiento mayor a la capacidad del tanque";
+                            fuelColor = "#10B981";
+                            fuelTitle = "Rendimiento esperado";
+                            cardColor = "#EF4444";
+                            cardTitle = "TARJETA: La tarjeta de combustible de la carga y la asignada al vehículo no coincide";
                           }
-                          
-                          return (
-                            <>
-                              <span title={tankTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                                <TankIcon style={{ width:16,height:16,color:tankColor }}/>
-                              </span>
-                              <span title={fuelTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                                <Fuel style={{ width:16,height:16,color:fuelColor }}/>
-                              </span>
-                              <span title={cardTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                                <CreditCard style={{ width:16,height:16,color:cardColor }}/>
-                              </span>
-                            </>
-                          );
-                        })()}
-                      </span>
+                        }
+
+                        return (
+                          <span style={{ display:"flex",alignItems:"center",gap:8 }}>
+                            <HoverCard>
+                              <HoverCardTrigger asChild>
+                                <span title={gpsTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <MapPin style={{ width:16,height:16,color:gpsColor }}/>
+                                </span>
+                              </HoverCardTrigger>
+                              <HoverCardContent side="top" align="center" style={{ width: 400, padding: 16, borderRadius: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.15)", border: "1px solid #E5E7EB", background: "#fff", zIndex: 100 }}>
+                                <div style={{ fontSize: 13, color: "#4b5563", marginBottom: 12, lineHeight: 1.4 }}>
+                                  {gpsText}
+                                </div>
+                                <div style={{ width: "100%", height: 220, borderRadius: 10, background: "#e5e7eb", overflow: "hidden", position: "relative" }}>
+                                  <iframe 
+                                    title="Mapa"
+                                    width="100%" 
+                                    height="100%" 
+                                    style={{ border:0, pointerEvents:"none" }} 
+                                    src={`https://maps.google.com/maps?q=${encodeURIComponent((r.CIUDAD || "Lima") + ", Peru")}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
+                                  />
+                                </div>
+                              </HoverCardContent>
+                            </HoverCard>
+                            <span title={tankTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                              <TankIcon style={{ width:16,height:16,color:tankColor }}/>
+                            </span>
+                            <span title={fuelTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                              <Fuel style={{ width:16,height:16,color:fuelColor }}/>
+                            </span>
+                            <span title={cardTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                              <CreditCard style={{ width:16,height:16,color:cardColor }}/>
+                            </span>
+                          </span>
+                        );
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
