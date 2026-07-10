@@ -3741,6 +3741,8 @@ async def upload_manual_document(
     emi: Optional[str] = Form(None),
     ven: Optional[str] = Form(None),
     placa: Optional[str] = Form(None),
+    conductor_id: Optional[str] = Form(None),
+    viaje_id: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
 ):
     content = await file.read()
@@ -3764,6 +3766,8 @@ async def upload_manual_document(
         "grp": 0,
         "all": 0 if placa else 1,
         "placa": placa.upper().strip() if placa else "",
+        "conductor_id": conductor_id or "",
+        "viaje_id": viaje_id or "",
         "archived": 0,
         "est": "Vigente",
         "filename": file.filename,

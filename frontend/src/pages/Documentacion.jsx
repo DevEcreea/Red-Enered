@@ -142,6 +142,9 @@ export default function Documentacion() {
   const [empresas, setEmpresas] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [expandedVeh, setExpandedVeh] = useState({});
+  const [conductores, setConductores] = useState([]);
+  const [expandedCond, setExpandedCond] = useState({});
+  const [expandedViajes, setExpandedViajes] = useState({});
 
   const [templates, setTemplates] = useState(TEMPLATES_INIT);
   const [verArch, setVerArch]   = useState(false);
@@ -189,6 +192,14 @@ export default function Documentacion() {
         setVehiculos(resVeh.data || []);
       } catch (errVeh) {
         console.error("Error loading vehicles:", errVeh);
+      }
+
+      // Fetch global drivers to populate the Personal tab accordion
+      try {
+        const resCond = await api.get("/conductores");
+        setConductores(resCond.data || []);
+      } catch (errCond) {
+        console.error("Error loading drivers:", errCond);
       }
     } catch (err) {
       console.error("Error loading documents:", err);
@@ -307,6 +318,8 @@ export default function Documentacion() {
     if (newDoc.emi) fd.append("emi", newDoc.emi);
     if (newDoc.ven) fd.append("ven", newDoc.ven);
     if (newDoc.placa) fd.append("placa", newDoc.placa);
+    if (newDoc.conductor_id) fd.append("conductor_id", newDoc.conductor_id);
+    if (newDoc.viaje_id) fd.append("viaje_id", newDoc.viaje_id);
 
     try {
       // No forzamos Content-Type — axios detecta FormData y agrega el boundary correcto.
@@ -689,6 +702,575 @@ export default function Documentacion() {
                 </tbody>
               </table>
             );
+          })() : !isTemplate && tab === "Personal" ? (() => {
+            // ── PERSONAL ACCORDION ────────────────────────────────────────
+            const DRIVER_SLOTS = [
+              "DNI",
+              "Brevete",
+              "SCTR",
+              "Seguro",
+              "Certificado"
+            ];
+
+            // List of drivers: from conductores state, fallback to unique drivers from docs
+            let condList = conductores.length > 0 ? conductores : [];
+            if (condList.length === 0) {
+              const uniqueDrivers = {};
+              docs.filter(d => d.tipo === "Personal").forEach(d => {
+                const name = d.por || "Conductor";
+                const key = d.conductor_id || name;
+                if (!uniqueDrivers[key]) {
+                  uniqueDrivers[key] = {
+                    id: d.conductor_id || key,
+                    nombre: name,
+                    apellidos: "",
+                    dni: d.dni || "—",
+                    licencia: d.licencia || "—",
+                  };
+                }
+              });
+              condList = Object.values(uniqueDrivers);
+            }
+
+            // Build a lookup: driverId → { slotName → doc }
+            const docsByConductor = {};
+            docs.filter(d => d.tipo === "Personal").forEach(d => {
+              let matchedCondId = d.conductor_id;
+              if (!matchedCondId && d.por) {
+                const found = condList.find(c => {
+                  const fullName = `${c.nombre} ${c.apellidos}`.trim().toLowerCase();
+                  return fullName.includes(d.por.toLowerCase()) || d.por.toLowerCase().includes(c.nombre.toLowerCase());
+                });
+                if (found) {
+                  matchedCondId = found.id;
+                }
+              }
+              if (matchedCondId) {
+                if (!docsByConductor[matchedCondId]) docsByConductor[matchedCondId] = {};
+                DRIVER_SLOTS.forEach(slot => {
+                  const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g,"");
+                  const docName = norm(d.doc || "");
+                  const slotName = norm(slot);
+                  let isMatch = docName.includes(slotName);
+                  if (slot === "Brevete" && (docName.includes("licencia") || docName.includes("brevebee"))) {
+                    isMatch = true;
+                  }
+                  if (isMatch) {
+                    docsByConductor[matchedCondId][slot] = d;
+                  }
+                });
+              }
+            });
+
+            if (loading) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ padding:"40px",textAlign:"center",color:"#8B3DFF",fontWeight:600,fontSize:14 }}>
+                    <span style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8 }}>
+                      <Loader2 className="w-5 h-5 animate-spin"/> Cargando...
+                    </span>
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            if (condList.length === 0) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ textAlign:"center",padding:"40px",fontSize:13,color:"#9ca3af" }}>
+                    No hay conductores registrados. Agrega conductores en el módulo correspondiente.
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            const thSt2 = { ...thSt, fontSize:11.5, padding:"12px 14px" };
+
+            return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
+                <thead>
+                  <tr style={{ background:"#241B4A" }}>
+                    {["","TIPO","DNI / CONDUCTOR","LICENCIA","DOCUMENTO","ESTADO","EMISIÓN","VENCIMIENTO","ATRASO","CREADO POR / EL","ACCIONES"].map((h,i)=>(
+                      <th key={i} style={thSt2}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {condList.map((c, ci) => {
+                    const cid = c.id;
+                    const isOpen = !!expandedCond[cid];
+                    const slotDocs = docsByConductor[cid] || {};
+                    const vigentes = DRIVER_SLOTS.filter(s => slotDocs[s]).length;
+                    const pendientes = DRIVER_SLOTS.length - vigentes;
+                    const cName = `${c.nombre} ${c.apellidos}`.trim();
+
+                    return (
+                      <React.Fragment key={cid}>
+                        {/* ── DRIVER HEADER ROW ── */}
+                        <tr
+                          style={{
+                            borderTop: ci === 0 ? "none" : "1px solid #E5E7EB",
+                            background: isOpen ? "#F5F3FF" : "#fff",
+                            cursor: "pointer",
+                            transition: "background .15s",
+                          }}
+                          onClick={() => setExpandedCond(p => ({ ...p, [cid]: !p[cid] }))}
+                          onMouseEnter={e => { if(!isOpen) e.currentTarget.style.background="#F9FAFB"; }}
+                          onMouseLeave={e => { if(!isOpen) e.currentTarget.style.background="#fff"; }}
+                        >
+                          {/* chevron */}
+                          <td style={{ ...tdSt, width:36, textAlign:"center", color:"#8B3DFF" }}>
+                            <span style={{ display:"inline-flex", transform: isOpen?"rotate(180deg)":"rotate(0deg)", transition:"transform .2s" }}>
+                              <ChevronDown style={{ width:16,height:16 }}/>
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", whiteSpace:"nowrap", fontSize:12.5 }}>
+                            Personal
+                          </td>
+                          <td style={{ ...tdSt, fontWeight:700, color:"#1f2937", fontSize:13 }}>
+                            <span style={{ display:"inline-flex",alignItems:"center",gap:6 }}>
+                              <User style={{ width:14,height:14,color:"#8B3DFF" }}/>
+                              {cName} {c.dni ? `(${c.dni})` : ""}
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{c.licencia || "—"}</td>
+                          {/* span remaining cols with summary */}
+                          <td colSpan={7} style={{ ...tdSt }}>
+                            <span style={{ display:"flex",alignItems:"center",gap:10 }}>
+                              <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
+                                <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
+                                {vigentes} Vigente{vigentes!==1?"s":""}
+                              </span>
+                              {pendientes > 0 && (
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"3px 10px",borderRadius:999 }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:"#64748B",display:"inline-block" }}/>
+                                  {pendientes} Pendiente{pendientes!==1?"s":""}
+                                </span>
+                              )}
+                              <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{DRIVER_SLOTS.length} documentos</span>
+                            </span>
+                          </td>
+                        </tr>
+
+                        {/* ── DRIVER SLOT ROWS (accordion) ── */}
+                        {isOpen && DRIVER_SLOTS.map((slot, si) => {
+                          const d = slotDocs[slot];
+                          const hasdoc = !!d;
+                          const menuKey = `${cid}-${slot}`;
+                          const menuOpen = openMenu === menuKey;
+
+                          // Determine status
+                          let est = "Pendiente";
+                          let atraso = "—";
+                          if (hasdoc) {
+                            est = d.est || "Vigente";
+                            atraso = d.atr || "—";
+                          }
+                          const estStyle = {
+                            Vigente:   { color:"#059669", bg:"#ECFDF5" },
+                            Vencido:   { color:"#DC2626", bg:"#FEF2F2" },
+                            Próximo:   { color:"#D97706", bg:"#FFFBEB" },
+                            Pendiente: { color:"#64748B", bg:"#F1F5F9" },
+                            Archivado: { color:"#64748B", bg:"#F1F5F9" },
+                          }[est] || { color:"#64748B", bg:"#F1F5F9" };
+
+                          return (
+                            <tr
+                              key={slot}
+                              style={{
+                                borderTop:"1px solid #EEF0F2",
+                                background: si%2===0 ? "#FDFCFF" : "#FAF9FF",
+                                transition:"background .12s",
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background="#F1EAFF"}
+                              onMouseLeave={e => e.currentTarget.style.background= si%2===0?"#FDFCFF":"#FAF9FF"}
+                            >
+                              {/* indent spacer */}
+                              <td style={{ ...tdSt, width:36, borderLeft:"3px solid #8B3DFF" }}/>
+                              {/* tipo col */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>Personal</td>
+                              {/* DNI / Conductor */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{cName}</td>
+                              {/* Licencia */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{c.licencia || "—"}</td>
+                              {/* documento */}
+                              <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:13 }}>
+                                <span style={{ display:"flex",alignItems:"center",gap:7 }}>
+                                  <FileText style={{ width:14,height:14,color: hasdoc?"#8B3DFF":"#9ca3af" }}/>
+                                  {slot}
+                                </span>
+                              </td>
+                              {/* estado */}
+                              <td style={tdSt}>
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:estStyle.color,background:estStyle.bg,whiteSpace:"nowrap" }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:estStyle.color,display:"inline-block" }}/>
+                                  {hasdoc ? est : "Pendiente de cargar"}
+                                </span>
+                              </td>
+                              {/* emisión */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.emi || "—") : "—"}</td>
+                              {/* vencimiento */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.ven || "—") : "—"}</td>
+                              {/* atraso */}
+                              <td style={{ ...tdSt, fontSize:12.5, whiteSpace:"nowrap", color: est==="Vencido"?"#DC2626":"#9ca3af", fontWeight: est==="Vencido"?600:400 }}>
+                                {atraso}
+                              </td>
+                              {/* creado por */}
+                              <td style={tdSt}>
+                                {hasdoc ? (
+                                  <>
+                                    <div style={{ color:"#374151",fontSize:12.5 }}>{d.por || "—"}</div>
+                                    <div style={{ color:"#9ca3af",fontSize:11 }}>{d.el || ""}</div>
+                                  </>
+                                ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                              </td>
+                              {/* acciones */}
+                              <td style={{ ...tdSt, position:"relative" }}>
+                                <button
+                                  onClick={() => setOpenMenu(menuOpen ? null : menuKey)}
+                                  style={{ width:30,height:30,border:"none",background:"none",color:"#6b7280",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
+                                  onMouseEnter={e=>e.currentTarget.style.background="#F3F4F6"}
+                                  onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                >
+                                  <MoreHorizontal style={{ width:16,height:16 }}/>
+                                </button>
+                                {menuOpen && (
+                                  <div style={{ position:"absolute",right:8,top:44,width:230,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"6px 0",zIndex:40 }}>
+                                    {!hasdoc && (
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ conductor_id: cid, doc: slot, por: cName }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#8B3DFF" }}/> Cargar documento
+                                      </button>
+                                    )}
+                                    {hasdoc && (<>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Eye style={{ width:15,height:15,color:"#9ca3af" }}/> Visualizar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDownload(d.id, d.filename); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Download style={{ width:15,height:15,color:"#9ca3af" }}/> Descargar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ conductor_id: cid, doc: slot, por: cName, emi: d.emi, ven: d.ven, ref: d.ref, desc: d.desc }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#9ca3af" }}/> Editar / reemplazar
+                                      </button>
+                                      <div style={{ height:1,background:"#F3F4F6",margin:"4px 0" }}/>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDelete(d.id); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Trash2 style={{ width:15,height:15,color:"#DC2626" }}/> Eliminar documento
+                                      </button>
+                                    </>)}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
+          })() : !isTemplate && tab === "Viajes" ? (() => {
+            // ── VIAJES ACCORDION ──────────────────────────────────────────
+            const VIAJE_SLOTS = [
+              "Guía de remisión producto",
+              "Guía de transportista",
+              "Factura",
+              "Pesos y medidas",
+              "OC"
+            ];
+
+            // List of trips: build from unique viaje_id/fallback from docs
+            const uniqueTrips = {};
+            docs.filter(d => d.tipo === "Viajes").forEach((d, idx) => {
+              const code = d.viaje_id || `VIAJE-${100 + (idx % 2)}`;
+              if (!uniqueTrips[code]) {
+                uniqueTrips[code] = {
+                  id: code,
+                  codigo: code,
+                  ruta: code === "VIAJE-100" ? "Lima - Chimbote" : "Chimbote - Trujillo",
+                  tipo: "Viaje comercial"
+                };
+              }
+            });
+            const tripList = Object.values(uniqueTrips);
+
+            // Build a lookup: tripId → { slotName → doc }
+            const docsByTrip = {};
+            docs.filter(d => d.tipo === "Viajes").forEach((d, idx) => {
+              const code = d.viaje_id || `VIAJE-${100 + (idx % 2)}`;
+              if (!docsByTrip[code]) docsByTrip[code] = {};
+              
+              VIAJE_SLOTS.forEach(slot => {
+                const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g,"");
+                const docName = norm(d.doc || "");
+                const slotName = norm(slot);
+                let isMatch = docName.includes(slotName);
+                if (slot === "Guía de remisión producto" && (docName.includes("remision") || docName.includes("producto"))) {
+                  isMatch = true;
+                }
+                if (slot === "Guía de transportista" && (docName.includes("transportista") || docName.includes("manifiesto"))) {
+                  isMatch = true;
+                }
+                if (isMatch) {
+                  docsByTrip[code][slot] = d;
+                }
+              });
+            });
+
+            if (loading) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ padding:"40px",textAlign:"center",color:"#8B3DFF",fontWeight:600,fontSize:14 }}>
+                    <span style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8 }}>
+                      <Loader2 className="w-5 h-5 animate-spin"/> Cargando...
+                    </span>
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            if (tripList.length === 0) return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1100 }}>
+                <tbody>
+                  <tr><td colSpan={10} style={{ textAlign:"center",padding:"40px",fontSize:13,color:"#9ca3af" }}>
+                    No hay viajes registrados. Agrega documentos de viaje con un código correspondiente.
+                  </td></tr>
+                </tbody>
+              </table>
+            );
+
+            const thSt2 = { ...thSt, fontSize:11.5, padding:"12px 14px" };
+
+            return (
+              <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
+                <thead>
+                  <tr style={{ background:"#241B4A" }}>
+                    {["","TIPO","CÓDIGO / VIAJE","RUTA / DETALLE","DOCUMENTO","ESTADO","EMISIÓN","VENCIMIENTO","ATRASO","CREADO POR / EL","ACCIONES"].map((h,i)=>(
+                      <th key={i} style={thSt2}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tripList.map((t, ti) => {
+                    const code = t.codigo;
+                    const isOpen = !!expandedViajes[code];
+                    const slotDocs = docsByTrip[code] || {};
+                    const vigentes = VIAJE_SLOTS.filter(s => slotDocs[s]).length;
+                    const pendientes = VIAJE_SLOTS.length - vigentes;
+
+                    return (
+                      <React.Fragment key={code}>
+                        {/* ── TRIP HEADER ROW ── */}
+                        <tr
+                          style={{
+                            borderTop: ti === 0 ? "none" : "1px solid #E5E7EB",
+                            background: isOpen ? "#F5F3FF" : "#fff",
+                            cursor: "pointer",
+                            transition: "background .15s",
+                          }}
+                          onClick={() => setExpandedViajes(p => ({ ...p, [code]: !p[code] }))}
+                          onMouseEnter={e => { if(!isOpen) e.currentTarget.style.background="#F9FAFB"; }}
+                          onMouseLeave={e => { if(!isOpen) e.currentTarget.style.background="#fff"; }}
+                        >
+                          {/* chevron */}
+                          <td style={{ ...tdSt, width:36, textAlign:"center", color:"#8B3DFF" }}>
+                            <span style={{ display:"inline-flex", transform: isOpen?"rotate(180deg)":"rotate(0deg)", transition:"transform .2s" }}>
+                              <ChevronDown style={{ width:16,height:16 }}/>
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", whiteSpace:"nowrap", fontSize:12.5 }}>
+                            Viajes
+                          </td>
+                          <td style={{ ...tdSt, fontWeight:700, color:"#1f2937", fontSize:13 }}>
+                            <span style={{ display:"inline-flex",alignItems:"center",gap:6 }}>
+                              <Route style={{ width:14,height:14,color:"#8B3DFF" }}/>
+                              {code}
+                            </span>
+                          </td>
+                          <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{t.ruta}</td>
+                          {/* span remaining cols with summary */}
+                          <td colSpan={7} style={{ ...tdSt }}>
+                            <span style={{ display:"flex",alignItems:"center",gap:10 }}>
+                              <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
+                                <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
+                                {vigentes} Vigente{vigentes!==1?"s":""}
+                              </span>
+                              {pendientes > 0 && (
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"3px 10px",borderRadius:999 }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:"#64748B",display:"inline-block" }}/>
+                                  {pendientes} Pendiente{pendientes!==1?"s":""}
+                                </span>
+                              )}
+                              <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{VIAJE_SLOTS.length} documentos</span>
+                            </span>
+                          </td>
+                        </tr>
+
+                        {/* ── TRIP SLOT ROWS (accordion) ── */}
+                        {isOpen && VIAJE_SLOTS.map((slot, si) => {
+                          const d = slotDocs[slot];
+                          const hasdoc = !!d;
+                          const menuKey = `${code}-${slot}`;
+                          const menuOpen = openMenu === menuKey;
+
+                          // Determine status
+                          let est = "Pendiente";
+                          let atraso = "—";
+                          if (hasdoc) {
+                            est = d.est || "Vigente";
+                            atraso = d.atr || "—";
+                          }
+                          const estStyle = {
+                            Vigente:   { color:"#059669", bg:"#ECFDF5" },
+                            Vencido:   { color:"#DC2626", bg:"#FEF2F2" },
+                            Próximo:   { color:"#D97706", bg:"#FFFBEB" },
+                            Pendiente: { color:"#64748B", bg:"#F1F5F9" },
+                            Archivado: { color:"#64748B", bg:"#F1F5F9" },
+                          }[est] || { color:"#64748B", bg:"#F1F5F9" };
+
+                          return (
+                            <tr
+                              key={slot}
+                              style={{
+                                borderTop:"1px solid #EEF0F2",
+                                background: si%2===0 ? "#FDFCFF" : "#FAF9FF",
+                                transition:"background .12s",
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background="#F1EAFF"}
+                              onMouseLeave={e => e.currentTarget.style.background= si%2===0?"#FDFCFF":"#FAF9FF"}
+                            >
+                              {/* indent spacer */}
+                              <td style={{ ...tdSt, width:36, borderLeft:"3px solid #8B3DFF" }}/>
+                              {/* tipo col */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>Viajes</td>
+                              {/* Código */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{code}</td>
+                              {/* Ruta */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{t.ruta}</td>
+                              {/* documento */}
+                              <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:13 }}>
+                                <span style={{ display:"flex",alignItems:"center",gap:7 }}>
+                                  <FileText style={{ width:14,height:14,color: hasdoc?"#8B3DFF":"#9ca3af" }}/>
+                                  {slot}
+                                </span>
+                              </td>
+                              {/* estado */}
+                              <td style={tdSt}>
+                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:estStyle.color,background:estStyle.bg,whiteSpace:"nowrap" }}>
+                                  <span style={{ width:6,height:6,borderRadius:"50%",background:estStyle.color,display:"inline-block" }}/>
+                                  {hasdoc ? est : "Pendiente de cargar"}
+                                </span>
+                              </td>
+                              {/* emisión */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.emi || "—") : "—"}</td>
+                              {/* vencimiento */}
+                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.ven || "—") : "—"}</td>
+                              {/* atraso */}
+                              <td style={{ ...tdSt, fontSize:12.5, whiteSpace:"nowrap", color: est==="Vencido"?"#DC2626":"#9ca3af", fontWeight: est==="Vencido"?600:400 }}>
+                                {atraso}
+                              </td>
+                              {/* creado por */}
+                              <td style={tdSt}>
+                                {hasdoc ? (
+                                  <>
+                                    <div style={{ color:"#374151",fontSize:12.5 }}>{d.por || "—"}</div>
+                                    <div style={{ color:"#9ca3af",fontSize:11 }}>{d.el || ""}</div>
+                                  </>
+                                ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                              </td>
+                              {/* acciones */}
+                              <td style={{ ...tdSt, position:"relative" }}>
+                                <button
+                                  onClick={() => setOpenMenu(menuOpen ? null : menuKey)}
+                                  style={{ width:30,height:30,border:"none",background:"none",color:"#6b7280",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
+                                  onMouseEnter={e=>e.currentTarget.style.background="#F3F4F6"}
+                                  onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                >
+                                  <MoreHorizontal style={{ width:16,height:16 }}/>
+                                </button>
+                                {menuOpen && (
+                                  <div style={{ position:"absolute",right:8,top:44,width:230,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"6px 0",zIndex:40 }}>
+                                    {!hasdoc && (
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ viaje_id: code, doc: slot }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f5f3ff"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#8B3DFF" }}/> Cargar documento
+                                      </button>
+                                    )}
+                                    {hasdoc && (<>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Eye style={{ width:15,height:15,color:"#9ca3af" }}/> Visualizar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDownload(d.id, d.filename); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Download style={{ width:15,height:15,color:"#9ca3af" }}/> Descargar documento
+                                      </button>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); setAddForm(slot); setNewDoc({ viaje_id: code, doc: slot, emi: d.emi, ven: d.ven, ref: d.ref, desc: d.desc }); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <UploadCloud style={{ width:15,height:15,color:"#9ca3af" }}/> Editar / reemplazar
+                                      </button>
+                                      <div style={{ height:1,background:"#F3F4F6",margin:"4px 0" }}/>
+                                      <button
+                                        onClick={() => { setOpenMenu(null); handleDelete(d.id); }}
+                                        style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                                        onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
+                                        onMouseLeave={e=>e.currentTarget.style.background="none"}
+                                      >
+                                        <Trash2 style={{ width:15,height:15,color:"#DC2626" }}/> Eliminar documento
+                                      </button>
+                                    </>)}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            );
           })() : !isTemplate ? (
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1120 }}>
               <thead>
@@ -913,6 +1495,18 @@ export default function Documentacion() {
                 <div style={{ gridColumn:"1/-1" }}>
                   <label style={lblSt}>Placa del vehículo</label>
                   <input style={inputSt} placeholder="Ej. ABC-123" value={newDoc.placa||""} onChange={e=>setNewDoc(p=>({...p,placa:e.target.value.toUpperCase()}))}/>
+                </div>
+              )}
+              {tab === "Personal" && (
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lblSt}>Conductor</label>
+                  <input style={{ ...inputSt,background:"#F9FAFB",color:"#6b7280" }} readOnly value={newDoc.por||"—"}/>
+                </div>
+              )}
+              {tab === "Viajes" && (
+                <div style={{ gridColumn:"1/-1" }}>
+                  <label style={lblSt}>Código de Viaje / Ruta</label>
+                  <input style={inputSt} placeholder="Ej. V-001 o Ruta Lima-Chimbote" value={newDoc.viaje_id||""} onChange={e=>setNewDoc(p=>({...p,viaje_id:e.target.value.toUpperCase()}))}/>
                 </div>
               )}
               <div style={{ gridColumn:"1/-1" }}>
