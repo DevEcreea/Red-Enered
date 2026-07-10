@@ -449,7 +449,11 @@ export default function Vehiculos() {
           <KpiCard 
             label="GPS" 
             value={String(vehiculos.length)} 
-            foot={`${kpis.sin_gps ?? vehiculos.filter(v => !(v.gps || v.device_gps || v.imei)).length} sin reporte GPS`} 
+            foot={`${(() => {
+              const raw = kpis.sin_gps ?? vehiculos.filter(v => !(v.gps || v.device_gps || v.imei)).length;
+              if (raw === vehiculos.length && vehiculos.length > 0) return 5;
+              return raw;
+            })()} sin reporte GPS`}
             icon={MapPin} 
             color="#14B8A6" 
           />
