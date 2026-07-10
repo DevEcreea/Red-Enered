@@ -322,12 +322,12 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                         {(() => {
                           const isDemo = user?.email === "soporte@enered.pe";
                           
-                          let tankColor = "#EF4444";
-                          let tankTitle = "Validación de Capacidad de Tanque";
-                          let fuelColor = "#EF4444";
-                          let fuelTitle = "Validación de Producto (Combustible)";
-                          let cardColor = "#9ca3af";
-                          let cardTitle = "Validación de Transacción / Pago";
+                          let tankColor = "#10B981";
+                          let tankTitle = "Capacidad de tanque validada y dentro del límite";
+                          let fuelColor = "#10B981";
+                          let fuelTitle = "Rendimiento esperado";
+                          let cardColor = "#10B981";
+                          let cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
 
                           if (isDemo && r.PLACA === "TFN213") {
                             if (r.NUMERO_DOCUMENTO === "F003-284") {
@@ -335,7 +335,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                               tankTitle = "Capacidad de tanque validada y dentro del límite";
                               fuelColor = "#EF4444";
                               fuelTitle = "Rendimiento menor al esperado (Tolerancia mínima): 9 GL /100 km (+10%)";
-                              cardColor = "#9ca3af";
+                              cardColor = "#10B981";
                               cardTitle = "La tarjeta de combustible y la asignada al vehículo coinciden";
                             } else if (r.NUMERO_DOCUMENTO === "F003-265") {
                               tankColor = "#EF4444";
