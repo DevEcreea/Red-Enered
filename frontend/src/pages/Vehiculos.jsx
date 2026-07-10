@@ -350,6 +350,7 @@ export default function Vehiculos() {
     try {
       const body = { ...vForm };
       if (body.año) body.año = parseInt(body.año, 10) || undefined;
+      if (body.proximo_mtto_km) body.proximo_mtto_km = parseInt(body.proximo_mtto_km, 10) || undefined;
       const id = body.id || body._id;
       delete body._id;
       if (vModal === "edit") {
@@ -445,7 +446,13 @@ export default function Vehiculos() {
 
         {/* KPIs — computados desde /api/vehiculos/kpis y datos locales */}
         <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:16,marginBottom:16 }}>
-          <KpiCard label="GPS" value={String(kpis.sin_gps ?? vehiculos.filter(v => !(v.gps || v.device_gps || v.imei)).length)} foot="Sin GPS" icon={MapPin} color="#14B8A6" />
+          <KpiCard 
+            label="GPS" 
+            value={String(vehiculos.length)} 
+            foot={`${kpis.sin_gps ?? vehiculos.filter(v => !(v.gps || v.device_gps || v.imei)).length} sin reporte GPS`} 
+            icon={MapPin} 
+            color="#14B8A6" 
+          />
           <KpiCard label="En Taller"                icon={Warehouse}  color="#F26B6B" value={String(kpis.en_taller ?? vehiculos.filter(v => (v.estado||"").toUpperCase() === "TALLER").length)} />
           <KpiCard label="Doc. Vehículo Vencida"    icon={FileText}   color="#F26B6B" value={String(kpis.docs_vehiculo_vencidos ?? 0)} />
           <KpiCard label="Doc. Chofer Vencida"      icon={UserCheck}  color="#F26B6B" value={String(kpis.docs_chofer_vencidos ?? 0)} />
@@ -555,10 +562,43 @@ export default function Vehiculos() {
                         </td>
                         <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>{v.modelo||"—"}</td>
                         <td style={{ padding:"10px 14px" }}>
-                          <div style={{ display:"flex",gap:4 }}>
-                            <b style={{ borderRadius:4,fontSize:9,fontWeight:700,padding:"1px 4px",color:"#fff",background:"#F26B6B" }}>P</b>
-                            <b style={{ borderRadius:4,fontSize:9,fontWeight:700,padding:"1px 4px",color:"#fff",background:"#8B3DFF" }}>V</b>
-                          </div>
+                          {(() => {
+                            const kmActual = v.kilometraje || 0;
+                            const kmMtto = v.proximo_mtto_km || 0;
+                            const kmFaltan = kmMtto - kmActual;
+                            
+                            const formatFecha = (f) => {
+                              if (!f) return "Sin programar";
+                              try {
+                                const parts = f.split("-");
+                                if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+                                return f;
+                              } catch(e) {
+                                return f;
+                              }
+                            };
+
+                            const fechaStr = formatFecha(v.proximo_mtto_fecha);
+                            const calendarTitle = `Mantenimiento Próximo: ${fechaStr}`;
+                            
+                            const wrenchTitle = kmMtto > 0
+                              ? `Mantenimiento a los ${kmMtto.toLocaleString("es-PE")} Km (Faltan ${kmFaltan > 0 ? kmFaltan.toLocaleString("es-PE") : 0} Km)`
+                              : "Kilometraje de mantenimiento sin definir";
+
+                            const calendarColor = v.proximo_mtto_fecha ? "#8B3DFF" : "#cbd5e1";
+                            const wrenchColor = kmMtto > 0 ? (kmFaltan <= 1000 ? "#F26B6B" : "#10B981") : "#cbd5e1";
+
+                            return (
+                              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                                <span title={calendarTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <CalendarDays style={{ width:16, height:16, color:calendarColor }}/>
+                                </span>
+                                <span title={wrenchTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
+                                  <Wrench style={{ width:15, height:15, color:wrenchColor }}/>
+                                </span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>{v.tipo||"—"}</td>
                         <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>{v.base||"—"}</td>
@@ -856,10 +896,20 @@ export default function Vehiculos() {
               <input value={vForm.cc||""} placeholder="Ej: 100000 - SEDE CENTRAL"
                 onChange={e=>setVForm({...vForm,cc:e.target.value})} style={inputSt}/>
             </div>
-            <div style={{ gridColumn:"1/-1" }}>
-              <label style={labelSt}>Kilometraje</label>
+            <div>
+              <label style={labelSt}>Kilometraje Actual</label>
               <input type="number" value={vForm.kilometraje||""} placeholder="Ej: 150000"
                 onChange={e=>setVForm({...vForm,kilometraje:parseInt(e.target.value)||0})} style={inputSt}/>
+            </div>
+            <div>
+              <label style={labelSt}>Próximo Mantenimiento (Kilometraje)</label>
+              <input type="number" value={vForm.proximo_mtto_km||""} placeholder="Ej: 155000"
+                onChange={e=>setVForm({...vForm,proximo_mtto_km:parseInt(e.target.value)||0})} style={inputSt}/>
+            </div>
+            <div style={{ gridColumn:"1/-1" }}>
+              <label style={labelSt}>Próximo Mantenimiento (Fecha)</label>
+              <input type="date" value={vForm.proximo_mtto_fecha||""}
+                onChange={e=>setVForm({...vForm,proximo_mtto_fecha:e.target.value})} style={inputSt}/>
             </div>
           </div>
 

@@ -2879,6 +2879,8 @@ class VehiculoCreate(BaseModel):
     conductor_principal_id: Optional[str] = None
     empresa: Optional[str] = None
     kilometraje: Optional[int] = None
+    proximo_mtto_fecha: Optional[str] = None
+    proximo_mtto_km: Optional[int] = None
 
 class VehiculoUpdate(BaseModel):
     placa: Optional[str] = None
@@ -2894,6 +2896,8 @@ class VehiculoUpdate(BaseModel):
     cc: Optional[str] = None
     conductor_principal_id: Optional[str] = None
     kilometraje: Optional[int] = None
+    proximo_mtto_fecha: Optional[str] = None
+    proximo_mtto_km: Optional[int] = None
 
 class ConductorCreate(BaseModel):
     dni: str = Field(min_length=8, max_length=8)
@@ -3144,6 +3148,8 @@ async def create_vehiculo(req: Request, body: VehiculoCreate):
         "conductor_principal_id": body.conductor_principal_id,
         "empresa": body.empresa or u.get("empresa"),
         "kilometraje": body.kilometraje,
+        "proximo_mtto_fecha": body.proximo_mtto_fecha,
+        "proximo_mtto_km": body.proximo_mtto_km,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": u["id"],
     }
