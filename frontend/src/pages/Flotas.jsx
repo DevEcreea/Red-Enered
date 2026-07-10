@@ -544,11 +544,154 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
 
 // ── TAB: EVENTOS ──────────────────────────────────────────────────────────────
 function TabEventos({ onToast }) {
+  const [search, setSearch] = useState("");
+  const [filterNivel, setFilterNivel] = useState("Todos");
+
+  const MOCK_EVENTS = [
+    {
+      id: "e1",
+      placa: "T9J904",
+      evento: "Ralentí Prolongado",
+      nivel: "Alto",
+      fecha: "2026-07-09 14:32",
+      duracion: "45 minutos",
+      consumo: "1.2 GL",
+      detalle: "El motor permaneció encendido sin desplazamiento (velocidad 0 km/h) excediendo el límite establecido (10 min).",
+      estacion: "HUAMACHUCO / SERVICENTROS MARIELENA"
+    },
+    {
+      id: "e2",
+      placa: "TDF856",
+      evento: "Ralentí Prolongado",
+      nivel: "Alto",
+      fecha: "2026-07-09 10:15",
+      duracion: "35 minutos",
+      consumo: "0.9 GL",
+      detalle: "El motor permaneció encendido sin desplazamiento (velocidad 0 km/h) excediendo el límite establecido (10 min).",
+      estacion: "HUAMACHUCO / SERVICENTROS MARIELENA"
+    },
+    {
+      id: "e3",
+      placa: "TDF862",
+      evento: "Exceso de Velocidad",
+      nivel: "Medio",
+      fecha: "2026-07-08 16:45",
+      duracion: "N/A",
+      consumo: "N/A",
+      detalle: "Vehículo reportó velocidad de 98 km/h en zona regulada de 80 km/h.",
+      estacion: "Carretera Industrial - Trujillo"
+    },
+    {
+      id: "e4",
+      placa: "T8D811",
+      evento: "Carga Fuera de Ruta",
+      nivel: "Bajo",
+      fecha: "2026-07-08 11:20",
+      duracion: "N/A",
+      consumo: "N/A",
+      detalle: "Desviación de ruta de despacho autorizada por 4.2 km.",
+      estacion: "CHICLAYO / ENERGIX PERU EIRL"
+    }
+  ];
+
+  const filteredEvents = useMemo(() => {
+    return MOCK_EVENTS.filter(e => {
+      const matchSearch = e.placa.toLowerCase().includes(search.toLowerCase()) || 
+                          e.evento.toLowerCase().includes(search.toLowerCase());
+      const matchNivel = filterNivel === "Todos" || e.nivel === filterNivel;
+      return matchSearch && matchNivel;
+    });
+  }, [search, filterNivel]);
+
   return (
-    <div style={{ background:"#fff",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)" }}>
-      <div style={{ display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"#9ca3af",padding:48 }}>
-        <ShieldCheck style={{ width:34,height:34,color:"#cbd5e1",marginBottom:10 }}/>
-        Sin eventos registrados.
+    <div style={{ background:"#fff",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:24 }}>
+      {/* Header & Filters */}
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:16,marginBottom:20 }}>
+        <div>
+          <h3 style={{ fontSize:18,fontWeight:700,color:"#111827",margin:0 }}>Panel de Alertas y Eventos (Telemetría)</h3>
+          <p style={{ fontSize:13,color:"#6B7280",marginTop:4,margin:0 }}>Eventos de ralentí, excesos de velocidad y desvíos reportados en tiempo real.</p>
+        </div>
+        
+        <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+          {/* Search */}
+          <div style={{ position:"relative",display:"flex",alignItems:"center" }}>
+            <Search style={{ width:16,height:16,color:"#9CA3AF",position:"absolute",left:12 }}/>
+            <input 
+              type="text" 
+              placeholder="Buscar por placa o evento..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ padding:"8px 12px 8px 36px",fontSize:13,border:"1px solid #E5E7EB",borderRadius:10,outline:"none",width:240 }}
+            />
+          </div>
+
+          {/* Level Filter */}
+          <select 
+            value={filterNivel} 
+            onChange={e => setFilterNivel(e.target.value)}
+            style={{ padding:"8px 12px",fontSize:13,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",outline:"none",cursor:"pointer" }}
+          >
+            <option value="Todos">Severidad: Todas</option>
+            <option value="Alto">Alto / Crítico</option>
+            <option value="Medio">Medio</option>
+            <option value="Bajo">Bajo</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Events Table */}
+      <div style={{ overflowX:"auto" }}>
+        <table style={{ width:"100%",borderCollapse:"collapse",textAlign:"left" }}>
+          <thead>
+            <tr style={{ background:"#241B4A",color:"#fff" }}>
+              <th style={{ padding:14,fontSize:13,fontWeight:600,borderRadius:"10px 0 0 10px" }}>Placa</th>
+              <th style={{ padding:14,fontSize:13,fontWeight:600 }}>Tipo Evento</th>
+              <th style={{ padding:14,fontSize:13,fontWeight:600 }}>Fecha y Hora</th>
+              <th style={{ padding:14,fontSize:13,fontWeight:600 }}>Severidad</th>
+              <th style={{ padding:14,fontSize:13,fontWeight:600 }}>Detalle / Duración</th>
+              <th style={{ padding:14,fontSize:13,fontWeight:600,borderRadius:"0 10px 10px 0" }}>Estación / Referencia</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEvents.map((e, idx) => {
+              const badgeColors = 
+                e.nivel === "Alto" ? { bg: "#FEE2E2", text: "#991B1B" } :
+                e.nivel === "Medio" ? { bg: "#FEF3C7", text: "#92400E" } :
+                { bg: "#F3F4F6", text: "#374151" };
+
+              return (
+                <tr key={e.id} style={{ borderBottom:"1px solid #F3F4F6",fontSize:13.5,color:"#4B5563" }}>
+                  <td style={{ padding:14,fontWeight:600,color:"#111827" }}>{e.placa}</td>
+                  <td style={{ padding:14 }}>
+                    <span style={{ display:"inline-flex",alignItems:"center",gap:6 }}>
+                      <span style={{ width:8,height:8,borderRadius:"50%",background:e.nivel==="Alto"?"#EF4444":e.nivel==="Medio"?"#F59E0B":"#9CA3AF" }}></span>
+                      {e.evento}
+                    </span>
+                  </td>
+                  <td style={{ padding:14 }}>{e.fecha}</td>
+                  <td style={{ padding:14 }}>
+                    <span style={{ padding:"2px 8px",borderRadius:20,fontSize:11,fontWeight:700,background:badgeColors.bg,color:badgeColors.text }}>
+                      {e.nivel}
+                    </span>
+                  </td>
+                  <td style={{ padding:14,maxWidth:320 }}>
+                    <div><strong>{e.duracion !== "N/A" ? `Duración: ${e.duracion} (${e.consumo})` : ""}</strong></div>
+                    <div style={{ fontSize:12,color:"#6B7280",marginTop:2 }}>{e.detalle}</div>
+                  </td>
+                  <td style={{ padding:14 }}>{e.estacion}</td>
+                </tr>
+              );
+            })}
+
+            {filteredEvents.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ textAlign:"center",padding:40,color:"#9CA3AF",fontSize:14 }}>
+                  No se encontraron eventos para los filtros seleccionados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
