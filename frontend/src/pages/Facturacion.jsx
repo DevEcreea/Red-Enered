@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
@@ -41,6 +42,10 @@ export default function Facturacion() {
   const [page, setPage] = useState(1);
   const [comingSoon, setComingSoon] = useState(false);
   const [emailInput, setEmailInput] = useState("");
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
+  const [viewerDoc, setViewerDoc] = useState(null);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -132,6 +137,20 @@ export default function Facturacion() {
       URL.revokeObjectURL(url);
     } catch {
       toast.error(`No se encontró el ${kind.toUpperCase()} de la factura`);
+    }
+  };
+
+  const viewInvoice = async (inv, kind) => {
+    try {
+      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
+      const blob = new Blob([r.data]);
+      const url = URL.createObjectURL(blob);
+      setViewerUrl(url);
+      setViewerTitle(`${inv.n_doc}.${kind}`);
+      setViewerDoc({ inv, kind });
+      setViewerOpen(true);
+    } catch {
+      toast.error(`No se encontró el ${kind.toUpperCase()} de la factura para visualizar`);
     }
   };
 
@@ -329,11 +348,14 @@ export default function Facturacion() {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-center gap-1.5">
-                        {inv.pdf_filename && (
-                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
+                        {inv.pdf_filename && (<>
+                          <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
                             <FileText className="w-4 h-4" />
                           </button>
-                        )}
+                        </>)}
                         {inv.xml_filename && (
                           <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                             <FileSpreadsheet className="w-4 h-4" />
@@ -398,6 +420,7 @@ export default function Facturacion() {
           </div>
         </div>
       )}
+      <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadInvoice(viewerDoc?.inv, viewerDoc?.kind)} />
     </div>
   );
 }

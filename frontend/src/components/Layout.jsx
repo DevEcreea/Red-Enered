@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, GraduationCap,
   LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
   FileText, Wrench, Disc, AlertTriangle,
-  Wallet, Calendar, Ticket, ClipboardCheck, Car, Route, ChevronDown,
+  Wallet, Calendar, Ticket, ClipboardCheck, Car, Route, ChevronDown, ChevronLeft, ChevronRight,
   FolderCheck,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
@@ -28,8 +28,6 @@ const MENU = [
   { to: "/flotas", label: "Combustible", icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
   { to: "/facturacion", label: "Cuenta", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
   { to: "/gestion-gastos", label: "Gestión Gastos", icon: Wallet, roles: ALL_REGULAR_ROLES, testid: "nav-gestion-gastos" },
-  { to: "/calendario", label: "Calendario", icon: Calendar, roles: ALL_REGULAR_ROLES, testid: "nav-calendario" },
-  { to: "/tickets", label: "Tickets", icon: Ticket, roles: ALL_REGULAR_ROLES, testid: "nav-tickets" },
   { to: "/mantenimiento", label: "Mantenimiento", icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
   { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist" },
   { to: "/infracciones", label: "Infracciones", icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
@@ -94,12 +92,12 @@ function SidebarLink({ item, onClick, isCollapsed }) {
       ) : (
         <Ic className={`w-5 h-5 flex-shrink-0 ${active ? "text-cyan-300" : "text-white/90"}`} strokeWidth={2} />
       )}
-      <span className={`text-sm font-semibold flex-1 transition-all duration-300 whitespace-nowrap overflow-hidden ${
-        isCollapsed ? "opacity-0 w-0 pointer-events-none" : "opacity-100"
+      <span className={`text-sm font-semibold flex-1 text-left transition-opacity duration-300 whitespace-nowrap ${
+        isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
       } ${active ? "text-cyan-300" : "text-white/95"}`}>{item.label}</span>
       {item.badge && (
-        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 transition-all duration-300 ${
-          isCollapsed ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
+        <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 transition-opacity duration-300 ${
+          isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
         } ${
           item.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
         }`}>
@@ -107,16 +105,14 @@ function SidebarLink({ item, onClick, isCollapsed }) {
         </span>
       )}
       {hasSubmenu && (
-        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-all duration-300 ${
-          isCollapsed ? "opacity-0 w-0 overflow-hidden pointer-events-none" : "opacity-100"
+        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-opacity duration-300 ${
+          isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
         } ${expanded ? "rotate-180" : ""} ${active || isSubmenuActive ? "text-cyan-300" : "text-white/70"}`} />
       )}
     </>
   );
 
-  const baseCls = `relative flex items-center rounded-lg transition-all ${
-    isCollapsed ? "gap-0 justify-center px-2 py-2.5" : "gap-3 px-4 py-2.5"
-  }`;
+  const baseCls = `relative flex items-center rounded-lg transition-all overflow-hidden gap-3 px-[14px] py-2.5`;
 
   if (item.disabled) {
     return (
@@ -212,7 +208,7 @@ export default function Layout({ children }) {
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [overview, setOverview] = useState(null);
-  const [isHovered, setIsHovered] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [wakingUp, setWakingUp] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -279,7 +275,7 @@ export default function Layout({ children }) {
     : (overview?.empresa || user.empresa || "ENERED PERÚ");
   const openWA = () => window.open(WA_LINK, "_blank");
 
-  const SidebarContent = ({ isCollapsed }) => (
+  const SidebarContent = ({ isCollapsed, onToggle }) => (
     <>
       {/* Logo */}
       <div className="px-5 pt-6 pb-5 flex-shrink-0 flex items-center justify-center min-h-[70px] relative">
@@ -308,7 +304,7 @@ export default function Layout({ children }) {
       {/* Divider */}
       <div className={`mx-5 h-px bg-white/15 mb-2 flex-shrink-0 transition-all duration-300 ${isCollapsed ? "mx-3" : "mx-5"}`} />
 
-      <nav className="flex-1 px-3 py-2 flex flex-col space-y-1 overflow-y-auto overflow-x-hidden" data-testid="sidebar-nav">
+      <nav className="flex-1 px-3 py-2 flex flex-col space-y-1.5 overflow-y-auto overflow-x-hidden" data-testid="sidebar-nav">
         {items.map((item) => (
           <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
         ))}
@@ -325,20 +321,36 @@ export default function Layout({ children }) {
             ))}
           </>
         )}
+
+        <div className="flex-1 min-h-[8px]" />
+
+        {/* Toggle Sidebar Button */}
+        {onToggle && (
+          <button
+            onClick={onToggle}
+            className={`hidden md:flex w-full items-center rounded-lg hover:bg-white/10 transition-all duration-300 overflow-hidden gap-3 px-[14px] py-2.5`}
+            title={isCollapsed ? "Expandir menú" : "Contraer menú"}
+          >
+            {isCollapsed ? <ChevronRight className="w-5 h-5 text-white/80 flex-shrink-0" strokeWidth={1.75} /> : <ChevronLeft className="w-5 h-5 text-white/80 flex-shrink-0" strokeWidth={1.75} />}
+            <span className={`text-sm font-semibold flex-1 text-left text-white/90 transition-opacity duration-300 whitespace-nowrap ${
+              isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
+            }`}>
+              {isCollapsed ? "Expandir" : "Contraer"}
+            </span>
+          </button>
+        )}
       </nav>
 
       {/* Logout */}
       <div className="px-3 py-3 border-t border-white/15 flex-shrink-0">
         <button
           onClick={handleLogout}
-          className={`w-full flex items-center rounded-lg hover:bg-white/10 transition-all duration-300 ${
-            isCollapsed ? "gap-0 justify-center px-2 py-2.5" : "gap-3 px-4 py-2.5"
-          }`}
+          className={`w-full flex items-center rounded-lg hover:bg-white/10 transition-all duration-300 overflow-hidden gap-3 px-[14px] py-2.5`}
           data-testid="logout-btn"
         >
           <LogOut className="w-5 h-5 text-white/80 flex-shrink-0" strokeWidth={1.75} />
-          <span className={`text-sm font-semibold text-white/90 transition-all duration-300 whitespace-nowrap overflow-hidden ${
-            isCollapsed ? "opacity-0 w-0 pointer-events-none" : "opacity-100"
+          <span className={`text-sm font-semibold flex-1 text-left text-white/90 transition-opacity duration-300 whitespace-nowrap ${
+            isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
           }`}>
             Salir
           </span>
@@ -351,21 +363,19 @@ export default function Layout({ children }) {
     <div className="min-h-screen bg-[#F6F7FB]">
       {/* Banner "Reactivando servidor..." — se muestra si un request tarda >5s (cold-start Render free) */}
       {wakingUp && (
-        <div className="fixed top-0 left-0 right-0 z-[100] bg-amber-500 text-white text-xs font-semibold py-2 px-4 text-center shadow-lg flex items-center justify-center gap-2">
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-emerald-500 text-white text-xs font-semibold py-2 px-4 text-center shadow-lg flex items-center justify-center gap-2">
           <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          Reactivando servidor… puede tardar hasta 60 segundos la primera vez.
+          Preparando tu flota… cargando vehículos y datos.
         </div>
       )}
       {/* Desktop sidebar */}
       <aside
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 transition-all duration-300 ease-in-out ${
-          isHovered ? "w-56 shadow-2xl" : "w-[72px]"
+        className={`hidden md:flex fixed inset-y-0 left-0 flex-col z-40 transition-all duration-300 ease-in-out border-r border-white/10 ${
+          isSidebarOpen ? "w-56" : "w-[72px]"
         }`}
         style={{ background: "linear-gradient(180deg, #8039F4 0%, #6B26DC 100%)" }}
       >
-        <SidebarContent isCollapsed={!isHovered} />
+        <SidebarContent isCollapsed={!isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
       </aside>
 
       {/* Mobile sidebar overlay */}
@@ -382,7 +392,7 @@ export default function Layout({ children }) {
       )}
 
       {/* Header */}
-      <header className="md:ml-[72px] h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100 transition-all duration-300 ease-in-out">
+      <header className={`${isSidebarOpen ? "md:ml-56" : "md:ml-[72px]"} h-20 bg-white sticky top-0 z-30 flex items-center justify-between px-4 md:px-8 border-b border-neutral-100 transition-all duration-300 ease-in-out`}>
         <div className="flex items-center gap-3 min-w-0">
           <button
             className="md:hidden p-2 rounded-md hover:bg-neutral-100"
@@ -434,7 +444,7 @@ export default function Layout({ children }) {
         </div>
       </header>
 
-      <main className="md:ml-[72px] p-4 md:p-8 space-y-8 page-enter transition-all duration-300 ease-in-out">
+      <main className={`${isSidebarOpen ? "md:ml-56" : "md:ml-[72px]"} p-4 md:p-8 space-y-8 page-enter transition-all duration-300 ease-in-out`}>
         {children}
         <EmayFooter variant="compact" />
       </main>

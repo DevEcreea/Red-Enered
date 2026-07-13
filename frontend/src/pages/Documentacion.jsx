@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 const SEED = {
@@ -129,6 +130,23 @@ function ModalOverlay({ children, onClose, maxWidth=760 }) {
   );
 }
 
+function FSel({ label, icon:Icon, grow, value, onChange, options = [] }) {
+  return (
+    <div style={{ position:"relative",height:38,border:"1px solid #E5E7EB",borderRadius:8,background:"#fff",display:"flex",alignItems:"center",padding:"0",fontSize:13,minWidth:grow?undefined:130,flex:grow?"1":undefined,cursor:"pointer" }}>
+      {Icon && <Icon style={{ width:15,height:15,color:"#9ca3af",marginLeft:12,marginRight:4 }}/>}
+      <select 
+        value={value} 
+        onChange={onChange}
+        style={{ width:"100%", height:"100%", border:"none", background:"transparent", padding: Icon ? "0 30px 0 4px" : "0 30px 0 12px", appearance:"none", outline:"none", color: value ? "#111827" : "#6b7280", fontWeight: value ? 600 : 400, cursor:"pointer" }}
+      >
+        <option value="">{label}</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <ChevronDown style={{ position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",width:14,height:14,color:"#9ca3af", pointerEvents:"none" }}/>
+    </div>
+  );
+}
+
 const inputSt = { width:"100%",height:38,border:"1px solid #E5E7EB",borderRadius:8,padding:"0 12px",fontSize:13,outline:"none",color:"#374151",boxSizing:"border-box" };
 const lblSt   = { fontSize:11,color:"#6b7280",marginBottom:4,display:"block" };
 
@@ -138,6 +156,24 @@ export default function Documentacion() {
   const [tab, setTab]           = useState("Vehículos");
   const [docs, setDocs]         = useState([]);
   const [loading, setLoading]   = useState(true);
+  const [filtros, setFiltros] = useState({ estado: "", placa: "", creado_por: "" });
+  const updFiltro = (k) => (e) => setFiltros(p => ({ ...p, [k]: e.target.value }));
+
+  const filterOpts = useMemo(() => {
+    const estados = new Set();
+    const placas = new Set();
+    const creadores = new Set();
+    docs.forEach(d => {
+      if (d.est) estados.add(d.est);
+      if (d.placa) placas.add(d.placa);
+      if (d.por) creadores.add(d.por);
+    });
+    return {
+      estado: Array.from(estados).sort(),
+      placa: Array.from(placas).sort(),
+      creador: Array.from(creadores).sort(),
+    };
+  }, [docs]);
   const [empresaFiltro, setEmpresaFiltro] = useState("");
   const [empresas, setEmpresas] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
@@ -146,7 +182,17 @@ export default function Documentacion() {
   const [expandedCond, setExpandedCond] = useState({});
   const [expandedViajes, setExpandedViajes] = useState({});
 
-  const [templates, setTemplates] = useState(TEMPLATES_INIT);
+  const [templates, setTemplates] = useState(() => {
+    const saved = localStorage.getItem("doc_templates");
+    if (saved) {
+      try { return JSON.parse(saved); } catch(e) {}
+    }
+    return TEMPLATES_INIT;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("doc_templates", JSON.stringify(templates));
+  }, [templates]);
   const [verArch, setVerArch]   = useState(false);
   const [openMenu, setOpenMenu] = useState(null); // doc id with open row-menu
   const [addOpen, setAddOpen]   = useState(false);
@@ -163,6 +209,55 @@ export default function Documentacion() {
   const [tplModal, setTplModal]   = useState(false);
   const [newDoc, setNewDoc]       = useState({});
   const [newTpl, setNewTpl]       = useState({});
+  
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
+
+  const calculateStatus = (doc) => {
+    if (!doc.ven) return doc;
+    let venDate;
+    if (doc.ven.includes("/")) {
+      const parts = doc.ven.split("/");
+      if (parts.length === 3) {
+        const [d, m, y] = parts;
+        const year = y.length === 2 ? 2000 + parseInt(y) : parseInt(y);
+        venDate = new Date(year, parseInt(m) - 1, parseInt(d));
+      }
+    } else if (doc.ven.includes("-")) {
+      venDate = new Date(doc.ven + "T00:00:00");
+    }
+    
+    if (!venDate || isNaN(venDate.getTime())) return doc;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffTime = venDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    let est = "Vigente";
+    let atr = "—";
+
+    if (diffDays < 0) {
+      est = "Vencido";
+      const absDays = Math.abs(diffDays);
+      if (absDays > 30) {
+        const months = Math.floor(absDays / 30);
+        atr = `${months} mes${months > 1 ? 'es' : ''}`;
+      } else {
+        atr = `${absDays} día${absDays > 1 ? 's' : ''}`;
+      }
+    } else if (diffDays <= 30) {
+      est = "Próximo";
+      atr = `${diffDays} día${diffDays > 1 ? 's' : ''}`;
+    }
+
+    if (doc.archived) {
+      est = "Archivado";
+    }
+
+    return { ...doc, est, atr };
+  };
 
   const load = async () => {
     setLoading(true);
@@ -174,13 +269,19 @@ export default function Documentacion() {
       
       let mergedDocs = data || [];
       const hasPersonal = mergedDocs.some(d => d.tipo === "Personal");
-      if (!hasPersonal) {
+      if (!hasPersonal && !localStorage.getItem("hideSeedPersonal")) {
         mergedDocs = [...mergedDocs, ...SEED.Personal];
       }
       const hasViajes = mergedDocs.some(d => d.tipo === "Viajes");
-      if (!hasViajes) {
+      if (!hasViajes && !localStorage.getItem("hideSeedViajes")) {
         mergedDocs = [...mergedDocs, ...SEED.Viajes];
       }
+      
+      const miNombre = user?.nombre || "Soporte";
+      const dummyNombres = ["Cindy Coach", "Bisma Ishfaq", "Atif Safeer", "Anwesha Ch.", "Cliente (Subsidio)", "Admin"];
+      mergedDocs = mergedDocs.map(d => dummyNombres.includes(d.por) ? { ...d, por: miNombre } : d);
+
+      mergedDocs = mergedDocs.map(calculateStatus);
       setDocs(mergedDocs);
 
       // Fetch global vehiculos to populate the Vehículos tab accordion
@@ -231,8 +332,14 @@ export default function Documentacion() {
   }, [tab, docs, isTemplate]);
 
   const visible = useMemo(() => {
-    return tabDocs.filter(d => verArch ? true : !d.archived);
-  }, [tabDocs, verArch]);
+    return tabDocs.filter(d => {
+      if (!verArch && d.archived) return false;
+      if (filtros.placa && (d.placa||"").toUpperCase() !== filtros.placa.toUpperCase()) return false;
+      if (filtros.estado && d.est !== filtros.estado) return false;
+      if (filtros.creado_por && d.por !== filtros.creado_por) return false;
+      return true;
+    });
+  }, [tabDocs, verArch, filtros]);
 
   // KPIs
   const kpis = useMemo(()=>{
@@ -254,6 +361,41 @@ export default function Documentacion() {
   }, [tab, tabDocs, templates, isTemplate]);
 
   // Actions
+  const handleDeleteDriver = async (cid) => {
+    if (!window.confirm("¿Estás seguro de eliminar este conductor y sus documentos?")) return;
+    const cidLower = (cid || "").toLowerCase();
+    const toDelete = docs.filter(d => d.tipo === "Personal" && (d.conductor_id === cid || (!d.conductor_id && d.por && cidLower.includes(d.por.toLowerCase()))));
+    for (const d of toDelete) {
+      if (!String(d.id).startsWith("300") && !String(d.id).startsWith("400")) {
+        await api.delete(`/documents/${d.id}`).catch(()=>({}));
+      } else {
+        localStorage.setItem("hideSeedPersonal", "true");
+      }
+    }
+    setDocs(prev => prev.filter(d => !toDelete.includes(d)));
+    showToast("Conductor eliminado");
+  };
+
+  const handleDeleteViaje = async (vid) => {
+    if (!window.confirm("¿Estás seguro de eliminar este viaje y sus documentos?")) return;
+    let v_idx = 0;
+    const toDelete = docs.filter(d => {
+      if (d.tipo !== "Viajes") return false;
+      const code = d.viaje_id || `VIAJE-${100 + (v_idx % 2)}`;
+      v_idx++;
+      return code === vid;
+    });
+    for (const d of toDelete) {
+      if (!String(d.id).startsWith("300") && !String(d.id).startsWith("400")) {
+        await api.delete(`/documents/${d.id}`).catch(()=>({}));
+      } else {
+        localStorage.setItem("hideSeedViajes", "true");
+      }
+    }
+    setDocs(prev => prev.filter(d => !toDelete.includes(d)));
+    showToast("Viaje eliminado");
+  };
+
   const handleDelete = async (id) => {
     if (String(id).startsWith("300") || String(id).startsWith("400")) {
       setDocs(prev => prev.filter(d => d.id !== id));
@@ -305,6 +447,23 @@ export default function Documentacion() {
     }
   };
 
+  const handleView = async (id, filename) => {
+    if (String(id).startsWith("300") || String(id).startsWith("400")) {
+      showToast("Visualizando documento simulado...");
+      return;
+    }
+    try {
+      const r = await api.get(`/documents/${id}/download`, { responseType: "blob" });
+      const blob = new Blob([r.data], { type: r.headers["content-type"] });
+      const url = URL.createObjectURL(blob);
+      setViewerUrl(url);
+      setViewerTitle(filename || "Documento");
+      setViewerOpen(true);
+    } catch (err) {
+      alert("No se pudo cargar el documento.");
+    }
+  };
+
   const handleSaveDoc = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
@@ -320,10 +479,41 @@ export default function Documentacion() {
     if (newDoc.placa) fd.append("placa", newDoc.placa);
     if (newDoc.conductor_id) fd.append("conductor_id", newDoc.conductor_id);
     if (newDoc.viaje_id) fd.append("viaje_id", newDoc.viaje_id);
+    if (newDoc.ref) fd.append("ref", newDoc.ref);
+    if (newDoc.desc) fd.append("desc", newDoc.desc);
 
     try {
-      // No forzamos Content-Type — axios detecta FormData y agrega el boundary correcto.
+      const isReplacement = !!(newDoc.doc || addForm);
+      if (isReplacement) {
+        const slotName = (newDoc.doc || addForm).toLowerCase().replace(/[^a-z0-9]/g,"");
+        
+        const existings = docs.filter(d => {
+          if (d.tipo !== tab) return false;
+          if (String(d.id).startsWith("300") || String(d.id).startsWith("400")) return false;
+          const dName = (d.doc || "").toLowerCase().replace(/[^a-z0-9]/g,"");
+          
+          let isMatch = dName.includes(slotName) || slotName.includes(dName);
+          if (slotName === "sctrsalud" && (dName.includes("sctr") || dName.includes("salud"))) isMatch = true;
+          if (slotName === "sctrpension" && (dName.includes("sctr") || dName.includes("pension"))) isMatch = true;
+          if (slotName === "brevete" && (dName.includes("licencia") || dName.includes("breve"))) isMatch = true;
+          
+          if (!isMatch) return false;
+          
+          if (tab === "Vehículos" && newDoc.placa && d.placa === newDoc.placa) return true;
+          if (tab === "Personal" && newDoc.conductor_id && d.conductor_id === newDoc.conductor_id) return true;
+          if (tab === "Viajes" && newDoc.viaje_id && d.viaje_id === newDoc.viaje_id) return true;
+          if (tab === "Empresa") return true;
+          if (newDoc.id && d.id === newDoc.id) return true;
+          return false;
+        });
+
+        for (const ex of existings) {
+          await api.delete(`/documents/${ex.id}`).catch(()=>{});
+        }
+      }
+
       await api.post("/documents", fd);
+      
       setAddForm(null);
       setSelectedFile(null);
       setNewDoc({});
@@ -336,10 +526,19 @@ export default function Documentacion() {
 
   function handleCreateTpl(e) {
     e.preventDefault();
-    setTemplates(prev => [...prev, { id:`tp${Date.now()}`, nombre:newTpl.nombre||"Nueva plantilla", tipo:newTpl.tipo||"Vehículo", campos:0, por:"Admin", est:"Borrador" }]);
+    setTemplates(prev => {
+      let updated;
+      if (newTpl.id) {
+        updated = prev.map(t => t.id === newTpl.id ? { ...t, nombre:newTpl.nombre||"Nueva plantilla", tipo:newTpl.tipo||"Vehículo", campos:newTpl.campos||0 } : t);
+      } else {
+        updated = [...prev, { id:`tp${Date.now()}`, nombre:newTpl.nombre||"Nueva plantilla", tipo:newTpl.tipo||"Vehículo", campos:newTpl.campos||0, por:user?.nombre||"Soporte", est:"Borrador" }];
+      }
+      localStorage.setItem("doc_templates", JSON.stringify(updated));
+      return updated;
+    });
     setTplModal(false);
     setNewTpl({});
-    showToast("Plantilla creada");
+    showToast(newTpl.id ? "Plantilla actualizada" : "Plantilla creada");
   }
 
   const TH = "#1F2430";
@@ -347,8 +546,9 @@ export default function Documentacion() {
   const tdSt = { padding:"13px 16px",fontSize:13 };
 
   return (
-    <div style={{ padding:"24px 32px",background:"#F3F4F6",minHeight:"100%" }} data-testid="page-documentacion">
+    <div style={{ padding:"24px 32px",background:"transparent",minHeight:"100%" }} data-testid="page-documentacion">
       <Toast msg={toast}/>
+      <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} />
       {/* TABS */}
       <div style={{ display:"flex",alignItems:"center",gap:28,borderBottom:"1px solid #E5E7EB",marginBottom:22 }}>
         {TABS.map(({ key, icon:Icon })=>(
@@ -394,12 +594,9 @@ export default function Documentacion() {
               {empresas.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
           )}
-          <FBtn icon={Calendar} label="Fecha de creación"/>
-          <FBtn label="Grupos"/>
-          <FBtn label="Vehículos"/>
-          <FBtn label="Tipo"/>
-          <FBtn label="Creado por"/>
-          <FBtn label="Estado"/>
+          <FSel label="Vehículos / Placa" value={filtros.placa} onChange={updFiltro("placa")} options={filterOpts.placa} />
+          <FSel label="Creado por" value={filtros.creado_por} onChange={updFiltro("creado_por")} options={filterOpts.creador} />
+          <FSel label="Estado" value={filtros.estado} onChange={updFiltro("estado")} options={filterOpts.estado} />
           {!isTemplate && (
             <button onClick={()=>setVerArch(v=>!v)} style={{
               display:"flex",alignItems:"center",gap:8,height:38,padding:"0 12px",fontSize:13,
@@ -470,6 +667,18 @@ export default function Documentacion() {
             if (vehList.length === 0) {
               const placas = [...new Set(docs.filter(d => d.tipo === "Vehículos" && d.placa).map(d => d.placa.toUpperCase()))];
               vehList = placas.map(pl => ({ id: pl, placa: pl, empresa: "", tipo: "" }));
+            }
+            if (filtros.placa) vehList = vehList.filter(v => (v.placa||"").toUpperCase() === filtros.placa.toUpperCase());
+            if (filtros.estado || filtros.creado_por) {
+              vehList = vehList.filter(v => {
+                const sDocs = docsByPlaca[(v.placa||"").toUpperCase()] || {};
+                return Object.values(sDocs).some(d => {
+                  let ok = true;
+                  if (filtros.estado && d.est !== filtros.estado) ok = false;
+                  if (filtros.creado_por && d.por !== filtros.creado_por) ok = false;
+                  return ok;
+                });
+              });
             }
 
             if (loading) return (
@@ -657,7 +866,7 @@ export default function Documentacion() {
                                     )}
                                     {hasdoc && (<>
                                       <button
-                                        onClick={() => { setOpenMenu(null); }}
+                                        onClick={() => { setOpenMenu(null); handleView(d.id, d.filename); }}
                                         style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                         onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                         onMouseLeave={e=>e.currentTarget.style.background="none"}
@@ -730,6 +939,18 @@ export default function Documentacion() {
                 }
               });
               condList = Object.values(uniqueDrivers);
+            }
+            if (filtros.estado || filtros.creado_por) {
+              condList = condList.filter(c => {
+                const cid = c.id;
+                const sDocs = docsByConductor[cid] || {};
+                return Object.values(sDocs).some(d => {
+                  let ok = true;
+                  if (filtros.estado && d.est !== filtros.estado) ok = false;
+                  if (filtros.creado_por && d.por !== filtros.creado_por) ok = false;
+                  return ok;
+                });
+              });
             }
 
             // Build a lookup: driverId → { slotName → doc }
@@ -835,7 +1056,7 @@ export default function Documentacion() {
                           </td>
                           <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{c.licencia || "—"}</td>
                           {/* span remaining cols with summary */}
-                          <td colSpan={7} style={{ ...tdSt }}>
+                          <td colSpan={6} style={{ ...tdSt }}>
                             <span style={{ display:"flex",alignItems:"center",gap:10 }}>
                               <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
                                 <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
@@ -849,6 +1070,15 @@ export default function Documentacion() {
                               )}
                               <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{DRIVER_SLOTS.length} documentos</span>
                             </span>
+                          </td>
+                          <td style={{ ...tdSt, textAlign:"center" }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteDriver(cid); }}
+                              style={{ width:30,height:30,border:"none",background:"#FEF2F2",color:"#DC2626",borderRadius:8,cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center" }}
+                              title="Eliminar conductor y sus documentos"
+                            >
+                              <Trash2 style={{ width:15,height:15 }}/>
+                            </button>
                           </td>
                         </tr>
 
@@ -948,7 +1178,7 @@ export default function Documentacion() {
                                     )}
                                     {hasdoc && (<>
                                       <button
-                                        onClick={() => { setOpenMenu(null); }}
+                                        onClick={() => { setOpenMenu(null); handleView(d.id, d.filename); }}
                                         style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                         onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                         onMouseLeave={e=>e.currentTarget.style.background="none"}
@@ -1113,7 +1343,7 @@ export default function Documentacion() {
                           </td>
                           <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{t.ruta}</td>
                           {/* span remaining cols with summary */}
-                          <td colSpan={7} style={{ ...tdSt }}>
+                          <td colSpan={6} style={{ ...tdSt }}>
                             <span style={{ display:"flex",alignItems:"center",gap:10 }}>
                               <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
                                 <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
@@ -1127,6 +1357,15 @@ export default function Documentacion() {
                               )}
                               <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{VIAJE_SLOTS.length} documentos</span>
                             </span>
+                          </td>
+                          <td style={{ ...tdSt, textAlign:"center" }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteViaje(code); }}
+                              style={{ width:30,height:30,border:"none",background:"#FEF2F2",color:"#DC2626",borderRadius:8,cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center" }}
+                              title="Eliminar viaje y sus documentos"
+                            >
+                              <Trash2 style={{ width:15,height:15 }}/>
+                            </button>
                           </td>
                         </tr>
 
@@ -1226,7 +1465,7 @@ export default function Documentacion() {
                                     )}
                                     {hasdoc && (<>
                                       <button
-                                        onClick={() => { setOpenMenu(null); }}
+                                        onClick={() => { setOpenMenu(null); handleView(d.id, d.filename); }}
                                         style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 14px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
                                         onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                                         onMouseLeave={e=>e.currentTarget.style.background="none"}
@@ -1275,9 +1514,12 @@ export default function Documentacion() {
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1120 }}>
               <thead>
                 <tr style={{ background:TH }}>
-                  {["Nº DOC","TIPO","PLACA","DOCUMENTO","CREADO POR / EL","EMISIÓN","VENCIMIENTO","ATRASO","COMPARTIDO CON","ESTADO","ACCIONES"].map((h,i)=>(
-                    <th key={i} style={thSt}>{h}</th>
-                  ))}
+                  {(() => {
+                    let cols = ["Nº DOC","TIPO","PLACA","DOCUMENTO","CREADO POR / EL","EMISIÓN","VENCIMIENTO","ATRASO","COMPARTIDO CON","ESTADO","ACCIONES"];
+                    if (tab === "Personal") cols = ["Nº DOC","TIPO","DOCUMENTO","CREADO POR / EL","EMISIÓN","VENCIMIENTO","ATRASO","ESTADO","ACCIONES"];
+                    if (tab === "Empresa") cols = ["TIPO","DOCUMENTO","CREADO POR / EL","EMISIÓN","VENCIMIENTO","ATRASO","ESTADO","ACCIONES"];
+                    return cols.map((h,i) => <th key={i} style={thSt}>{h}</th>);
+                  })()}
                 </tr>
               </thead>
               <tbody>
@@ -1304,9 +1546,15 @@ export default function Documentacion() {
                     <tr key={d.id} style={{ borderTop:i===0?"none":"1px solid #F3F4F6",transition:"background .15s" }}
                       onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                       onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <td style={{ ...tdSt,fontWeight:600,color:"#374151",whiteSpace:"nowrap" }}>{d.id.substring(0,8)}</td>
+                      {tab !== "Empresa" && (
+                        <td style={{ ...tdSt,fontWeight:600,color:"#374151",whiteSpace:"nowrap" }}>
+                          {tab === "Personal" ? d.n_doc || "—" : d.id.substring(0,8)}
+                        </td>
+                      )}
                       <td style={{ ...tdSt,color:"#6b7280",whiteSpace:"nowrap" }}>{d.tipo}</td>
-                      <td style={{ ...tdSt,color:"#374151",fontWeight:600 }}>{d.placa || "—"}</td>
+                      {tab !== "Personal" && tab !== "Empresa" && (
+                        <td style={{ ...tdSt,color:"#374151",fontWeight:600 }}>{d.placa || "—"}</td>
+                      )}
                       <td style={{ ...tdSt,color:"#374151",fontWeight:500 }}>{d.doc}</td>
                       <td style={tdSt}>
                         <div style={{ color:"#374151",fontSize:12.5 }}>{d.por}</div>
@@ -1315,7 +1563,9 @@ export default function Documentacion() {
                       <td style={{ ...tdSt,color:"#6b7280",whiteSpace:"nowrap",fontSize:12.5 }}>{d.emi}</td>
                       <td style={{ ...tdSt,color:"#6b7280",whiteSpace:"nowrap",fontSize:12.5 }}>{d.ven}</td>
                       <td style={{ ...tdSt,whiteSpace:"nowrap",fontSize:12.5,color:d.est==="Vencido"?"#DC2626":"#9ca3af",fontWeight:d.est==="Vencido"?600:400 }}>{d.atr}</td>
-                      <td style={tdSt}>{sharedLabel}</td>
+                      {tab !== "Personal" && tab !== "Empresa" && (
+                        <td style={tdSt}>{sharedLabel}</td>
+                      )}
                       <td style={tdSt}><Pill est={d.est}/></td>
                       <td style={{ ...tdSt,position:"relative" }}>
                         <button onClick={()=>setOpenMenu(menuOpen?null:d.id)}
@@ -1327,8 +1577,9 @@ export default function Documentacion() {
                         {menuOpen && (
                           <div style={{ position:"absolute",right:8,top:44,width:220,background:"#fff",border:"1px solid #F0F0F3",borderRadius:10,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"4px 0",zIndex:40 }}>
                             {[
-                              { icon:Eye,      label:"Ver detalles del documento",  onClick: () => setOpenMenu(null) },
+                              { icon:Eye,      label:"Ver detalles del documento",  onClick: () => { setOpenMenu(null); handleView(d.id, d.filename); } },
                               { icon:Download, label:"Descargar documento",         onClick: () => { setOpenMenu(null); handleDownload(d.id, d.filename); } },
+                              { icon:UploadCloud, label:"Editar / reemplazar",       onClick: () => { setOpenMenu(null); setAddForm(d.doc); setNewDoc({ id: d.id, doc: d.doc, emi: d.emi, ven: d.ven, ref: d.ref, desc: d.desc }); } },
                             ].map((item,j)=>(
                               <button key={j} onClick={item.onClick}
                                 style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
@@ -1377,7 +1628,11 @@ export default function Documentacion() {
                 </tr>
               </thead>
               <tbody>
-                {templates.map((t,i)=>(
+                {templates.map((t,i)=>{
+                  const miNombre = user?.nombre || "Soporte";
+                  const dummyNombres = ["Cindy Coach", "Bisma Ishfaq", "Atif Safeer", "Anwesha Ch.", "Cliente (Subsidio)", "Admin"];
+                  const displayPor = dummyNombres.includes(t.por) ? miNombre : t.por;
+                  return (
                   <tr key={t.id} style={{ borderTop:i===0?"none":"1px solid #F3F4F6",transition:"background .15s" }}
                     onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
                     onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -1389,15 +1644,46 @@ export default function Documentacion() {
                     </td>
                     <td style={{ ...tdSt,color:"#6b7280" }}>{t.tipo}</td>
                     <td style={{ ...tdSt,color:"#6b7280" }}>{t.campos} campos</td>
-                    <td style={{ ...tdSt,color:"#6b7280" }}>{t.por}</td>
+                    <td style={{ ...tdSt,color:"#6b7280" }}>{displayPor}</td>
                     <td style={tdSt}><Pill est={t.est}/></td>
-                    <td style={tdSt}>
-                      <button style={{ width:30,height:30,border:"none",background:"none",color:"#6b7280",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}>
+                    <td style={{ ...tdSt,position:"relative" }}>
+                      <button onClick={()=>setOpenMenu(openMenu === t.id ? null : t.id)}
+                        style={{ width:30,height:30,border:"none",background:"none",color:"#6b7280",borderRadius:8,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}
+                        onMouseEnter={e=>e.currentTarget.style.background="#F3F4F6"}
+                        onMouseLeave={e=>e.currentTarget.style.background="none"}>
                         <MoreHorizontal style={{ width:16,height:16 }}/>
                       </button>
+                      {openMenu === t.id && (
+                        <div style={{ position:"absolute",right:8,top:44,width:180,background:"#fff",border:"1px solid #F0F0F3",borderRadius:10,boxShadow:"0 12px 30px rgba(0,0,0,.14)",padding:"4px 0",zIndex:40 }}>
+                          <button onClick={() => { setOpenMenu(null); setNewTpl(t); setTplModal(true); }}
+                            style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                            onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
+                            onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                            <UploadCloud style={{ width:15,height:15,color:"#9ca3af" }}/>Editar plantilla
+                          </button>
+                          <div style={{ height:1,background:"#F3F4F6",margin:"4px 0" }}/>
+                          <button onClick={() => { 
+                            setOpenMenu(null); 
+                            if(window.confirm("¿Seguro que deseas eliminar esta plantilla?")) {
+                              setTemplates(prev => {
+                                const nw = prev.filter(x => x.id !== t.id);
+                                localStorage.setItem("doc_templates", JSON.stringify(nw));
+                                return nw;
+                              });
+                              showToast("Plantilla eliminada");
+                            }
+                          }}
+                            style={{ width:"100%",display:"flex",alignItems:"center",gap:10,padding:"9px 12px",fontSize:13,color:"#DC2626",background:"none",border:"none",cursor:"pointer",textAlign:"left" }}
+                            onMouseEnter={e=>e.currentTarget.style.background="#fef2f2"}
+                            onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                            <Trash2 style={{ width:15,height:15,color:"#DC2626" }}/>Eliminar plantilla
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
           ) : null}
@@ -1537,6 +1823,10 @@ export default function Documentacion() {
                   <option value="">Vehículo · Personal · Viaje · Empresa</option>
                   {["Vehículo","Personal","Viaje","Empresa"].map(o=><option key={o}>{o}</option>)}
                 </select>
+              </div>
+              <div>
+                <label style={lblSt}>Campos requeridos</label>
+                <input type="number" style={inputSt} placeholder="Ej. 5" value={newTpl.campos||""} onChange={e=>setNewTpl(p=>({...p,campos:parseInt(e.target.value)||0}))}/>
               </div>
               <button type="submit" style={{ display:"flex",alignItems:"center",justifyContent:"center",height:40,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:600,cursor:"pointer",marginTop:18,boxShadow:"0 4px 12px rgba(139,61,255,.2)" }}>
                 Crear plantilla

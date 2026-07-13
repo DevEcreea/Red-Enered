@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 const ESTADO_TEXT_COLOR = {
   pagada: "text-green-600",
@@ -36,6 +37,10 @@ export default function EstadoCuentaHistorial() {
   const [allInvoices, setAllInvoices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
+  const [viewerDoc, setViewerDoc] = useState(null);
 
   // Filtros
   const [fEmpresa, setFEmpresa] = useState("");
@@ -172,6 +177,19 @@ export default function EstadoCuentaHistorial() {
       URL.revokeObjectURL(url);
     } catch {
       toast.error(`No hay ${kind.toUpperCase()} disponible para esta factura`);
+    }
+  };
+
+  const viewDoc = async (id, kind) => {
+    try {
+      const res = await api.get(`/invoices/${id}/download/${kind}`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      setViewerUrl(url);
+      setViewerTitle(`${id}.${kind}`);
+      setViewerDoc({ id, kind });
+      setViewerOpen(true);
+    } catch {
+      toast.error(`No hay ${kind.toUpperCase()} disponible para visualizar`);
     }
   };
 
@@ -335,6 +353,7 @@ export default function EstadoCuentaHistorial() {
             Tenga en cuenta que para mejor rendimiento se recomienda usar rangos de fechas acotados al consultar grandes volúmenes.
           </p>
         </div>
+        <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadDoc(viewerDoc?.id, viewerDoc?.kind)} />
       </div>
 
       {/* RESULTADOS */}
@@ -423,11 +442,18 @@ export default function EstadoCuentaHistorial() {
                           <td className="px-3 py-2.5 text-center">
                             <div className="inline-flex gap-1.5">
                               <button
+                                onClick={() => viewDoc(inv.id, "pdf")}
+                                title="Visualizar PDF"
+                                className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
                                 onClick={() => downloadDoc(inv.id, "pdf")}
                                 title="Descargar PDF"
-                                className="w-7 h-7 rounded-md bg-red-50 text-red-700 hover:bg-red-100 flex items-center justify-center"
+                                className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
                               >
-                                <FileText className="w-3.5 h-3.5" />
+                                <FileText className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => downloadDoc(inv.id, "xml")}

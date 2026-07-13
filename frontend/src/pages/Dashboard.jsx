@@ -723,42 +723,7 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ================= FILTERS (compact) ================= */}
-      <div className="bg-white border border-neutral-200 rounded-xl p-3 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-600 uppercase tracking-wider">
-          <Filter className="w-3.5 h-3.5" /> Filtros
-        </div>
-        <select value={filters.placa} onChange={(e) => setFilters({ ...filters, placa: e.target.value })}
-          className="h-8 px-2 border border-neutral-200 rounded-md bg-white text-xs font-semibold min-w-[120px]" data-testid="filter-placa">
-          <option value="">Placa</option>
-          {options.placas.map((v) => <option key={v}>{v}</option>)}
-        </select>
-        <select value={filters.semana} onChange={(e) => setFilters({ ...filters, semana: e.target.value })}
-          className="h-8 px-2 border border-neutral-200 rounded-md bg-white text-xs font-semibold min-w-[120px]" data-testid="filter-semana">
-          <option value="">Semana</option>
-          {options.semanas.map((v) => <option key={v}>{v}</option>)}
-        </select>
-        <select value={filters.estacion} onChange={(e) => setFilters({ ...filters, estacion: e.target.value })}
-          className="h-8 px-2 border border-neutral-200 rounded-md bg-white text-xs font-semibold min-w-[160px]" data-testid="filter-estacion">
-          <option value="">Estación</option>
-          {options.estaciones.map((v) => <option key={v}>{v}</option>)}
-        </select>
-        <select value={filters.producto} onChange={(e) => setFilters({ ...filters, producto: e.target.value })}
-          className="h-8 px-2 border border-neutral-200 rounded-md bg-white text-xs font-semibold min-w-[140px]" data-testid="filter-producto">
-          <option value="">Producto</option>
-          {options.productos.map((v) => <option key={v}>{v}</option>)}
-        </select>
-        {activeFiltersCount > 0 && (
-          <button
-            onClick={() => setFilters({ empresa: filters.empresa, placa: "", semana: "", estacion: "", producto: "" })}
-            className="h-8 px-2 border border-neutral-200 rounded-md text-[11px] font-bold flex items-center gap-1 hover:bg-neutral-50"
-            data-testid="filter-clear"
-          >
-            <X className="w-3 h-3" /> Limpiar ({activeFiltersCount})
-          </button>
-        )}
-      </div>
-
+      {/* Filters removed */}
       {/* ================= ROW 3 — 4 charts ================= */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3" data-testid="row-3-charts">
         {/* Consumo y ahorro (área) */}

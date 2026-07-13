@@ -10,6 +10,7 @@ import {
   CheckCircle2, Trash2, Edit2, Eye
 } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -1033,6 +1034,9 @@ export default function Flotas() {
   const [toast, setToast]         = useState(null);
   const [nuevaCargaOpen, setNuevaCargaOpen] = useState(false);
   const [editCargaData, setEditCargaData] = useState(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
   const toastRef = useRef(null);
 
   const handleEdit = (row) => {
@@ -1087,7 +1091,9 @@ export default function Flotas() {
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
       } else {
-        window.open(url, "_blank");
+        setViewerUrl(url);
+        setViewerTitle(`Factura_${numDoc || placa || "Combustible"}.pdf`);
+        setViewerOpen(true);
       }
     } catch (err) {
       alert("No se pudo descargar el comprobante para esta carga.");
@@ -1097,8 +1103,8 @@ export default function Flotas() {
   const TABS = ["Resumen","Eventos","Control","QR"];
 
   return (
-    <div style={{ padding:"22px 26px",background:"#EEF0F2",minHeight:"100%" }} data-testid="flotas-page">
-
+    <div style={{ padding:"22px 26px", background:"transparent", minHeight:"100%" }} data-testid="flotas-page">
+      <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} />
       {/* TABS */}
       <div style={{ display:"flex",alignItems:"center",gap:38,marginBottom:20 }}>
         {TABS.map(t=>(

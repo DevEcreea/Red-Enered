@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { formatNumber } from "../lib/utils";
 import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
 
 const TARGET_DATE = new Date("2026-07-28T23:59:59");
 
@@ -141,10 +142,6 @@ export default function TrackerSubsidio() {
 
         {/* Steps */}
         <div className="relative z-10 grid grid-cols-4 hidden sm:grid">
-          <div className="absolute top-[19px] left-[11%] right-[11%] h-[3px] bg-white/20 rounded-[3px]">
-            <div className="absolute top-0 left-0 h-full rounded-[3px] bg-white transition-all duration-500 ease-in-out" style={{ width: s.fill + '%' }} />
-          </div>
-
           {[
             { step: 0, name: 'Revisión interna', micro: 'Validando tu expediente' },
             { step: 1, name: 'Trámite en ATU', micro: 'En manos del Estado' },
@@ -172,21 +169,33 @@ export default function TrackerSubsidio() {
               microClass = "mt-[1px] text-[10.5px] font-medium text-white/80 transition-all duration-300 text-center hidden md:block";
             }
 
+            const stepKeys = ['revision', 'atu', 'aprobado', 'abonado'];
+            const stepKey = stepKeys[i];
+            const stepObj = STATES[stepKey];
+
             return (
-              <div key={i} className="flex flex-col items-center px-1">
-                <div className={nodeClass}>
-                  {isDone ? (
-                    <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  ) : (
-                    i === 0 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4M7.5 4h9a2 2 0 012 2v12a2 2 0 01-2 2h-9a2 2 0 01-2-2V6a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
-                    i === 1 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M4 20h16M6 20V8l6-4 6 4v12M9 20v-5h6v5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
-                    i === 2 && s.res === 'ok' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg> :
-                    i === 2 && s.res === 'no' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7L7 17" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg> :
-                    i === 2 && s.res === 'obs' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 16.5v.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg> :
-                    i === 2 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M12 3v3M12 6a6 6 0 016 6c0 2-1 3.5-2 4.5-.6.6-1 1.3-1 2.2V19H9v-.3c0-.9-.4-1.6-1-2.2-1-1-2-2.5-2-4.5a6 6 0 016-6zM9.5 21h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
-                    <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M3 7h18v10H3zM3 10h18M7 14h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                  )}
-                </div>
+              <div key={i} className="flex flex-col items-center px-1 relative">
+                {/* Connecting Line Segment */}
+                {i < 3 && (
+                  <div className="absolute top-[17.5px] left-[calc(50%+19px)] w-[calc(100%-38px)] h-[3px] bg-white/20 z-0">
+                    <div className="absolute top-0 left-0 h-full bg-white transition-all duration-500 ease-in-out" style={{ width: s.current > i ? '100%' : '0%' }} />
+                  </div>
+                )}
+                
+                {/* HoverCard removed */}
+                    <div className={nodeClass}>
+                      {isDone ? (
+                        <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      ) : (
+                        i === 0 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4M7.5 4h9a2 2 0 012 2v12a2 2 0 01-2 2h-9a2 2 0 01-2-2V6a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
+                        i === 1 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M4 20h16M6 20V8l6-4 6 4v12M9 20v-5h6v5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
+                        i === 2 && s.res === 'ok' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg> :
+                        i === 2 && s.res === 'no' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M7 7l10 10M17 7L7 17" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg> :
+                        i === 2 && s.res === 'obs' ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 16.5v.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg> :
+                        i === 2 ? <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M12 3v3M12 6a6 6 0 016 6c0 2-1 3.5-2 4.5-.6.6-1 1.3-1 2.2V19H9v-.3c0-.9-.4-1.6-1-2.2-1-1-2-2.5-2-4.5a6 6 0 016-6zM9.5 21h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg> :
+                        <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none"><path d="M3 7h18v10H3zM3 10h18M7 14h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      )}
+                    </div>
                 <div className={nameClass}>{st.name}</div>
                 <div className={microClass}>{st.micro}</div>
               </div>

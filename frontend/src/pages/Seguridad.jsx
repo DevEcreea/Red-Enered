@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Search, X, Upload, FileText, Trash2, Plus, Inbox } from "lucide-react";
+import { Search, X, Upload, FileText, Trash2, Plus, Inbox, Eye, Download } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
+import PdfViewerModal from "../components/PdfViewerModal";
 
 const formatFecha = (iso) => {
   if (!iso) return "—";
@@ -20,6 +21,10 @@ export default function Seguridad() {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState("");
   const [showUpload, setShowUpload] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState(null);
+  const [viewerTitle, setViewerTitle] = useState("");
+  const [viewerDoc, setViewerDoc] = useState(null);
 
   // Filtros (Buscar/Limpiar)
   const fetchDocs = async (q = "") => {
@@ -50,6 +55,19 @@ export default function Seguridad() {
       URL.revokeObjectURL(url);
     } catch {
       toast.error("Error al descargar el documento");
+    }
+  };
+
+  const viewPDF = async (doc) => {
+    try {
+      const res = await api.get(`/security-docs/${doc.id}/download`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      setViewerUrl(url);
+      setViewerTitle(doc.filename_original || `${doc.codigo}.pdf`);
+      setViewerDoc(doc);
+      setViewerOpen(true);
+    } catch {
+      toast.error("Error al visualizar el documento");
     }
   };
 
@@ -155,12 +173,19 @@ export default function Seguridad() {
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-center gap-2">
                         <button
+                          onClick={() => viewPDF(doc)}
+                          title="Visualizar PDF"
+                          className="w-9 h-9 rounded-md bg-brand/10 text-brand hover:bg-brand/20 flex items-center justify-center transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => downloadPDF(doc)}
                           title="Descargar PDF"
                           className="w-9 h-9 rounded-md bg-red-50 text-red-700 hover:bg-red-100 flex items-center justify-center transition-colors"
                           data-testid={`seguridad-download-${doc.codigo}`}
                         >
-                          <FileText className="w-4 h-4" />
+                          <Download className="w-4 h-4" />
                         </button>
                         {isAdmin && (
                           <button
@@ -181,6 +206,8 @@ export default function Seguridad() {
           </div>
         )}
       </div>
+
+      <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadPDF(viewerDoc)} />
 
       {/* Modal Upload (solo admin) */}
       {showUpload && isAdmin && (
