@@ -44,7 +44,10 @@ const DOCTYPES = [
   ["Tarjeta de propiedad",              false],
 ];
 
-const ADD_OPTS = ["Documento de vehículo","Documento de viaje","Documento de empresa","Otro documento"];
+const VEHICULO_SLOTS = ["Tarjeta de propiedad", "SOAT", "Revisión técnica", "TUC", "Póliza"];
+const DRIVER_SLOTS = ["DNI", "Brevete", "SCTR", "Seguro", "Certificado"];
+const VIAJE_SLOTS = ["Guía de remisión producto", "Guía de transportista", "Factura", "Pesos y medidas", "OC"];
+const EMPRESA_SLOTS = ["RUC", "Vigencia de poder", "Testimonio", "Licencia de funcionamiento", "Cuenta bancaria"];
 
 const TABS = [
   { key:"Vehículos", icon:Car },
@@ -209,6 +212,8 @@ export default function Documentacion() {
   const [tplModal, setTplModal]   = useState(false);
   const [newDoc, setNewDoc]       = useState({});
   const [newTpl, setNewTpl]       = useState({});
+  const [multiAddOpen, setMultiAddOpen] = useState(false);
+  const [multiAddData, setMultiAddData] = useState({ identifier: "", docs: {} });
   
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerUrl, setViewerUrl] = useState(null);
@@ -477,6 +482,58 @@ export default function Documentacion() {
     }
   };
 
+  const handleSaveMulti = async () => {
+    if (!multiAddData.identifier) {
+      alert("Por favor ingresa un identificador principal (Placa, Nombre o Código)");
+      return;
+    }
+    const uploads = [];
+    for (const [slot, data] of Object.entries(multiAddData.docs)) {
+      if (!data.file) continue;
+      const fd = new FormData();
+      fd.append("file", data.file);
+      fd.append("tipo", tab);
+      fd.append("doc", slot);
+      if (data.emi) fd.append("emi", data.emi);
+      if (data.ven) fd.append("ven", data.ven);
+      
+      if (tab === "Vehículos") fd.append("placa", multiAddData.identifier.toUpperCase());
+      else if (tab === "Personal") fd.append("por", multiAddData.identifier);
+      else if (tab === "Viajes") fd.append("viaje_id", multiAddData.identifier.toUpperCase());
+      else fd.append("ref", multiAddData.identifier);
+
+      uploads.push(api.post("/documents", fd));
+    }
+    
+    if (uploads.length === 0) {
+      alert("No has adjuntado ningún documento");
+      return;
+    }
+    
+    try {
+      setLoading(true);
+      await Promise.all(uploads);
+      showToast("Documentos guardados correctamente");
+      setMultiAddOpen(false);
+      setMultiAddData({ identifier: "", docs: {} });
+      load();
+    } catch (err) {
+      alert("Hubo un error al guardar los documentos: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const setMultiField = (slot, field, val) => {
+    setMultiAddData(prev => ({
+      ...prev,
+      docs: {
+        ...prev.docs,
+        [slot]: { ...(prev.docs[slot] || {}), [field]: val }
+      }
+    }));
+  };
+
   const handleSaveDoc = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
@@ -622,24 +679,10 @@ export default function Documentacion() {
         </div>
         <div style={{ display:"flex",alignItems:"center",gap:12,position:"relative" }}>
           {!isTemplate && (
-            <div style={{ position:"relative" }}>
-              <button onClick={()=>setAddOpen(v=>!v)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:500,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",borderRadius:8,cursor:"pointer" }}>
-                <Plus style={{ width:15,height:15,color:"#8B3DFF" }}/> Agregar documento
-                <ChevronDown style={{ width:13,height:13,color:"#9ca3af" }}/>
-              </button>
-              {addOpen && (
-                <div style={{ position:"absolute",right:0,top:44,width:210,background:"#fff",border:"1px solid #F0F0F3",borderRadius:10,boxShadow:"0 12px 30px rgba(0,0,0,.12)",padding:"4px 0",zIndex:30 }}>
-                  {ADD_OPTS.map(o=>(
-                    <button key={o} onClick={()=>{ setAddOpen(false); setTypeModal(true); }}
-                      style={{ width:"100%",textAlign:"left",padding:"8px 12px",fontSize:13,color:"#4b5563",background:"none",border:"none",cursor:"pointer" }}
-                      onMouseEnter={e=>e.currentTarget.style.background="#f9fafb"}
-                      onMouseLeave={e=>e.currentTarget.style.background="none"}>
-                      {o}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button onClick={()=>setMultiAddOpen(true)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:500,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",borderRadius:8,cursor:"pointer" }}>
+              <Plus style={{ width:15,height:15,color:"#8B3DFF" }}/> 
+              {tab === "Vehículos" ? "Agregar vehículo" : tab === "Personal" ? "Agregar personal" : tab === "Viajes" ? "Agregar viaje" : "Agregar empresa"}
+            </button>
           )}
           <button onClick={()=>setTplModal(true)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 16px",fontSize:13,fontWeight:600,color:"#fff",background:"#8B3DFF",border:"none",borderRadius:8,cursor:"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.2)" }}>
             <LayoutTemplate style={{ width:15,height:15 }}/> Nueva plantilla
@@ -675,12 +718,16 @@ export default function Documentacion() {
               });
             });
 
-            // List of vehicles: from vehiculos state, fallback to placas from docs
-            let vehList = vehiculos.length > 0 ? vehiculos : [];
-            if (vehList.length === 0) {
-              const placas = [...new Set(docs.filter(d => d.tipo === "Vehículos" && d.placa).map(d => d.placa.toUpperCase()))];
-              vehList = placas.map(pl => ({ id: pl, placa: pl, empresa: "", tipo: "" }));
-            }
+            // List of vehicles: from vehiculos state, merged with placas from docs
+            let vehList = vehiculos.length > 0 ? [...vehiculos] : [];
+            const existingPlacas = new Set(vehList.map(v => (v.placa || "").toUpperCase()));
+            const extraPlacas = [...new Set(docs.filter(d => d.tipo === "Vehículos" && d.placa).map(d => d.placa.toUpperCase()))];
+            extraPlacas.forEach(pl => {
+              if (pl && !existingPlacas.has(pl)) {
+                vehList.push({ id: pl, placa: pl, empresa: "", tipo: "" });
+                existingPlacas.add(pl);
+              }
+            });
             if (filtros.placa) vehList = vehList.filter(v => (v.placa||"").toUpperCase() === filtros.placa.toUpperCase());
             if (filtros.estado || filtros.creado_por) {
               vehList = vehList.filter(v => {
@@ -943,25 +990,25 @@ export default function Documentacion() {
               "Certificado"
             ];
 
-            // List of drivers: from conductores state, fallback to unique drivers from docs
-            let condList = conductores.length > 0 ? conductores : [];
-            if (condList.length === 0) {
-              const uniqueDrivers = {};
-              docs.filter(d => d.tipo === "Personal").forEach(d => {
-                const name = d.por || "Conductor";
-                const key = d.conductor_id || name;
-                if (!uniqueDrivers[key]) {
-                  uniqueDrivers[key] = {
-                    id: d.conductor_id || key,
-                    nombre: name,
-                    apellidos: "",
-                    dni: d.dni || "—",
-                    licencia: d.licencia || "—",
-                  };
-                }
-              });
-              condList = Object.values(uniqueDrivers);
-            }
+            // List of drivers: from conductores state, merged with unique drivers from docs
+            let condList = conductores.length > 0 ? [...conductores] : [];
+            const existingConds = new Set(condList.map(c => c.id));
+            const existingNames = new Set(condList.map(c => (`${c.nombre||""} ${c.apellidos||""}`).trim().toLowerCase()));
+
+            docs.filter(d => d.tipo === "Personal").forEach(d => {
+              const name = d.por || "Conductor";
+              const key = d.conductor_id || name;
+              if (key && !existingConds.has(key) && !existingNames.has(name.toLowerCase())) {
+                existingConds.add(key);
+                condList.push({
+                  id: key,
+                  nombre: name,
+                  apellidos: "",
+                  dni: d.dni || "—",
+                  licencia: d.licencia || "—",
+                });
+              }
+            });
             if (filtros.estado || filtros.creado_por) {
               condList = condList.filter(c => {
                 const cid = c.id;
@@ -1739,6 +1786,65 @@ export default function Documentacion() {
                   {premium && <Sparkles style={{ width:14,height:14,color:"#8B3DFF",flexShrink:0 }}/>}
                 </button>
               ))}
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {/* ══════ MODAL: CARGA MÚLTIPLE ══════ */}
+      {multiAddOpen && (
+        <ModalOverlay onClose={()=>setMultiAddOpen(false)} maxWidth={700}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px",height:60,borderBottom:"1px solid #EEF0F2",flexShrink:0 }}>
+            <h2 style={{ fontSize:16,fontWeight:700,color:"#1f2937" }}>
+              Agregar {tab === "Vehículos" ? "Vehículo" : tab === "Personal" ? "Personal" : tab === "Viajes" ? "Viaje" : "Empresa"}
+            </h2>
+            <div style={{ display:"flex",gap:8 }}>
+              <button onClick={()=>setMultiAddOpen(false)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:500,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",borderRadius:8,cursor:"pointer" }}>Cancelar</button>
+              <button onClick={handleSaveMulti} disabled={loading} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 16px",fontSize:13,fontWeight:600,color:"#fff",background:"#8B3DFF",border:"none",borderRadius:8,cursor:"pointer",opacity:loading?0.7:1 }}>
+                {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : "Guardar Todo"}
+              </button>
+            </div>
+          </div>
+          <div style={{ padding: 24, overflowY: "auto" }}>
+            <div style={{ marginBottom: 20 }}>
+              <label style={lblSt}>{tab === "Vehículos" ? "Placa del vehículo" : tab === "Personal" ? "Nombre del conductor" : tab === "Viajes" ? "Código de viaje / Ruta" : "Empresa"}</label>
+              <input style={inputSt} placeholder={tab === "Vehículos" ? "Ej. ABC-123" : ""} value={multiAddData.identifier} onChange={e => setMultiAddData(p => ({ ...p, identifier: e.target.value }))} />
+            </div>
+            
+            <div style={{ fontSize:14, fontWeight:600, color:"#374151", marginBottom:12 }}>Documentos correspondientes</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {(tab === "Vehículos" ? VEHICULO_SLOTS : tab === "Personal" ? DRIVER_SLOTS : tab === "Viajes" ? VIAJE_SLOTS : EMPRESA_SLOTS).map(slot => {
+                const sData = multiAddData.docs[slot] || {};
+                return (
+                  <div key={slot} style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: 16, background: sData.file ? "#F5F3FF" : "#fff", transition: "background .2s" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: sData.file ? 12 : 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: "#374151" }}>{slot}</div>
+                      <label style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 500, color: sData.file ? "#8B3DFF" : "#6b7280", background: sData.file ? "#E0D4F5" : "#F3F4F6", padding: "6px 12px", borderRadius: 6 }}>
+                        <UploadCloud style={{ width: 14, height: 14 }} />
+                        <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {sData.file ? sData.file.name : "Cargar archivo"}
+                        </span>
+                        <input type="file" style={{ display: "none" }} onChange={e => {
+                          const f = e.target.files[0];
+                          if (f) setMultiField(slot, "file", f);
+                        }} />
+                      </label>
+                    </div>
+                    {sData.file && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div>
+                          <label style={lblSt}>Fecha de emisión</label>
+                          <input type="date" style={inputSt} value={sData.emi || ""} onChange={e => setMultiField(slot, "emi", e.target.value)} />
+                        </div>
+                        <div>
+                          <label style={lblSt}>Fecha de vencimiento</label>
+                          <input type="date" style={inputSt} value={sData.ven || ""} onChange={e => setMultiField(slot, "ven", e.target.value)} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </ModalOverlay>
