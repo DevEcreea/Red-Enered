@@ -6,7 +6,7 @@ import {
   Wrench, CalendarDays, Search, Upload, Download, X,
   MapPin, Cog, Warehouse, FileText, UserCheck, Fuel,
   Cpu, Wifi, WifiOff, Unlink, Tag, Shield, Layers,
-  Clock, Truck, Bus, Bike
+  Clock, Truck, Bus, Bike, RotateCw, Trash2
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -187,16 +187,16 @@ const inputSt = { width:"100%",border:"1px solid #D1D5DB",borderRadius:8,padding
 const labelSt = { fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:".05em",display:"block",marginBottom:2 };
 
 // ─── Action button row ────────────────────────────────────────────────────────
-function ActionBtns({ onView, onEdit, onCopy, onWrench, onDelete }) {
+function ActionBtns({ onEdit, onUpdate, onView, onDownload, onDelete }) {
   return (
     <div style={{ display:"flex",alignItems:"center",gap:10 }}>
       {[
-        { Ic:Eye,         fn:onView,   title:"Ver" },
-        { Ic:Pencil,      fn:onEdit,   title:"Editar" },
-        { Ic:Copy,        fn:onCopy,   title:"Duplicar" },
-        { Ic:Wrench,      fn:onWrench, title:"Mantenimiento" },
-        { Ic:CalendarDays,fn:onDelete, title:"Eliminar" },
-      ].map(({ Ic, fn, title }, j) => (
+        { Ic:Pencil,      fn:onEdit,     title:"Editar" },
+        { Ic:RotateCw,    fn:onUpdate,   title:"Actualizar" },
+        { Ic:Eye,         fn:onView,     title:"Visualizar" },
+        { Ic:Download,    fn:onDownload, title:"Descargar" },
+        { Ic:Trash2,      fn:onDelete,   title:"Eliminar" },
+      ].filter(btn => btn.fn).map(({ Ic, fn, title }, j) => (
         <button key={j} onClick={fn} title={title}
           style={{ background:"none",border:"none",cursor:"pointer",color:"#9ca3af",display:"flex",padding:0,transition:"color .15s" }}
           onMouseEnter={e=>e.currentTarget.style.color="#8B3DFF"}
@@ -434,7 +434,7 @@ export default function Vehiculos() {
 
       {/* TABS */}
       <div style={{ display:"flex",alignItems:"center",gap:32,borderBottom:"1px solid #E5E7EB",marginBottom:20 }}>
-        {[["vehiculos","Vehículos"],["catalogos","Catálogos"],["dispositivos","Dispositivos GPS"]].map(([id,lbl])=>(
+        {[["vehiculos","Vehículos"],["catalogos","Catálogos"]].map(([id,lbl])=>(
           <button key={id} onClick={()=>setTab(id)} style={{ position:"relative",paddingBottom:12,fontSize:15,fontWeight:tab===id?700:500,color:tab===id?"#8B3DFF":"#6B7280",background:"none",border:"none",cursor:"pointer" }}>
             {lbl}{tab===id&&<span style={{ position:"absolute",left:0,right:0,bottom:-1,height:2.5,borderRadius:2,background:"#8B3DFF" }}/>}
           </button>
@@ -516,7 +516,7 @@ export default function Vehiculos() {
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
               <thead>
                 <tr style={{ background:"#2A2A3C" }}>
-                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACTUALIZAR","ACCIONES"].map((h,i)=>(
+                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACCIONES"].map((h,i)=>(
                     <th key={i} style={{ textAlign:"left",color:"#fff",fontWeight:600,textTransform:"uppercase",fontSize:10.5,letterSpacing:".03em",padding:"12px 14px",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
@@ -568,7 +568,8 @@ export default function Vehiculos() {
                         <td style={{ padding:"10px 14px" }}>
                           {(() => {
                             const kmActual = v.kilometraje || 0;
-                            const kmMtto = v.proximo_mtto_km || 0;
+                            // Si no hay proximo_mtto_km en BD, para la demo sumamos 23569 al actual o fijamos en 60000
+                            const kmMtto = v.proximo_mtto_km || (kmActual > 0 ? kmActual + 23569 : 60000);
                             const kmFaltan = kmMtto - kmActual;
                             
                             const formatFecha = (f) => {
@@ -582,24 +583,50 @@ export default function Vehiculos() {
                               }
                             };
 
-                            const fechaStr = formatFecha(v.proximo_mtto_fecha);
-                            const calendarTitle = `Mantenimiento Próximo: ${fechaStr}`;
-                            
-                            const wrenchTitle = kmMtto > 0
-                              ? `Mantenimiento a los ${kmMtto.toLocaleString("es-PE")} Km (Faltan ${kmFaltan > 0 ? kmFaltan.toLocaleString("es-PE") : 0} Km)`
-                              : "Kilometraje de mantenimiento sin definir";
+                            const isVencido = v.proximo_mtto_fecha && new Date(v.proximo_mtto_fecha) < new Date();
+                            const fechaProg = formatFecha(v.proximo_mtto_fecha);
 
-                            const calendarColor = v.proximo_mtto_fecha ? "#8B3DFF" : "#cbd5e1";
-                            const wrenchColor = kmMtto > 0 ? (kmFaltan <= 1000 ? "#F26B6B" : "#10B981") : "#cbd5e1";
+                            const pText = kmMtto > 0 ? `Próximo mantenimiento: PM a los ${kmMtto.toLocaleString("es-PE")} km` : "Próximo mantenimiento: Sin definir";
+                            const pCalText = v.proximo_mtto_fecha ? `Fecha de programación: ${isVencido ? "Vencido" : "Vigente"}, Fecha Programada ${fechaProg}` : "Fecha de programación: Sin fecha";
+                            const pRoadText = kmMtto > 0 ? `En cuánto se dará el mantenimiento: Próximo PM en ${kmFaltan > 0 ? kmFaltan.toLocaleString("es-PE") : 0} KM` : "En cuánto se dará el mantenimiento: Distancia no definida";
+
+                            // Demo logic for Document Expiration (T)
+                            const charSum = (v.veh || v.placa || "").split("").reduce((s, c) => s + c.charCodeAt(0), 0);
+                            const isSoatVencido = charSum % 2 === 0;
+                            const tText = isSoatVencido ? "Próximo Vencimiento: SOAT VENCIDO" : "Próximo Vencimiento: Documentos en regla";
+                            const tCalText = isSoatVencido ? "Fecha de programación: Vencido, Fecha Programada 15/06/2026" : "Fecha de programación: Vigente";
 
                             return (
-                              <div style={{ display:"flex", gap:10, alignItems:"center" }}>
-                                <span title={calendarTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                                  <CalendarDays style={{ width:16, height:16, color:calendarColor }}/>
+                              <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 18px)", gap:"6px 8px", alignItems:"center", justifyContent:"center", width: 70 }}>
+                                
+                                {/* Row 1: Mantenimiento (P) */}
+                                <span title={pText} style={{ position:"relative", width:18, height:18, background:"#E5E7EB", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                                  <span style={{ color:"#fff", fontSize:12, fontWeight:700, lineHeight:1 }}>P</span>
+                                  <span style={{ position:"absolute", top:-3, right:-3, width:7, height:7, borderRadius:"50%", background: (kmMtto > 0 && kmFaltan <= 1000) ? "#DC2626" : "#10B981" }}/>
                                 </span>
-                                <span title={wrenchTitle} style={{ display:"inline-flex", cursor:"pointer" }}>
-                                  <Wrench style={{ width:15, height:15, color:wrenchColor }}/>
+
+                                <span title={pCalText} style={{ display:"inline-flex", cursor:"pointer", color: "#D1D5DB" }}>
+                                  <CalendarDays style={{ width:18, height:18 }}/>
                                 </span>
+
+                                <span title={pRoadText} style={{ display:"inline-flex", cursor:"pointer", color: "#D1D5DB" }}>
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M5.5 22h13a2 2 0 0 0 1.95-1.55l3-13A2 2 0 0 0 21.5 5h-19a2 2 0 0 0-1.95 2.45l3 13A2 2 0 0 0 5.5 22zM12 7v3h-1V7h1zm0 5v3h-1v-3h1zm0 5v3h-1v-3h1z" />
+                                  </svg>
+                                </span>
+
+                                {/* Row 2: Trámites/Docs (T) */}
+                                <span title={tText} style={{ position:"relative", width:18, height:18, background:"#E5E7EB", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
+                                  <span style={{ color:"#fff", fontSize:12, fontWeight:700, lineHeight:1 }}>T</span>
+                                  <span style={{ position:"absolute", top:-3, right:-3, width:7, height:7, borderRadius:"50%", background: isSoatVencido ? "#DC2626" : "#10B981" }}/>
+                                </span>
+
+                                <span title={tCalText} style={{ display:"inline-flex", cursor:"pointer", color: "#D1D5DB" }}>
+                                  <CalendarDays style={{ width:18, height:18 }}/>
+                                </span>
+
+                                <span></span> {/* Empty cell to keep grid aligned */}
+
                               </div>
                             );
                           })()}
@@ -614,15 +641,12 @@ export default function Vehiculos() {
                             <span style={{ fontSize:12.5 }}>{v.kilometraje || 0} Kms</span>
                           </div>
                         </td>
-                        <td style={{ padding:"10px 14px",minWidth:90 }}>
-                          <div style={{ borderBottom:"1.5px solid #14B8A6",height:20,minWidth:80 }}/>
-                        </td>
                         <td style={{ padding:"10px 14px" }}>
                           <ActionBtns
-                            onView={()=>openVEdit(v)}
                             onEdit={()=>openVEdit(v)}
-                            onCopy={undefined}
-                            onWrench={undefined}
+                            onUpdate={undefined}
+                            onView={()=>openVEdit(v)}
+                            onDownload={undefined}
                             onDelete={()=>handleVDelete(v.id)}
                           />
                         </td>
@@ -736,7 +760,7 @@ export default function Vehiculos() {
                       <span style={{ display:"inline-flex",alignItems:"center",gap:6,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:m.estado==="Activo"?"#059669":"#6B7280",background:m.estado==="Activo"?"#ECFDF5":"#F3F4F6" }}>{m.estado}</span>
                     </td>
                     <td style={{ padding:"12px 18px" }}>
-                      <ActionBtns onView={()=>openCatView("marca",m)} onEdit={()=>openCatEdit("marca",m)} onCopy={()=>handleCatCopy("marca",m)} onWrench={()=>openCatEdit("marca",m)} onDelete={()=>handleCatDelete("marca",m.id)}/>
+                      <ActionBtns onEdit={()=>openCatEdit("marca",m)} onUpdate={undefined} onView={()=>openCatView("marca",m)} onDownload={undefined} onDelete={()=>handleCatDelete("marca",m.id)}/>
                     </td>
                   </tr>
                 ))}</tbody>
@@ -757,7 +781,7 @@ export default function Vehiculos() {
                     <td style={{ padding:"12px 18px" }}><span style={{ borderRadius:999,fontSize:11.5,padding:"3px 10px",color:"#7A2FF0",background:"#F1EAFF" }}>{m.tipo}</span></td>
                     <td style={{ padding:"12px 18px",color:"#4b5563",fontSize:13.5 }}>{m.n}</td>
                     <td style={{ padding:"12px 18px" }}>
-                      <ActionBtns onView={()=>openCatView("modelo",m)} onEdit={()=>openCatEdit("modelo",m)} onCopy={()=>handleCatCopy("modelo",m)} onWrench={()=>openCatEdit("modelo",m)} onDelete={()=>handleCatDelete("modelo",m.id)}/>
+                      <ActionBtns onEdit={()=>openCatEdit("modelo",m)} onUpdate={undefined} onView={()=>openCatView("modelo",m)} onDownload={undefined} onDelete={()=>handleCatDelete("modelo",m.id)}/>
                     </td>
                   </tr>
                 ))}</tbody>
@@ -782,7 +806,7 @@ export default function Vehiculos() {
                     <td style={{ padding:"12px 18px",color:"#4b5563",fontSize:13.5 }}>{t.configuracion}</td>
                     <td style={{ padding:"12px 18px",color:"#4b5563",fontSize:13.5 }}>{t.n}</td>
                     <td style={{ padding:"12px 18px" }}>
-                      <ActionBtns onView={()=>openCatView("tipo",t)} onEdit={()=>openCatEdit("tipo",t)} onCopy={()=>handleCatCopy("tipo",t)} onWrench={()=>openCatEdit("tipo",t)} onDelete={()=>handleCatDelete("tipo",t.id)}/>
+                      <ActionBtns onEdit={()=>openCatEdit("tipo",t)} onUpdate={undefined} onView={()=>openCatView("tipo",t)} onDownload={undefined} onDelete={()=>handleCatDelete("tipo",t.id)}/>
                     </td>
                   </tr>
                 ))}</tbody>

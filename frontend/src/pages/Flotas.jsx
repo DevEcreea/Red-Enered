@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
 import PdfViewerModal from "../components/PdfViewerModal";
+import * as XLSX from "xlsx";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -265,7 +266,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       </div>
 
       {/* Small KPIs row 2 — Ahorro se oculta si no tiene servicios.combustible */}
-      <div style={{ display:"grid",gridTemplateColumns:showAhorro?"repeat(4,1fr)":"repeat(3,1fr)",gap:20,marginTop:20 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginTop:20 }}>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:"relative",display:"flex",flexDirection:"column",justifyContent:"center" }}>
           <span style={{ fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:".04em",textTransform:"uppercase" }}>Cargas</span>
           <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }} data-testid="combustible-kpi-cargas">{rows.length}</span>
@@ -279,12 +280,10 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Monto Cargas Inválidas</span>
           <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-monto-invalidas">S/ {invalidas.monto.toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
         </div>
-        {showAhorro && (
-          <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#10B981",display:"flex",flexDirection:"column",justifyContent:"center" }}>
-            <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Ahorro Combustible</span>
-            <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-ahorro">S/ {(totals.ahorro || 0).toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-          </div>
-        )}
+        <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#10B981",display:"flex",flexDirection:"column",justifyContent:"center" }}>
+          <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Ahorro Combustible</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-ahorro">S/ {(showAhorro ? (totals.ahorro || 0) : 0).toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+        </div>
       </div>
 
       {/* Filters */}
@@ -298,9 +297,43 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           <FSel label="Estación" value={filtros.estacion} onChange={updFiltro("estacion")} options={opts.estacion} />
           <FSel label="Producto" value={filtros.producto} onChange={updFiltro("producto")} options={opts.producto} />
           <div style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:16,color:"#9ca3af" }}>
-            {[Share2, Printer, Columns3, Download].map((Ic,i)=>(
-              <Ic key={i} style={{ width:18,height:18,cursor:"pointer" }}/>
-            ))}
+            <Download
+              style={{ width:18,height:18,cursor:"pointer",color:"#8B3DFF" }}
+              title="Descargar Excel"
+              onClick={() => {
+                const data = filteredRows.map(r => {
+                  const km = r.KILOMETRAJE ? parseFloat(r.KILOMETRAJE) : 0;
+                  const galones = parseFloat(r.CANTIDAD_GL || 0);
+                  const importe = parseFloat(r.IMPORTE_TOTAL || 0);
+                  const precio = galones > 0 ? importe / galones : 0;
+                  const ahorro = parseFloat(r.AHORRO || 0);
+                  const fecha = new Date(r.FECHA_TRANSACCION).toLocaleString("es-PE", {
+                    day: "2-digit", month: "2-digit", year: "numeric",
+                    hour: "2-digit", minute: "2-digit", hour12: false
+                  });
+
+                  const baseRow = {
+                    "Placa": r.PLACA || "—",
+                    ...(isAdmin ? { "Empresa": r.EMPRESA || "—" } : {}),
+                    "Fecha y Hora": fecha,
+                    "Ciudad / Estación": `${r.CIUDAD||""} / ${r.ESTACION||""}`,
+                    "Kilometraje": km ? `${km} km` : "—",
+                    "Producto": r.PRODUCTO || "—",
+                    "Galones": galones > 0 ? galones.toFixed(2) : "—",
+                    "Precio (S/)": precio > 0 ? precio.toFixed(2) : "—",
+                    "Importe (S/)": importe > 0 ? importe.toFixed(2) : "—",
+                    "Ahorro (S/)": (showAhorro && ahorro > 0) ? ahorro.toFixed(2) : "0.00",
+                    "Factura/Doc": r.NUMERO_DOCUMENTO || "—",
+                    "Conductor": r.CONDUCTOR || "—"
+                  };
+                  return baseRow;
+                });
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Consumos");
+                XLSX.writeFile(wb, "Consumos_Combustible.xlsx");
+              }}
+            />
             {!showAhorro && (
               <button
                 onClick={onOpenNuevaCarga}
@@ -322,7 +355,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
               <tr style={{ background:HEADER_BG }}>
                 {(showAhorro
                   ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""]
-                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Factura","Conductor",""]
+                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Conductor",""]
                 ).filter(h => h !== null).map((h,i,arr)=>(
                   <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
@@ -353,19 +386,19 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                         let tankText = "El volumen de galones ingresado se encuentra dentro de los límites físicos y la capacidad máxima declarada para el tanque de este vehículo.";
                         
                         let fuelColor = "#10B981";
-                        let fuelTitle = "Rendimiento Óptimo";
-                        let fuelText = "El rendimiento computado para esta carga está dentro del rango esperado para la ruta y tipo de vehículo.";
+                        let fuelTitle = "Rendimiento Optimo";
+                        let fuelText = "Consumo de combustible dentro del rango esperado: (Tolerancia mínima): 9 GL /100 km (+10%)";
                         
                         let cardColor = "#10B981";
                         let cardTitle = "Tarjeta Autorizada";
-                        let cardText = "La tarjeta de combustible activa utilizada para la transacción coincide exactamente con la credencial asignada a esta placa.";
+                        let cardText = "La tarjeta de combustible de la carga y la asignada al vehiculo coinciden";
 
                         // Deterministic alerts for other rows (like Rapesa client) to show both green and red cases
                         const charSum = (r.NUMERO_DOCUMENTO || r.id || "").split("").reduce((s, c) => s + c.charCodeAt(0), 0);
                         if (charSum % 3 === 1) {
                           fuelColor = "#EF4444";
-                          fuelTitle = "Desviación de Rendimiento";
-                          fuelText = "El consumo calculado (GL/100 KM) presenta una desviación mayor al límite de tolerancia mínimo (+10%). Se recomienda revisión del odómetro.";
+                          fuelTitle = "Rendimiento Deficiente";
+                          fuelText = "Consumo de combustible fuera del rango esperado: (Tolerancia mínima): 9 GL /100 km (+10%)";
                         } else if (charSum % 3 === 2) {
                           // The map stays green, but tank and card can be red
                           tankColor = "#EF4444";
@@ -374,7 +407,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                           
                           cardColor = "#EF4444";
                           cardTitle = "Alerta de Tarjeta";
-                          cardText = "La tarjeta utilizada en el terminal de pago no coincide con la credencial asignada a este vehículo en la base de datos.";
+                          cardText = "La tarjeta de combustible de la carga y la asignada al vehiculo no coinciden";
                         }
 
                         // Override for demo plaque TFN213
@@ -388,24 +421,24 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                             tankText = "El volumen de galones ingresado se encuentra dentro de los límites físicos del tanque.";
                             
                             fuelColor = "#EF4444";
-                            fuelTitle = "Desviación de Rendimiento";
-                            fuelText = "El consumo calculado (GL/100 KM) presenta una desviación mayor al límite de tolerancia mínimo (+10%).";
+                            fuelTitle = "Rendimiento Deficiente";
+                            fuelText = "Consumo de combustible fuera del rango esperado: (Tolerancia mínima): 9 GL /100 km (+10%)";
                             
                             cardColor = "#10B981";
                             cardTitle = "Tarjeta Autorizada";
-                            cardText = "La tarjeta de combustible coincide con la credencial asignada.";
+                            cardText = "La tarjeta de combustible de la carga y la asignada al vehiculo coinciden";
                           } else if (r.NUMERO_DOCUMENTO === "F003-265") {
                             tankColor = "#EF4444";
                             tankTitle = "Alerta de Capacidad";
                             tankText = "El volumen cargado excede la capacidad máxima física registrada para el tanque de esta unidad.";
                             
                             fuelColor = "#10B981";
-                            fuelTitle = "Rendimiento Óptimo";
-                            fuelText = "El rendimiento computado para esta carga está dentro del rango esperado.";
+                            fuelTitle = "Rendimiento Optimo";
+                            fuelText = "Consumo de combustible dentro del rango esperado: (Tolerancia mínima): 9 GL /100 km (+10%)";
                             
                             cardColor = "#EF4444";
                             cardTitle = "Alerta de Tarjeta";
-                            cardText = "La tarjeta utilizada en el terminal de pago no coincide con la credencial asignada a este vehículo.";
+                            cardText = "La tarjeta de combustible de la carga y la asignada al vehiculo no coinciden";
                           }
                         }
 
@@ -505,18 +538,21 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{importe? `S/ ${importe.toFixed(2)}`:"—"}</td>
                     {showAhorro ? (
                       <>
-                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>{ahorro? `S/ ${ahorro.toFixed(2)}`:"—"}</td>
+                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ {ahorro? ahorro.toFixed(2):"0.00"}</td>
                         <td style={tdSt}>—</td>
                         <td style={{ ...tdSt,whiteSpace:"nowrap" }}>—</td>
                       </>
                     ) : (
-                      <td style={tdSt}>
-                        {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
-                          <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                            <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Doc Adjunto"}
-                          </span>
-                        ) : "—"}
-                      </td>
+                      <>
+                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ 0.00</td>
+                        <td style={tdSt}>
+                          {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
+                            <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Doc Adjunto"}
+                            </span>
+                          ) : "—"}
+                        </td>
+                      </>
                     )}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.CONDUCTOR||"—"}</td>
                     <td style={tdSt}>
@@ -1100,7 +1136,7 @@ export default function Flotas() {
     }
   };
 
-  const TABS = ["Resumen","Eventos","Control","QR"];
+  const TABS = ["Resumen","Control","QR"];
 
   return (
     <div style={{ padding:"22px 26px", background:"transparent", minHeight:"100%" }} data-testid="flotas-page">
@@ -1131,7 +1167,6 @@ export default function Flotas() {
           onDownloadPdf={handleDownloadPdf}
         />
       )}
-      {activeTab==="Eventos" && <TabEventos onToast={showToast}/>}
       {activeTab==="Control" && <TabControl onToast={showToast}/>}
       {activeTab==="QR"      && <TabQR onToast={showToast}/>}
 

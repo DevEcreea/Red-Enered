@@ -376,6 +376,19 @@ export default function Documentacion() {
     showToast("Conductor eliminado");
   };
 
+  const handleDeleteVehiculo = async (pl) => {
+    if (!window.confirm("¿Estás seguro de eliminar este vehículo y sus documentos?")) return;
+    const plLower = (pl || "").toLowerCase();
+    const toDelete = docs.filter(d => d.tipo === "Vehículos" && (d.placa || "").toLowerCase() === plLower);
+    for (const d of toDelete) {
+      if (!String(d.id).startsWith("300") && !String(d.id).startsWith("400")) {
+        await api.delete(`/documents/${d.id}`).catch(()=>({}));
+      }
+    }
+    setDocs(prev => prev.filter(d => !toDelete.includes(d)));
+    showToast("Vehículo eliminado");
+  };
+
   const handleDeleteViaje = async (vid) => {
     if (!window.confirm("¿Estás seguro de eliminar este viaje y sus documentos?")) return;
     let v_idx = 0;
@@ -753,7 +766,7 @@ export default function Documentacion() {
                           </td>
                           <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{v.empresa || "—"}</td>
                           {/* span remaining cols with summary */}
-                          <td colSpan={7} style={{ ...tdSt }}>
+                          <td colSpan={6} style={{ ...tdSt }}>
                             <span style={{ display:"flex",alignItems:"center",gap:10 }}>
                               <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
                                 <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
@@ -767,6 +780,15 @@ export default function Documentacion() {
                               )}
                               <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{SLOTS.length} documentos</span>
                             </span>
+                          </td>
+                          <td style={{ ...tdSt, textAlign:"center" }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteVehiculo(pl); }}
+                              style={{ width:30,height:30,border:"none",background:"#FEF2F2",color:"#DC2626",borderRadius:8,cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center" }}
+                              title="Eliminar vehículo y sus documentos"
+                            >
+                              <Trash2 style={{ width:15,height:15 }}/>
+                            </button>
                           </td>
                         </tr>
 
