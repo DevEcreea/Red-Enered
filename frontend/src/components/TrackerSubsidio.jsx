@@ -263,31 +263,7 @@ export default function TrackerSubsidio() {
         </div>
       </div>
 
-      {/* Panel de Estado */}
-      <div className={`mt-[14px] bg-white border border-[#EAE7F2] rounded-[16px] p-[17px_22px] flex flex-col md:flex-row md:items-center gap-[16px] shadow-[0_8px_24px_-20px_rgba(45,18,110,.5)] ${s.panelClass || ''}`}>
-        <div className="w-[44px] h-[44px] rounded-[12px] flex-none grid place-items-center bg-[#F3EEFF] text-[#8039F4] [&>svg]:w-[22px] [&>svg]:h-[22px]">
-          {s.badge === 'doc' ? badges.doc : s.badge === 'gov' ? badges.gov : s.badge === 'ok' ? badges.ok : badges.no}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-cabinet text-[15.5px] font-bold text-[#211B3A] flex items-center gap-[9px]">
-            <span>{s.title}</span>
-            <span className={`text-[10.5px] font-bold tracking-[0.06em] uppercase px-[9px] py-[3px] rounded-[20px] ${s.pill[0]}`}>{s.pill[1]}</span>
-          </div>
-          <div className="text-[13.5px] text-[#6B6685] mt-[3px] leading-[1.5]" dangerouslySetInnerHTML={{__html: s.copy}} />
-        </div>
-        {s.cta && (
-          <button 
-            onClick={() => navigate('/subsidio/documentos')}
-            className={`font-semibold text-[13px] flex-none px-[18px] py-[11px] rounded-[11px] transition-all flex items-center justify-center gap-[7px] ${
-              s.cta[0] === 'ghost' 
-                ? 'bg-white text-[#211B3A] border-[1.5px] border-[#EAE7F2] hover:border-[#D9D2F0] hover:bg-[#FBFAFE]' 
-                : 'text-white bg-[#8039F4] hover:bg-[#6D28D9]'
-            }`}
-          >
-            {s.cta[1]} {s.cta[2] && arrow}
-          </button>
-        )}
-      </div>
+
 
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes pulseRing { 0% { transform: scale(1); opacity: .7 } 100% { transform: scale(1.55); opacity: 0 } }

@@ -54,7 +54,6 @@ const TABS = [
   { key:"Personal",  icon:Users },
   { key:"Viajes",    icon:Route },
   { key:"Empresa",   icon:Building2 },
-  { key:"Plantilla", icon:LayoutTemplate },
 ];
 
 // ─── Estado pill helper ───────────────────────────────────────────────────────
@@ -684,9 +683,6 @@ export default function Documentacion() {
               {tab === "Vehículos" ? "Agregar vehículo" : tab === "Personal" ? "Agregar personal" : tab === "Viajes" ? "Agregar viaje" : "Agregar empresa"}
             </button>
           )}
-          <button onClick={()=>setTplModal(true)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 16px",fontSize:13,fontWeight:600,color:"#fff",background:"#8B3DFF",border:"none",borderRadius:8,cursor:"pointer",boxShadow:"0 4px 12px rgba(139,61,255,.2)" }}>
-            <LayoutTemplate style={{ width:15,height:15 }}/> Nueva plantilla
-          </button>
         </div>
       </div>
 
