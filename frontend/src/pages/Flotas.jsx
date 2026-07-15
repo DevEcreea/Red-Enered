@@ -154,7 +154,7 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
 function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit, onDelete, onDownloadPdf }) {
   const { user } = useAuth();
   const showAhorro = services?.combustible === true;
-  const [filtros, setFiltros] = useState({ empresa:"", placa:"", estacion:"", producto:"" });
+  const [filtros, setFiltros] = useState({ empresa:"", placa:"", estacion:"", producto:"", desde:"", hasta:"" });
 
   const opts = useMemo(() => {
     const empresas = new Set();
@@ -181,6 +181,18 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       if (filtros.placa && r.PLACA !== filtros.placa) return false;
       if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
       if (filtros.producto && r.PRODUCTO !== filtros.producto) return false;
+      
+      const rDate = r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null;
+      if (rDate && !isNaN(rDate.getTime())) {
+        if (filtros.desde) {
+          const dDesde = new Date(filtros.desde + "T00:00:00");
+          if (rDate < dDesde) return false;
+        }
+        if (filtros.hasta) {
+          const dHasta = new Date(filtros.hasta + "T23:59:59");
+          if (rDate > dHasta) return false;
+        }
+      }
       return true;
     });
   }, [rows, filtros]);
@@ -296,6 +308,37 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           <FSel label="Placa" value={filtros.placa} onChange={updFiltro("placa")} options={opts.placa} />
           <FSel label="Estación" value={filtros.estacion} onChange={updFiltro("estacion")} options={opts.estacion} />
           <FSel label="Producto" value={filtros.producto} onChange={updFiltro("producto")} options={opts.producto} />
+          
+          <div style={{ display:"flex",alignItems:"center",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,height:42,padding:"0 12px",gap:8 }}>
+            <Calendar style={{ width:16,height:16,color:"#9ca3af" }}/>
+            <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+              <input 
+                type={filtros.desde ? "date" : "text"} 
+                onFocus={(e) => e.target.type = "date"}
+                onBlur={(e) => { if (!filtros.desde) e.target.type = "text"; }}
+                placeholder="Desde"
+                value={filtros.desde} 
+                onChange={updFiltro("desde")} 
+                style={{ border:"none", background:"transparent", fontSize:13, color:filtros.desde?"#111827":"#6b7280", fontWeight:filtros.desde?600:400, outline:"none", cursor:"pointer", width: 115 }} 
+              />
+              <span style={{ color:"#d1d5db" }}>-</span>
+              <input 
+                type={filtros.hasta ? "date" : "text"} 
+                onFocus={(e) => e.target.type = "date"}
+                onBlur={(e) => { if (!filtros.hasta) e.target.type = "text"; }}
+                placeholder="Hasta"
+                value={filtros.hasta} 
+                onChange={updFiltro("hasta")} 
+                style={{ border:"none", background:"transparent", fontSize:13, color:filtros.hasta?"#111827":"#6b7280", fontWeight:filtros.hasta?600:400, outline:"none", cursor:"pointer", width: 115 }} 
+              />
+            </div>
+            {(filtros.desde || filtros.hasta) && (
+              <button onClick={() => setFiltros(p => ({ ...p, desde:"", hasta:"" }))} style={{ background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",padding:4,marginLeft:2 }} title="Limpiar fechas">
+                <X style={{ width:14,height:14,color:"#9ca3af" }}/>
+              </button>
+            )}
+          </div>
+
           <div style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:16,color:"#9ca3af" }}>
             <Download
               style={{ width:18,height:18,cursor:"pointer",color:"#8B3DFF" }}
