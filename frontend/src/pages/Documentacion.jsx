@@ -4,7 +4,7 @@ import {
   ChevronDown, Calendar, Users, Truck, Tag, User, Activity,
   LayoutTemplate, MoreHorizontal, X, Route, Building2,
   Car, UploadCloud, Archive, RotateCcw, Trash2, Eye,
-  Sparkles, Folder, Files, Loader2
+  Sparkles, Folder, Files, Loader2, Camera
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -128,6 +128,34 @@ function ModalOverlay({ children, onClose, maxWidth=760 }) {
       <div style={{ position:"relative",background:"#fff",borderRadius:16,boxShadow:"0 30px 80px rgba(0,0,0,.3)",width:"100%",maxWidth,maxHeight:"90vh",display:"flex",flexDirection:"column",zIndex:1 }}>
         {children}
       </div>
+    </div>
+  );
+}
+
+// ─── Avatar Loader ────────────────────────────────────────────────────────────
+function DriverAvatar({ docId }) {
+  const [imgUrl, setImgUrl] = useState(null);
+  
+  useEffect(() => {
+    if (!docId) return;
+    let active = true;
+    api.get(`/documents/${docId}/download`, { responseType: "blob" })
+      .then(r => {
+        if (!active) return;
+        const blob = new Blob([r.data], { type: r.headers["content-type"] });
+        setImgUrl(URL.createObjectURL(blob));
+      })
+      .catch(e => console.error("Error loading avatar", e));
+    return () => { active = false; };
+  }, [docId]);
+
+  return (
+    <div style={{ width:40,height:40,borderRadius:8,background:"#1C1F26",flexShrink:0,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center" }}>
+      {imgUrl ? (
+        <img src={imgUrl} alt="perfil" style={{ width:"100%",height:"100%",objectFit:"cover" }}/>
+      ) : (
+        <User style={{ width:20,height:20,color:"#4B5563" }}/>
+      )}
     </div>
   );
 }
@@ -368,7 +396,13 @@ export default function Documentacion() {
   const handleDeleteDriver = async (cid) => {
     if (!window.confirm("¿Estás seguro de eliminar este conductor y sus documentos?")) return;
     const cidLower = (cid || "").toLowerCase();
-    const toDelete = docs.filter(d => d.tipo === "Personal" && (d.conductor_id === cid || (!d.conductor_id && d.por && cidLower.includes(d.por.toLowerCase()))));
+    const toDelete = docs.filter(d => {
+      if (d.tipo !== "Personal") return false;
+      const rawName = d.placa || d.ref || d.conductor_id || d.por || "";
+      const storedName = rawName.split(":::")[0].toLowerCase();
+      if (!storedName) return false;
+      return storedName === cidLower || storedName.includes(cidLower) || cidLower.includes(storedName);
+    });
     for (const d of toDelete) {
       if (!String(d.id).startsWith("300") && !String(d.id).startsWith("400")) {
         await api.delete(`/documents/${d.id}`).catch(()=>({}));
@@ -495,15 +529,51 @@ export default function Documentacion() {
       fd.append("doc", slot);
       if (data.emi) fd.append("emi", data.emi);
       if (data.ven) fd.append("ven", data.ven);
+      if (data.dni) {
+        fd.append("dni", data.dni); // Pass DNI number from slot if present
+        if (slot === "DNI") fd.append("desc", data.dni); // Fallback to desc for DNI number
+      }
       
-      if (tab === "Vehículos") fd.append("placa", multiAddData.identifier.toUpperCase());
-      else if (tab === "Personal") fd.append("por", multiAddData.identifier);
-      else if (tab === "Viajes") fd.append("viaje_id", multiAddData.identifier.toUpperCase());
-      else fd.append("ref", multiAddData.identifier);
+      if (tab === "Vehículos") {
+        fd.append("placa", multiAddData.identifier.toUpperCase());
+      }
+      else if (tab === "Personal") {
+        const encodedName = data.dni ? `${multiAddData.identifier}:::${data.dni}` : multiAddData.identifier;
+        fd.append("placa", encodedName); // Abuse placa to ensure the backend saves and returns the conductor name AND dni!
+        fd.append("conductor_id", multiAddData.identifier);
+        fd.append("ref", multiAddData.identifier); 
+        if (multiAddData.foto) fd.append("foto", multiAddData.foto);
+      }
+      else if (tab === "Viajes") {
+        fd.append("viaje_id", multiAddData.identifier.toUpperCase());
+      }
+      else {
+        fd.append("ref", multiAddData.identifier);
+      }
 
       uploads.push(api.post("/documents", fd));
+    } // End of for loop
+
+    if (tab === "Personal") {
+      const fd = new FormData();
+      fd.append("tipo", tab);
+      fd.append("doc", "Perfil"); // Dummy document to store driver metadata
+      const encodedName = multiAddData.dni ? `${multiAddData.identifier}:::${multiAddData.dni}` : multiAddData.identifier;
+      fd.append("placa", encodedName);
+      fd.append("conductor_id", multiAddData.identifier);
+      fd.append("ref", multiAddData.identifier);
+      if (multiAddData.dni) fd.append("desc", multiAddData.dni); // Store DNI number
+      if (multiAddData.foto) {
+        fd.append("file", multiAddData.foto);
+        fd.append("foto", multiAddData.foto);
+      } else {
+        const dummyBlob = new Blob(["perfil"], { type: "text/plain" });
+        fd.append("file", dummyBlob, "perfil.txt");
+      }
+      
+      uploads.push(api.post("/documents", fd));
     }
-    
+
     if (uploads.length === 0) {
       alert("No has adjuntado ningún documento");
       return;
@@ -991,17 +1061,25 @@ export default function Documentacion() {
             const existingConds = new Set(condList.map(c => c.id));
             const existingNames = new Set(condList.map(c => (`${c.nombre||""} ${c.apellidos||""}`).trim().toLowerCase()));
 
+            const perfilDocs = docs.filter(d => d.tipo === "Personal" && d.doc === "Perfil");
             docs.filter(d => d.tipo === "Personal").forEach(d => {
-              const name = d.por || "Conductor";
-              const key = d.conductor_id || name;
+              const rawName = d.placa || d.ref || d.conductor_id || d.por || "Conductor";
+              const name = rawName.split(":::")[0];
+              const dniPart = rawName.split(":::")[1];
+              const key = name;
               if (key && !existingConds.has(key) && !existingNames.has(name.toLowerCase())) {
+                const perfil = perfilDocs.find(p => {
+                  const pRaw = p.placa || p.ref || p.conductor_id || p.por || "";
+                  return pRaw.split(":::")[0] === name;
+                });
                 existingConds.add(key);
                 condList.push({
                   id: key,
                   nombre: name,
                   apellidos: "",
-                  dni: d.dni || "—",
+                  dni: dniPart || perfil?.desc || d.desc || d.dni || "—",
                   licencia: d.licencia || "—",
+                  perfilId: perfil?.id || (d.doc === "Perfil" ? d.id : null),
                 });
               }
             });
@@ -1020,17 +1098,18 @@ export default function Documentacion() {
 
             // Build a lookup: driverId → { slotName → doc }
             const docsByConductor = {};
-            docs.filter(d => d.tipo === "Personal").forEach(d => {
-              let matchedCondId = d.conductor_id;
-              if (!matchedCondId && d.por) {
-                const found = condList.find(c => {
-                  const fullName = `${c.nombre} ${c.apellidos}`.trim().toLowerCase();
-                  return fullName.includes(d.por.toLowerCase()) || d.por.toLowerCase().includes(c.nombre.toLowerCase());
-                });
-                if (found) {
-                  matchedCondId = found.id;
-                }
-              }
+            docs.filter(d => d.tipo === "Personal" && d.doc !== "Perfil").forEach(d => {
+              const storedNameRaw = d.placa || d.ref || d.conductor_id || d.por || "";
+              const storedName = storedNameRaw.split(":::")[0];
+              const found = condList.find(c => {
+                const fullName = `${c.nombre} ${c.apellidos}`.trim().toLowerCase();
+                if (!storedName) return false;
+                return fullName === storedName.toLowerCase() || 
+                       fullName.includes(storedName.toLowerCase()) || 
+                       storedName.toLowerCase().includes(c.nombre.toLowerCase());
+              });
+              
+              const matchedCondId = found ? found.id : null;
               if (matchedCondId) {
                 if (!docsByConductor[matchedCondId]) docsByConductor[matchedCondId] = {};
                 DRIVER_SLOTS.forEach(slot => {
@@ -1076,7 +1155,7 @@ export default function Documentacion() {
               <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
                 <thead>
                   <tr style={{ background:"#241B4A" }}>
-                    {["","TIPO","DNI / CONDUCTOR","LICENCIA","DOCUMENTO","ESTADO","EMISIÓN","VENCIMIENTO","ATRASO","CREADO POR / EL","ACCIONES"].map((h,i)=>(
+                    {["","CONDUCTOR","EMPRESA","DOCUMENTOS","ESTADO","EMISIÓN","VENCIMIENTO","ATRASO","CREADO POR / EL","ACCIONES"].map((h,i)=>(
                       <th key={i} style={thSt2}>{h}</th>
                     ))}
                   </tr>
@@ -1089,6 +1168,7 @@ export default function Documentacion() {
                     const vigentes = DRIVER_SLOTS.filter(s => slotDocs[s]).length;
                     const pendientes = DRIVER_SLOTS.length - vigentes;
                     const cName = `${c.nombre} ${c.apellidos}`.trim();
+                    const firstDoc = Object.values(slotDocs)[0];
 
                     return (
                       <React.Fragment key={cid}>
@@ -1104,38 +1184,48 @@ export default function Documentacion() {
                           onMouseEnter={e => { if(!isOpen) e.currentTarget.style.background="#F9FAFB"; }}
                           onMouseLeave={e => { if(!isOpen) e.currentTarget.style.background="#fff"; }}
                         >
-                          {/* chevron */}
-                          <td style={{ ...tdSt, width:36, textAlign:"center", color:"#8B3DFF" }}>
-                            <span style={{ display:"inline-flex", transform: isOpen?"rotate(180deg)":"rotate(0deg)", transition:"transform .2s" }}>
-                              <ChevronDown style={{ width:16,height:16 }}/>
-                            </span>
+                          {/* check/expand spacer (empty checkbox in image, we'll use a simple spacer) */}
+                          <td style={{ ...tdSt, width:36, textAlign:"center", color:"#d1d5db" }}>
+                             <input type="checkbox" onClick={e=>e.stopPropagation()} style={{ cursor:"pointer" }}/>
                           </td>
-                          <td style={{ ...tdSt, color:"#6b7280", whiteSpace:"nowrap", fontSize:12.5 }}>
-                            Personal
-                          </td>
+                          {/* Conductor (Photo + Name + DNI) */}
                           <td style={{ ...tdSt, fontWeight:700, color:"#1f2937", fontSize:13 }}>
-                            <span style={{ display:"inline-flex",alignItems:"center",gap:6 }}>
-                              <User style={{ width:14,height:14,color:"#8B3DFF" }}/>
-                              {cName} {c.dni ? `(${c.dni})` : ""}
+                            <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+                              <DriverAvatar docId={c.perfilId} />
+                              <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
+                                <span style={{ fontSize:12.5 }}>{cName}</span>
+                                <span style={{ fontSize:11,color:"#6b7280",fontWeight:500 }}>{c.dni || "—"}</span>
+                              </div>
+                            </div>
+                          </td>
+                          {/* Empresa */}
+                          <td style={{ ...tdSt, color:"#4b5563", fontSize:12.5 }}>{c?.empresa || "Rapesa"}</td>
+                          {/* Documentos */}
+                          <td style={{ ...tdSt, fontSize:12.5, fontWeight:600, color:"#059669" }}>
+                            Vigentes
+                          </td>
+                          {/* Estado */}
+                          <td style={tdSt}>
+                            <span style={{ fontSize:12,fontWeight:600,color:"#F59E0B" }}>
+                              {pendientes} Pendientes
                             </span>
                           </td>
-                          <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{c.licencia || "—"}</td>
-                          {/* span remaining cols with summary */}
-                          <td colSpan={6} style={{ ...tdSt }}>
-                            <span style={{ display:"flex",alignItems:"center",gap:10 }}>
-                              <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#059669",background:"#ECFDF5",padding:"3px 10px",borderRadius:999 }}>
-                                <span style={{ width:6,height:6,borderRadius:"50%",background:"#059669",display:"inline-block" }}/>
-                                {vigentes} Vigente{vigentes!==1?"s":""}
-                              </span>
-                              {pendientes > 0 && (
-                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,fontSize:12,fontWeight:600,color:"#64748B",background:"#F1F5F9",padding:"3px 10px",borderRadius:999 }}>
-                                  <span style={{ width:6,height:6,borderRadius:"50%",background:"#64748B",display:"inline-block" }}/>
-                                  {pendientes} Pendiente{pendientes!==1?"s":""}
-                                </span>
-                              )}
-                              <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{DRIVER_SLOTS.length} documentos</span>
-                            </span>
+                          {/* Emisión (mock or first doc) */}
+                          <td style={{ ...tdSt, color:"#4b5563", fontSize:12.5 }}>{firstDoc?.emi || "—"}</td>
+                          {/* Vencimiento */}
+                          <td style={{ ...tdSt, color:"#4b5563", fontSize:12.5 }}>{firstDoc?.ven || "—"}</td>
+                          {/* Atraso */}
+                          <td style={{ ...tdSt, color:"#4b5563", fontSize:12.5 }}>{firstDoc?.atr || "—"}</td>
+                          {/* Creado por */}
+                          <td style={{ ...tdSt, fontSize:12 }}>
+                            {firstDoc ? (
+                              <>
+                                <div style={{ color:"#374151",fontWeight:500 }}>{firstDoc.por || "Administrador"}</div>
+                                <div style={{ color:"#6b7280",fontSize:11 }}>{firstDoc.el || "—"}</div>
+                              </>
+                            ) : "—"}
                           </td>
+                          {/* Acciones */}
                           <td style={{ ...tdSt, textAlign:"center" }}>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteDriver(cid); }}
@@ -1182,32 +1272,26 @@ export default function Documentacion() {
                             >
                               {/* indent spacer */}
                               <td style={{ ...tdSt, width:36, borderLeft:"3px solid #8B3DFF" }}/>
-                              {/* tipo col */}
-                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>Personal</td>
-                              {/* DNI / Conductor */}
-                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{cName}</td>
-                              {/* Licencia */}
-                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>{c.licencia || "—"}</td>
+                              {/* Conductor (empty) */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}/>
+                              {/* Empresa (FILIAL 01) */}
+                              <td style={{ ...tdSt, color:"#9ca3af", fontSize:12 }}>FILIAL 01</td>
                               {/* documento */}
-                              <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:13 }}>
-                                <span style={{ display:"flex",alignItems:"center",gap:7 }}>
-                                  <FileText style={{ width:14,height:14,color: hasdoc?"#8B3DFF":"#9ca3af" }}/>
-                                  {slot}
-                                </span>
+                              <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:12.5 }}>
+                                {slot}
                               </td>
                               {/* estado */}
                               <td style={tdSt}>
-                                <span style={{ display:"inline-flex",alignItems:"center",gap:5,borderRadius:999,fontWeight:600,fontSize:11,padding:"3px 10px",color:estStyle.color,background:estStyle.bg,whiteSpace:"nowrap" }}>
-                                  <span style={{ width:6,height:6,borderRadius:"50%",background:estStyle.color,display:"inline-block" }}/>
-                                  {hasdoc ? est : "Pendiente de cargar"}
+                                <span style={{ color:hasdoc?"#374151":"#9ca3af", fontSize:12.5 }}>
+                                  {hasdoc ? est : "Pendiente"}
                                 </span>
                               </td>
                               {/* emisión */}
-                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.emi || "—") : "—"}</td>
+                              <td style={{ ...tdSt, color:"#374151", fontSize:12.5, fontWeight:500 }}>{hasdoc ? (d.emi || "—") : "—"}</td>
                               {/* vencimiento */}
-                              <td style={{ ...tdSt, color:"#6b7280", fontSize:12.5 }}>{hasdoc ? (d.ven || "—") : "—"}</td>
+                              <td style={{ ...tdSt, color:"#374151", fontSize:12.5, fontWeight:500 }}>{hasdoc ? (d.ven || "—") : "—"}</td>
                               {/* atraso */}
-                              <td style={{ ...tdSt, fontSize:12.5, whiteSpace:"nowrap", color: est==="Vencido"?"#DC2626":"#9ca3af", fontWeight: est==="Vencido"?600:400 }}>
+                              <td style={{ ...tdSt, fontSize:12.5, whiteSpace:"nowrap", color: est==="Vencido"?"#DC2626":"#374151", fontWeight: 500 }}>
                                 {atraso}
                               </td>
                               {/* creado por */}
@@ -1806,6 +1890,28 @@ export default function Documentacion() {
               <label style={lblSt}>{tab === "Vehículos" ? "Placa del vehículo" : tab === "Personal" ? "Nombre del conductor" : tab === "Viajes" ? "Código de viaje / Ruta" : "Empresa"}</label>
               <input style={inputSt} placeholder={tab === "Vehículos" ? "Ej. ABC-123" : ""} value={multiAddData.identifier} onChange={e => setMultiAddData(p => ({ ...p, identifier: e.target.value }))} />
             </div>
+            {tab === "Personal" && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:20 }}>
+                <div>
+                  <label style={lblSt}>Nro de DNI</label>
+                  <input style={inputSt} placeholder="Ej. 74582910" value={multiAddData.dni || ""} onChange={e => setMultiAddData(p => ({ ...p, dni: e.target.value }))} />
+                </div>
+                <div>
+                  <label style={lblSt}>Fotografía del conductor</label>
+                  <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 500, color: multiAddData.foto ? "#8B3DFF" : "#6b7280", background: multiAddData.foto ? "#E0D4F5" : "#F3F4F6", padding: "10px 14px", borderRadius: 10, border: "1px solid #E5E7EB", height: 42 }}>
+                    <Camera style={{ width: 16, height: 16 }} />
+                    <span style={{ maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {multiAddData.foto ? multiAddData.foto.name : "Subir fotografía"}
+                    </span>
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                      const f = e.target.files[0];
+                      if (f) setMultiAddData(p => ({ ...p, foto: f, fotoUrl: URL.createObjectURL(f) }));
+                    }} />
+                  </label>
+                </div>
+              </div>
+            )}
+
             
             <div style={{ fontSize:14, fontWeight:600, color:"#374151", marginBottom:12 }}>Documentos correspondientes</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
