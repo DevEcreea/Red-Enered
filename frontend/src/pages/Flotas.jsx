@@ -199,14 +199,16 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       }
       return true;
     }).sort((a, b) => {
-      const formatTime = (t) => {
-        if (!t) return '00:00:00';
+      const parseDate = (d, t) => {
+        if (!d) return new Date(a.FECHA_TRANSACCION || 0).getTime() || 0;
+        let dateStr = String(d).replace(/\//g, '-');
+        if (!t) t = '00:00:00';
         const parts = t.split(':');
-        return parts.map(p => p.padStart(2, '0')).join(':');
+        const timeStr = parts.map(p => p.padStart(2, '0')).join(':');
+        const dt = new Date(`${dateStr}T${timeStr}`);
+        return isNaN(dt.getTime()) ? 0 : dt.getTime();
       };
-      const dateA = new Date(a.FECHA ? `${a.FECHA}T${formatTime(a.HORA)}` : (a.FECHA_TRANSACCION || 0));
-      const dateB = new Date(b.FECHA ? `${b.FECHA}T${formatTime(b.HORA)}` : (b.FECHA_TRANSACCION || 0));
-      return (dateB.getTime() || 0) - (dateA.getTime() || 0);
+      return parseDate(b.FECHA, b.HORA) - parseDate(a.FECHA, a.HORA);
     });
   }, [rows, filtros]);
 
@@ -462,7 +464,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                 if (r.FECHA) {
                   const parts = r.FECHA.split("-");
                   if (parts.length === 3) {
-                    fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                    fecha = `${parts[0]}/${parts[1]}/${parts[2]}`; // YYYY/MM/DD
                   } else {
                     fecha = r.FECHA;
                   }
