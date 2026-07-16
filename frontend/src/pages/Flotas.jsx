@@ -194,6 +194,10 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
         }
       }
       return true;
+    }).sort((a, b) => {
+      const dateA = new Date(a.FECHA ? `${a.FECHA}T${a.HORA || '00:00:00'}` : (a.FECHA_TRANSACCION || 0));
+      const dateB = new Date(b.FECHA ? `${b.FECHA}T${b.HORA || '00:00:00'}` : (b.FECHA_TRANSACCION || 0));
+      return (dateB.getTime() || 0) - (dateA.getTime() || 0);
     });
   }, [rows, filtros]);
 
@@ -442,7 +446,20 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             </thead>
             <tbody>
               {filteredRows.slice(0,50).map((r,i)=>{
-                const fecha = r.FECHA ? `${r.FECHA}${r.HORA?" "+r.HORA:""}` : "—";
+                let fecha = "—";
+                if (r.FECHA) {
+                  const parts = r.FECHA.split("-");
+                  if (parts.length === 3) {
+                    fecha = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                  } else {
+                    fecha = r.FECHA;
+                  }
+                  if (r.HORA) {
+                    const hParts = r.HORA.split(":");
+                    const hm = hParts.length >= 2 ? `${hParts[0]}:${hParts[1]}` : r.HORA;
+                    fecha += ` ${hm}`;
+                  }
+                }
                 const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
                 const galones = parseFloat(r.CANTIDAD_GL||0);
                 const precio = parseFloat(r.PRECIO_UNITARIO||0);
