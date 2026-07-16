@@ -1212,7 +1212,16 @@ export default function Flotas() {
   const services = user?.servicios || { plataforma:true, combustible:true, gps:false };
 
   const reload = () => {
-    api.get("/consumptions").then(r=>setRows(r.data||[])).catch(()=>{});
+    api.get("/consumptions").then(r => {
+      const rawData = r.data || [];
+      const cleanData = rawData.filter(item => {
+        if (item._origen === "manual") return false;
+        if (item.ESTACION && item.ESTACION.toLowerCase().includes("energix")) return false;
+        if (!item.FECHA || item.FECHA.trim() === "" || item.FECHA === "NaT" || item.FECHA === "NaN") return false;
+        return true;
+      });
+      setRows(cleanData);
+    }).catch(() => {});
   };
 
   useEffect(reload, []);
