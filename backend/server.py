@@ -433,8 +433,12 @@ async def list_consumptions(
 ):
     rows = []
     
-    # 1. Fetch from db.consumptions (unless cliente_subsidio)
-    if user.get("role") != "cliente_subsidio":
+    # 1. Fetch from db.consumptions
+    fetch_combustible = True
+    if user.get("role") == "cliente_subsidio" and not user.get("empresa"):
+        fetch_combustible = False
+
+    if fetch_combustible:
         q = {}
         target_emp = empresa if (empresa and user["role"] == "admin_enered") else user.get("empresa")
         if user["role"] != "admin_enered" and target_emp:

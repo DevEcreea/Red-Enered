@@ -37,10 +37,10 @@ export default function AnalyticsIndex() {
               key={mod.to}
               onClick={() => !mod.disabled && navigate(mod.to)}
               disabled={mod.disabled}
-              className={`flex flex-col items-center justify-center gap-3 py-10 px-4 rounded-xl transition-all ${
+              className={`flex flex-col items-center justify-center gap-3 py-10 px-4 rounded-xl transition-all bg-brand text-white shadow-md ${
                 mod.disabled
-                  ? "bg-white border border-neutral-200 text-neutral-400 cursor-not-allowed"
-                  : "bg-brand text-white hover:bg-brand-hover hover:-translate-y-1 shadow-md"
+                  ? "cursor-not-allowed"
+                  : "hover:bg-brand-hover hover:-translate-y-1"
               }`}
             >
               <Icon className="w-7 h-7" strokeWidth={1.5} />

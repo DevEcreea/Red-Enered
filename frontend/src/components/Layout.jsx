@@ -248,9 +248,6 @@ export default function Layout({ children }) {
       if (user?.servicios?.plataforma) return false;
       if (user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
     }
-    // Ocultar módulo Monitoreo si la empresa NO tiene servicios.gps (excepto admin_enered)
-    if (i.to === "/monitoreo" && user.role !== "admin_enered" && user?.servicios && !user.servicios.gps) return false;
-
     // Condición: Ningún usuario de empresa ve Dashboard a menos que tengan el servicio plataforma
     if (i.to === "/dashboard" && user.role !== "admin_enered") {
       if (!user?.servicios?.plataforma) {
@@ -259,6 +256,12 @@ export default function Layout({ children }) {
     }
 
     return true;
+  }).map((i) => {
+    // Si es Monitoreo y no tiene GPS, le ponemos el badge de DEMO GRATIS
+    if (i.to === "/monitoreo" && user.role !== "admin_enered" && (!user?.servicios || !user.servicios.gps)) {
+      return { ...i, badge: "DEMO GRATIS", badgeColor: "amber" };
+    }
+    return i;
   });
   const isAdmin = user.role === "admin_enered";
 

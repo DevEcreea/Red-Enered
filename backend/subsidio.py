@@ -1154,13 +1154,50 @@ async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     return {"ok": True, "confirmed": res.modified_count}
 
 
+def _combustible_to_subsidio(r: dict) -> dict:
+    try:
+        gal = float(r.get("CANTIDAD_GL") or 0)
+    except Exception:
+        gal = 0.0
+    try:
+        imp = float(r.get("IMPORTE_TOTAL") or 0)
+    except Exception:
+        imp = 0.0
+
+    return {
+        "id": r.get("id") or str(uuid.uuid4()),
+        "fecha": r.get("FECHA") or "",
+        "hora": r.get("HORA") or "",
+        "placa": r.get("PLACA") or "",
+        "ciudad": r.get("CIUDAD") or "",
+        "estacion": r.get("ESTACION") or "",
+        "producto": r.get("PRODUCTO") or "",
+        "galones": gal,
+        "precio_unitario": r.get("PRECIO_UNITARIO") or 0,
+        "importe_total": imp,
+        "ruc_emisor": r.get("RUC_EMISOR") or "",
+        "numero_documento": r.get("NUMERO_DOCUMENTO") or "",
+        "estado": "Confirmado (Combustible)",
+        "_origen": "combustible"
+    }
+
 @subsidio_router.get("/subsidio/invoices/confirmed")
 async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
     """Lista facturas confirmadas (para módulos del cliente_subsidio)."""
     rows = await db.consumos_subsidio.find(
         {"user_id": user["id"], "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
-    ).sort("fecha", -1).to_list(2000)
+    ).to_list(2000)
+
+    if user.get("empresa"):
+        rows_comb = await db.consumptions.find(
+            {"EMPRESA": user["empresa"]},
+            {"_id": 0}
+        ).to_list(2000)
+        mapped = [_combustible_to_subsidio(r) for r in rows_comb]
+        rows.extend(mapped)
+
+    rows.sort(key=lambda x: x.get("fecha") or "", reverse=True)
     return rows
 
 
@@ -1179,6 +1216,14 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         {"user_id": user["id"], "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(5000)
+
+    if user.get("empresa"):
+        rows_comb = await db.consumptions.find(
+            {"EMPRESA": user["empresa"]},
+            {"_id": 0}
+        ).to_list(5000)
+        mapped = [_combustible_to_subsidio(r) for r in rows_comb]
+        rows.extend(mapped)
 
     def _f(x):
         try:

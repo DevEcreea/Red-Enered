@@ -182,7 +182,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
       if (filtros.producto && r.PRODUCTO !== filtros.producto) return false;
       
-      const rDate = r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null;
+      const rDate = r.FECHA ? new Date(r.FECHA) : (r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null);
       if (rDate && !isNaN(rDate.getTime())) {
         if (filtros.desde) {
           const dDesde = new Date(filtros.desde + "T00:00:00");
@@ -197,21 +197,33 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
     });
   }, [rows, filtros]);
 
+  const activeFilters = useMemo(() => Object.values(filtros).filter(Boolean).length, [filtros]);
+
   const updFiltro = (k) => (e) => setFiltros(p => ({ ...p, [k]: e.target.value }));
 
+  const filteredTotals = useMemo(() => {
+    let gal = 0, gasto = 0, ahorro = 0;
+    filteredRows.forEach((r) => {
+      gal += parseFloat(r.CANTIDAD_GL || 0);
+      gasto += parseFloat(r.IMPORTE_TOTAL || 0);
+      ahorro += parseFloat(r.AHORRO || 0);
+    });
+    return { gal, gasto, ahorro, n: filteredRows.length };
+  }, [filteredRows]);
+
   const invalidas = useMemo(() => {
-    const list = rows.filter(r => {
+    const list = filteredRows.filter(r => {
       const gl = parseFloat(r.CANTIDAD_GL || 0);
       const imp = parseFloat(r.IMPORTE_TOTAL || 0);
       return !r.PLACA || gl <= 0 || imp <= 0;
     });
     const monto = list.reduce((s, r) => s + parseFloat(r.IMPORTE_TOTAL || 0), 0);
     return { count: list.length, monto };
-  }, [rows]);
+  }, [filteredRows]);
 
   const kmGalVal = useMemo(() => {
     const byPlaca = {};
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const placa = (r.PLACA || "").toUpperCase().trim();
       if (!placa) return;
       const km = parseFloat(r.KILOMETRAJE || 0);
@@ -250,13 +262,13 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       return `${(totalDist / totalGal).toFixed(2)}`;
     }
     return "—";
-  }, [rows]);
+  }, [filteredRows]);
 
   const kpiValues = {
-    gasto:    `S/ ${(totals.gasto || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    galones:  `${Math.round(totals.gal || 0).toLocaleString("es-PE")}`,
+    gasto:    `S/ ${(filteredTotals.gasto || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    galones:  `${Math.round(filteredTotals.gal || 0).toLocaleString("es-PE")}`,
     kmGal:    kmGalVal,
-    costoGal: totals.gal > 0 ? `S/ ${(totals.gasto / totals.gal).toFixed(2)}` : "—",
+    costoGal: filteredTotals.gal > 0 ? `S/ ${(filteredTotals.gasto / filteredTotals.gal).toFixed(2)}` : "—",
   };
 
   return (
@@ -277,11 +289,11 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
         })}
       </div>
 
-      {/* Small KPIs row 2 — Ahorro se oculta si no tiene servicios.combustible */}
+      {/* Small KPIs row 2 — Ahorro se oculta si no tiene services.combustible */}
       <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginTop:20 }}>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:"relative",display:"flex",flexDirection:"column",justifyContent:"center" }}>
           <span style={{ fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:".04em",textTransform:"uppercase" }}>Cargas</span>
-          <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }} data-testid="combustible-kpi-cargas">{rows.length}</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }} data-testid="combustible-kpi-cargas">{filteredRows.length}</span>
           <span style={{ position:"absolute",top:16,right:18,color:"#8B3DFF" }}><Droplet style={{ width:18,height:18 }}/></span>
         </div>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#EF4444",display:"flex",flexDirection:"column",justifyContent:"center" }}>
@@ -294,7 +306,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
         </div>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#10B981",display:"flex",flexDirection:"column",justifyContent:"center" }}>
           <span style={{ fontSize:14,opacity:.95,color:"#fff" }}>Ahorro Combustible</span>
-          <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-ahorro">S/ {(showAhorro ? (totals.ahorro || 0) : 0).toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+          <span style={{ fontSize:26,fontWeight:700,color:"#fff",marginTop:2 }} data-testid="combustible-kpi-ahorro">S/ {(showAhorro ? (filteredTotals.ahorro || 0) : 0).toLocaleString("es-PE",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
         </div>
       </div>
 
@@ -310,26 +322,41 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           <FSel label="Producto" value={filtros.producto} onChange={updFiltro("producto")} options={opts.producto} />
           
           <div style={{ display:"flex",alignItems:"center",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,height:42,padding:"0 12px",gap:8 }}>
+            <style>{`
+              .date-input-clean::-webkit-calendar-picker-indicator {
+                opacity: 0;
+                position: absolute;
+                right: 0;
+                top: 0;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+                cursor: pointer;
+              }
+            `}</style>
             <Calendar style={{ width:16,height:16,color:"#9ca3af" }}/>
             <div style={{ display:"flex",alignItems:"center",gap:6 }}>
               <input 
+                className="date-input-clean"
                 type={filtros.desde ? "date" : "text"} 
                 onFocus={(e) => e.target.type = "date"}
                 onBlur={(e) => { if (!filtros.desde) e.target.type = "text"; }}
                 placeholder="Desde"
                 value={filtros.desde} 
                 onChange={updFiltro("desde")} 
-                style={{ border:"none", background:"transparent", fontSize:13, color:filtros.desde?"#111827":"#6b7280", fontWeight:filtros.desde?600:400, outline:"none", cursor:"pointer", width: 115 }} 
+                style={{ position: "relative", border:"none", background:"transparent", fontSize:13, color:filtros.desde?"#111827":"#6b7280", fontWeight:filtros.desde?600:400, outline:"none", cursor:"pointer", width: 110 }} 
               />
               <span style={{ color:"#d1d5db" }}>-</span>
               <input 
+                className="date-input-clean"
                 type={filtros.hasta ? "date" : "text"} 
                 onFocus={(e) => e.target.type = "date"}
                 onBlur={(e) => { if (!filtros.hasta) e.target.type = "text"; }}
                 placeholder="Hasta"
                 value={filtros.hasta} 
                 onChange={updFiltro("hasta")} 
-                style={{ border:"none", background:"transparent", fontSize:13, color:filtros.hasta?"#111827":"#6b7280", fontWeight:filtros.hasta?600:400, outline:"none", cursor:"pointer", width: 115 }} 
+                style={{ position: "relative", border:"none", background:"transparent", fontSize:13, color:filtros.hasta?"#111827":"#6b7280", fontWeight:filtros.hasta?600:400, outline:"none", cursor:"pointer", width: 110 }} 
               />
             </div>
             {(filtros.desde || filtros.hasta) && (
@@ -338,6 +365,15 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
               </button>
             )}
           </div>
+
+          {activeFilters > 0 && (
+            <button 
+              onClick={() => setFiltros({ empresa:"", placa:"", estacion:"", producto:"", desde:"", hasta:"" })}
+              style={{ display:"flex",alignItems:"center",gap:6,background:"#F3F4F6",color:"#4B5563",border:"none",borderRadius:10,height:42,padding:"0 16px",fontSize:13,fontWeight:600,cursor:"pointer" }}
+            >
+              <X style={{ width:14,height:14 }}/> Limpiar Filtros
+            </button>
+          )}
 
           <div style={{ marginLeft:"auto",display:"flex",alignItems:"center",gap:16,color:"#9ca3af" }}>
             <Download
