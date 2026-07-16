@@ -196,19 +196,45 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           const dHasta = new Date(filtros.hasta + "T23:59:59");
           if (rDate > dHasta) return false;
         }
-      }
       return true;
     }).sort((a, b) => {
-      const parseDate = (d, t) => {
-        if (!d) return new Date(a.FECHA_TRANSACCION || 0).getTime() || 0;
-        let dateStr = String(d).replace(/\//g, '-');
-        if (!t) t = '00:00:00';
-        const parts = t.split(':');
-        const timeStr = parts.map(p => p.padStart(2, '0')).join(':');
-        const dt = new Date(`${dateStr}T${timeStr}`);
-        return isNaN(dt.getTime()) ? 0 : dt.getTime();
+      const getSortValue = (r) => {
+        if (!r) return 0;
+        let f = r.FECHA || r.FECHA_TRANSACCION || "";
+        let h = r.HORA || "00:00:00";
+        if (!f) return 0;
+        
+        let y = 0, m = 0, d = 0;
+        let parts = f.split(/[-/]/);
+        if (parts.length === 3) {
+          if (parts[0].length === 4) {
+            y = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10);
+            d = parseInt(parts[2], 10);
+          } else {
+            d = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10);
+            y = parseInt(parts[2], 10);
+            if (y < 100) y += 2000;
+          }
+        }
+        
+        // If the month is > 7 (we are in July) and day <= 12, it's definitely a swapped date from pandas
+        if (m > 7 && d <= 12) {
+           let temp = m;
+           m = d;
+           d = temp;
+        }
+        
+        let th = 0, tm = 0, ts = 0;
+        let hp = h.split(":");
+        if (hp.length >= 1) th = parseInt(hp[0], 10) || 0;
+        if (hp.length >= 2) tm = parseInt(hp[1], 10) || 0;
+        if (hp.length >= 3) ts = parseInt(hp[2], 10) || 0;
+        
+        return y * 10000000000 + m * 100000000 + d * 1000000 + th * 10000 + tm * 100 + ts;
       };
-      return parseDate(b.FECHA, b.HORA) - parseDate(a.FECHA, a.HORA);
+      return getSortValue(b) - getSortValue(a);
     });
   }, [rows, filtros]);
 
@@ -464,7 +490,15 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                 if (r.FECHA) {
                   const parts = r.FECHA.split("-");
                   if (parts.length === 3) {
-                    fecha = `${parts[0]}/${parts[1]}/${parts[2]}`; // YYYY/MM/DD
+                    let y = parseInt(parts[0], 10);
+                    let m = parseInt(parts[1], 10);
+                    let d = parseInt(parts[2], 10);
+                    if (m > 7 && d <= 12) {
+                      let temp = m;
+                      m = d;
+                      d = temp;
+                    }
+                    fecha = `${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}`;
                   } else {
                     fecha = r.FECHA;
                   }
