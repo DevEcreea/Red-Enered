@@ -1,0 +1,1 @@
+Google Sheets no configurado. Define GOOGLE_SHEETS_CREDENTIALS_JSON (contenido del JSON) o GOOGLE_SHEETS_CREDENTIALS_PATH (ruta al archivo).

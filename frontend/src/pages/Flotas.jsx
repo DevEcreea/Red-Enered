@@ -155,6 +155,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
   const { user } = useAuth();
   const showAhorro = services?.combustible === true;
   const [filtros, setFiltros] = useState({ empresa:"", placa:"", estacion:"", producto:"", desde:"", hasta:"" });
+  const [page, setPage] = useState(0);
 
   const opts = useMemo(() => {
     const empresas = new Set();
@@ -182,8 +183,11 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
       if (filtros.producto && r.PRODUCTO !== filtros.producto) return false;
       
-      const rDate = r.FECHA ? new Date(r.FECHA) : (r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null);
-      if (rDate && !isNaN(rDate.getTime())) {
+      if (filtros.desde || filtros.hasta) {
+        const rDate = r.FECHA ? new Date(r.FECHA) : (r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null);
+        if (!rDate || isNaN(rDate.getTime())) {
+          return false; // If filtering by date, exclude records without a valid date
+        }
         if (filtros.desde) {
           const dDesde = new Date(filtros.desde + "T00:00:00");
           if (rDate < dDesde) return false;
@@ -195,15 +199,23 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       }
       return true;
     }).sort((a, b) => {
-      const dateA = new Date(a.FECHA ? `${a.FECHA}T${a.HORA || '00:00:00'}` : (a.FECHA_TRANSACCION || 0));
-      const dateB = new Date(b.FECHA ? `${b.FECHA}T${b.HORA || '00:00:00'}` : (b.FECHA_TRANSACCION || 0));
+      const formatTime = (t) => {
+        if (!t) return '00:00:00';
+        const parts = t.split(':');
+        return parts.map(p => p.padStart(2, '0')).join(':');
+      };
+      const dateA = new Date(a.FECHA ? `${a.FECHA}T${formatTime(a.HORA)}` : (a.FECHA_TRANSACCION || 0));
+      const dateB = new Date(b.FECHA ? `${b.FECHA}T${formatTime(b.HORA)}` : (b.FECHA_TRANSACCION || 0));
       return (dateB.getTime() || 0) - (dateA.getTime() || 0);
     });
   }, [rows, filtros]);
 
   const activeFilters = useMemo(() => Object.values(filtros).filter(Boolean).length, [filtros]);
 
-  const updFiltro = (k) => (e) => setFiltros(p => ({ ...p, [k]: e.target.value }));
+  const updFiltro = (k) => (e) => {
+    setFiltros(p => ({ ...p, [k]: e.target.value }));
+    setPage(0);
+  };
 
   const filteredTotals = useMemo(() => {
     let gal = 0, gasto = 0, ahorro = 0;
@@ -445,7 +457,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
               </tr>
             </thead>
             <tbody>
-              {filteredRows.slice(0,50).map((r,i)=>{
+              {filteredRows.slice(page * 50, (page + 1) * 50).map((r,i)=>{
                 let fecha = "—";
                 if (r.FECHA) {
                   const parts = r.FECHA.split("-");
@@ -536,6 +548,24 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                             cardTitle = "Alerta de Tarjeta";
                             cardText = "La tarjeta de combustible de la carga y la asignada al vehiculo no coinciden";
                           }
+                        }
+
+                        if (services && services.gps === false) {
+                          gpsColor = "#9CA3AF";
+                          gpsTitle = "Sin Servicio GPS";
+                          gpsText = "El cliente no cuenta con el servicio de GPS activo en su plan.";
+                          
+                          tankColor = "#EF4444";
+                          tankTitle = "Falta Validación GPS";
+                          tankText = "No se puede cruzar la información de capacidad del tanque sin datos satelitales (kilometraje y ubicación).";
+                          
+                          fuelColor = "#EF4444";
+                          fuelTitle = "Falta Validación GPS";
+                          fuelText = "No se puede calcular el rendimiento ni el consumo óptimo sin datos satelitales.";
+                          
+                          cardColor = "#EF4444";
+                          cardTitle = "Falta Validación GPS";
+                          cardText = "No se puede verificar la proximidad de la unidad con el uso de la tarjeta sin ubicación satelital.";
                         }
 
                         return (
@@ -656,7 +686,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                   </tr>
                 );
               })}
-              {rows.length === 0 && (
+              {filteredRows.length === 0 && (
                 <tr>
                   <td colSpan={showAhorro?16:14} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
                     Aún no hay cargas registradas. {!showAhorro && "Haz clic en \"Nueva carga\" para registrar la primera."}
@@ -667,7 +697,23 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           </table>
         </div>
         <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 6px",fontSize:14,color:"#6b7280" }}>
-          <span>Mostrando {Math.min(filteredRows.length,50)} de {filteredRows.length}</span>
+          <span>Mostrando {Math.min(filteredRows.length, (page + 1) * 50)} de {filteredRows.length}</span>
+          <div style={{ display:"flex", gap: 8 }}>
+            <button 
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0}
+              style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: page === 0 ? "#f9fafb" : "#fff", color: page === 0 ? "#9ca3af" : "#374151", cursor: page === 0 ? "not-allowed" : "pointer" }}
+            >
+              Anterior
+            </button>
+            <button 
+              onClick={() => setPage(p => p + 1)}
+              disabled={(page + 1) * 50 >= filteredRows.length}
+              style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: (page + 1) * 50 >= filteredRows.length ? "#f9fafb" : "#fff", color: (page + 1) * 50 >= filteredRows.length ? "#9ca3af" : "#374151", cursor: (page + 1) * 50 >= filteredRows.length ? "not-allowed" : "pointer" }}
+            >
+              Siguiente
+            </button>
+          </div>
         </div>
       </div>
     </div>

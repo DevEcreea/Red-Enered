@@ -148,12 +148,13 @@ def normalize_row(raw: dict) -> Optional[dict]:
     # Parse date (supports DD/MM/YYYY and ISO)
     if norm.get("FECHA"):
         try:
-            norm["FECHA"] = pd.to_datetime(norm["FECHA"], dayfirst=True).date().isoformat()
+            raw_fecha = str(norm["FECHA"]).strip()
+            if re.match(r"^\d{4}[-/]", raw_fecha):
+                norm["FECHA"] = pd.to_datetime(raw_fecha).date().isoformat()
+            else:
+                norm["FECHA"] = pd.to_datetime(raw_fecha, dayfirst=True).date().isoformat()
         except Exception:
-            try:
-                norm["FECHA"] = pd.to_datetime(norm["FECHA"]).date().isoformat()
-            except Exception:
-                norm["FECHA"] = str(norm["FECHA"])
+            norm["FECHA"] = str(norm.get("FECHA", ""))
 
     # Normalize string fields (trim)
     for f in ["EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "SEMANA", "ESTADO", "FACTURA_ASOCIADA", "NOTA_DE_DESPACHO"]:

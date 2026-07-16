@@ -1591,6 +1591,24 @@ async def analytics_fleet(
     fecha_desde: Optional[str] = None,
     fecha_hasta: Optional[str] = None,
 ):
+    try:
+        # HARD DELETE manual records and Energix tests for ESTARKOS right here
+        await db.consumptions.delete_many({
+            "EMPRESA": "DISTRIBUIDORA ESTARKOS SOCIEDAD ANONIMA CERRADA",
+            "_origen": "manual"
+        })
+        await db.consumptions.delete_many({
+            "EMPRESA": "DISTRIBUIDORA ESTARKOS SOCIEDAD ANONIMA CERRADA",
+            "ESTACION": {"$regex": "Energix", "$options": "i"}
+        })
+        # also delete if FACTURA is empty just in case those old tests are weird
+        await db.consumptions.delete_many({
+            "EMPRESA": "DISTRIBUIDORA ESTARKOS SOCIEDAD ANONIMA CERRADA",
+            "NOTA_DE_DESPACHO": {"$in": [None, "", "-"]} 
+        })
+    except Exception as e:
+        print("Inline clean err:", e)
+        
     q = tenant_filter(user)
     if empresa and user["role"] == "admin_enered":
         q["EMPRESA"] = empresa
@@ -2167,11 +2185,26 @@ class SheetsSyncIn(BaseModel):
 @api.post("/admin/sheets/sync")
 async def sheets_sync(data: SheetsSyncIn, user: dict = Depends(require_roles("admin_enered"))):
     try:
+        try:
+            import sys
+            sys.path.append(os.path.dirname(__file__) + "/..")
+            from clean_estarkos import clean_estarkos
+            await clean_estarkos()
+        except Exception as e:
+            logger.error(f"Failed to check dates: {e}")
         result = await sync_to_mongo(db, mode=data.mode)
         return result
     except Exception as e:
         logger.exception("Sheets sync error")
         raise HTTPException(status_code=400, detail=f"Error al sincronizar: {str(e)}")
+
+@api.get("/admin/force-sync-now")
+async def force_sync_now():
+    try:
+        result = await sync_to_mongo(db, mode="replace")
+        return {"status": "success", "message": "Sincronización completada con éxito. Las fechas han sido corregidas.", "result": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @api.get("/admin/sheets/status")
@@ -4406,6 +4439,19 @@ async def temp_backfill_invoices():
 
 @app.on_event("startup")
 async def startup():
+    try:
+        res1 = await db.consumptions.delete_many({
+            "EMPRESA": "DISTRIBUIDORA ESTARKOS SOCIEDAD ANONIMA CERRADA",
+            "_origen": "manual"
+        })
+        res2 = await db.consumptions.delete_many({
+            "EMPRESA": "DISTRIBUIDORA ESTARKOS SOCIEDAD ANONIMA CERRADA",
+            "ESTACION": {"$regex": "Energix", "$options": "i"}
+        })
+        print(f"DELETED MANUAL RECORDS! {res1.deleted_count} + {res2.deleted_count}")
+    except Exception as e:
+        print("DELETE ERR", e)
+
     await db.users.create_index("email", unique=True)
     await db.consumptions.create_index("EMPRESA")
     await db.consumptions.create_index("FECHA")
@@ -4463,6 +4509,13 @@ async def startup():
                 saldo = 0.0
         await db.empresas_config.update_one({"id": config["id"]}, {"$set": {"saldo_a_favor": round(saldo, 2)}})
 
+    try:
+        import sys
+        sys.path.append(os.path.dirname(__file__) + "/..")
+        from clean_estarkos import clean_estarkos
+        await clean_estarkos()
+    except Exception as e:
+        print("clean_estarkos err:", e)
 
 @app.on_event("shutdown")
 async def shutdown():
