@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
-  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2,
+  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
@@ -40,12 +40,15 @@ export default function Facturacion() {
   const [empresa, setEmpresa] = useState("");
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [historial, setHistorial] = useState([]);
+  const [activeTab, setActiveTab] = useState("facturas");
   const [comingSoon, setComingSoon] = useState(false);
   const [emailInput, setEmailInput] = useState("");
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerUrl, setViewerUrl] = useState(null);
   const [viewerTitle, setViewerTitle] = useState("");
   const [viewerDoc, setViewerDoc] = useState(null);
+  const [abonoModalOpen, setAbonoModalOpen] = useState(false);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -58,8 +61,14 @@ export default function Facturacion() {
     Promise.all([
       api.get("/account-state", { params }),
       api.get("/invoices", { params }),
+      api.get("/abonos/historial", { params }).catch(() => ({ data: { data: [] } })),
     ])
-      .then(([s, i]) => { setState(s.data); setInvoices(i.data); setPage(1); })
+      .then(([s, i, h]) => { 
+        setState(s.data); 
+        setInvoices(i.data); 
+        setHistorial(h.data?.data || []);
+        setPage(1); 
+      })
       .catch((err) => console.error("Error loading Facturacion:", err))
       .finally(() => setLoading(false));
   }, [empresa]);
@@ -211,7 +220,11 @@ export default function Facturacion() {
               </div>
               <div className="border-t border-neutral-200" />
               <div className="grid grid-cols-2 gap-x-10">
+                <KpiRow label="Saldo a Favor (Prepago)" value={formatSoles(state.saldo_a_favor)} testid="ec-saldo-favor" highlight />
                 <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
+              </div>
+              <div className="border-t border-neutral-200" />
+              <div className="grid grid-cols-2 gap-x-10">
                 <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
               </div>
               <div className="border-t border-neutral-200" />
@@ -284,108 +297,161 @@ export default function Facturacion() {
         <div className="flex flex-col gap-4">
           <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
           <ActionCardLarge onClick={() => navigate("/facturacion/historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
+          <ActionCardLarge onClick={() => setAbonoModalOpen(true)} icon={FileSpreadsheet} title="Registrar un abono" body="Sube tu comprobante de pago para pagar facturas o cargar saldo prepago." cta="Registrar" testid="ec-action-abono" />
           <ActionCardLarge onClick={() => window.open(WA_LINK, "_blank")} icon={BookOpen} title="Aprende a realizar el pago masivo de tus facturas" body="Conoce cómo hacerlo paso a paso" cta="Aprende cómo" testid="ec-action-aprende" />
         </div>
       </div>
-
-      {/* TABLA DE DOCUMENTOS */}
-      <div className="rounded-2xl overflow-hidden border border-brand/30">
-        <div className="bg-brand text-white px-5 py-4 text-sm font-semibold space-y-1">
-          <div>Detalle de los documentos pendientes de pago (vencido y por vencer)</div>
-          <div className="text-xs text-white/80">(*) Monto total incluye IGV y/o percepción (según corresponda).</div>
-        </div>
-        <div className="overflow-x-auto bg-white">
-          <table className="w-full text-sm" data-testid="ec-table">
-            <thead className="bg-[#1E1B4B] text-white">
-              <tr className="text-[11px] font-bold uppercase tracking-wider">
-                <th className="px-3 py-3 text-left">Producto</th>
-                <th className="px-3 py-3 text-left">Tipo Doc</th>
-                <th className="px-3 py-3 text-left">N° Doc</th>
-                <th className="px-3 py-3 text-left">F. Emisión</th>
-                <th className="px-3 py-3 text-left">F. Vencimiento</th>
-                <th className="px-3 py-3 text-right">Atraso</th>
-                <th className="px-3 py-3 text-center">Moneda</th>
-                <th className="px-3 py-3 text-right">Monto Total</th>
-                <th className="px-3 py-3 text-right">Saldo</th>
-                <th className="px-3 py-3 text-center">Estado</th>
-                <th className="px-3 py-3 text-center">Descargar</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {pageRows.length === 0 ? (
-                <tr><td colSpan={11} className="text-center py-12 text-neutral-400">
-                  <FileText className="w-10 h-10 mx-auto mb-2 text-neutral-300" />
-                  Sin documentos pendientes
-                </td></tr>
-              ) : (
-                pageRows.map((inv) => (
-                  <tr key={inv.id || inv.n_doc} className="hover:bg-neutral-50">
-                    <td className="px-3 py-2.5 truncate max-w-[150px]">{inv.producto || "—"}</td>
-                    <td className="px-3 py-2.5">{inv.tipo_doc || "—"}</td>
-                    <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
-                    <td className="px-3 py-2.5">{formatDate(inv.f_emision) || "—"}</td>
-                    <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento) || "—"}</td>
-                    <td className="px-3 py-2.5 text-right">{inv.atraso_dias || 0} días</td>
-                    <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
-                    <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
-                    <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
-                    <td className="px-3 py-2.5 text-center">
-                      {user?.role === "admin_enered" ? (
-                        <EstadoEditor
-                          inv={inv}
-                          onUpdated={(newEstado) => {
-                            setInvoices((prev) => prev.map((x) => x.id === inv.id ? { ...x, estado: newEstado } : x));
-                            // Refrescar account-state porque cambia disponible/utilizada/vencido
-                            const params = empresa ? { empresa } : {};
-                            api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
-                          }}
-                        />
-                      ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
-                          {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ")}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center justify-center gap-1.5">
-                        {inv.pdf_filename && (<>
-                          <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
-                            <FileText className="w-4 h-4" />
-                          </button>
-                        </>)}
-                        {inv.xml_filename && (
-                          <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
-                            <FileSpreadsheet className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        {invoices.length > 0 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-100 bg-neutral-50 text-xs">
-            <div className="text-neutral-500 font-semibold">
-              {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, invoices.length)} de {invoices.length} registros
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">‹</button>
-              <span className="font-bold">{page}/{totalPages}</span>
-              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">›</button>
-            </div>
-          </div>
-        )}
+      
+      {/* TABS: Facturas vs Historial de Movimientos */}
+      <div className="flex items-center gap-4 border-b border-neutral-200">
+        <button
+          onClick={() => setActiveTab("facturas")}
+          className={`pb-3 font-semibold text-sm transition-colors relative ${activeTab === "facturas" ? "text-brand" : "text-neutral-500 hover:text-neutral-700"}`}
+        >
+          Documentos Pendientes
+          {activeTab === "facturas" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand rounded-t-full" />}
+        </button>
+        <button
+          onClick={() => setActiveTab("historial")}
+          className={`pb-3 font-semibold text-sm transition-colors relative ${activeTab === "historial" ? "text-brand" : "text-neutral-500 hover:text-neutral-700"}`}
+        >
+          Historial de Movimientos
+          {activeTab === "historial" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand rounded-t-full" />}
+        </button>
       </div>
+
+      {activeTab === "facturas" && (
+        <div className="rounded-2xl overflow-hidden border border-brand/30">
+          <div className="bg-brand text-white px-5 py-4 text-sm font-semibold space-y-1">
+            <div>Detalle de los documentos pendientes de pago (vencido y por vencer)</div>
+            <div className="text-xs text-white/80">(*) Monto total incluye IGV y/o percepción (según corresponda).</div>
+          </div>
+          <div className="overflow-x-auto bg-white">
+            <table className="w-full text-sm" data-testid="ec-table">
+              <thead className="bg-[#1E1B4B] text-white">
+                <tr className="text-[11px] font-bold uppercase tracking-wider">
+                  <th className="px-3 py-3 text-left">Producto</th>
+                  <th className="px-3 py-3 text-left">Tipo Doc</th>
+                  <th className="px-3 py-3 text-left">N° Doc</th>
+                  <th className="px-3 py-3 text-left">F. Emisión</th>
+                  <th className="px-3 py-3 text-left">F. Vencimiento</th>
+                  <th className="px-3 py-3 text-right">Atraso</th>
+                  <th className="px-3 py-3 text-center">Moneda</th>
+                  <th className="px-3 py-3 text-right">Monto Total</th>
+                  <th className="px-3 py-3 text-right">Saldo</th>
+                  <th className="px-3 py-3 text-center">Estado</th>
+                  <th className="px-3 py-3 text-center">Descargar</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {pageRows.length === 0 ? (
+                  <tr><td colSpan={11} className="text-center py-12 text-neutral-400">
+                    <FileText className="w-10 h-10 mx-auto mb-2 text-neutral-300" />
+                    Sin documentos pendientes
+                  </td></tr>
+                ) : (
+                  pageRows.map((inv) => (
+                    <tr key={inv.id || inv.n_doc} className="hover:bg-neutral-50">
+                      <td className="px-3 py-2.5 truncate max-w-[150px]">{inv.producto || "—"}</td>
+                      <td className="px-3 py-2.5">{inv.tipo_doc || "—"}</td>
+                      <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
+                      <td className="px-3 py-2.5">{formatDate(inv.f_emision) || "—"}</td>
+                      <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento) || "—"}</td>
+                      <td className="px-3 py-2.5 text-right">{inv.atraso_dias || 0} días</td>
+                      <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
+                      <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
+                      <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        {user?.role === "admin_enered" ? (
+                          <EstadoEditor
+                            inv={inv}
+                            onUpdated={(newEstado) => {
+                              setInvoices((prev) => prev.map((x) => x.id === inv.id ? { ...x, estado: newEstado } : x));
+                              const params = empresa ? { empresa } : {};
+                              api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
+                            }}
+                          />
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200"}`}>
+                            {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase().replace("_", " ")}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {inv.pdf_filename && (<>
+                            <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          </>)}
+                          {inv.xml_filename && (
+                            <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
+                              <FileSpreadsheet className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {invoices.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-100 bg-neutral-50 text-xs">
+              <div className="text-neutral-500 font-semibold">
+                {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, invoices.length)} de {invoices.length} registros
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">‹</button>
+                <span className="font-bold">{page}/{totalPages}</span>
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-2 py-1 border border-border rounded font-bold disabled:opacity-30">›</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "historial" && (
+        <div className="rounded-2xl overflow-hidden border border-neutral-200">
+          <div className="bg-neutral-100 text-neutral-800 px-5 py-4 text-sm font-semibold space-y-1">
+            <div>Historial de Transacciones y Abonos</div>
+          </div>
+          <div className="overflow-x-auto bg-white">
+            <table className="w-full text-left text-sm whitespace-nowrap">
+              <thead className="bg-neutral-50 text-neutral-500 font-semibold border-b border-neutral-200">
+                <tr>
+                  <th className="px-5 py-3">Fecha</th>
+                  <th className="px-5 py-3">Tipo</th>
+                  <th className="px-5 py-3">Descripción</th>
+                  <th className="px-5 py-3">Monto (S/)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {historial.map((h) => (
+                  <tr key={h.id} className="hover:bg-neutral-50 transition-colors">
+                    <td className="px-5 py-4 text-neutral-500 font-medium">{new Date(h.created_at).toLocaleString("es-PE")}</td>
+                    <td className="px-5 py-4 font-bold text-neutral-700">{h.tipo.replace(/_/g, " ")}</td>
+                    <td className="px-5 py-4 text-neutral-600">{h.descripcion}</td>
+                    <td className="px-5 py-4 font-bold text-brand">{formatSoles(h.monto)}</td>
+                  </tr>
+                ))}
+                {historial.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-5 py-10 text-center text-neutral-400 font-medium">No hay movimientos registrados.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Modal "Próximamente" */}
       {comingSoon && (
@@ -420,7 +486,21 @@ export default function Facturacion() {
           </div>
         </div>
       )}
-      <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadInvoice(viewerDoc?.inv, viewerDoc?.kind)} />
+      
+      <AbonoModal 
+        open={abonoModalOpen} 
+        onClose={() => setAbonoModalOpen(false)} 
+        onSuccess={() => {
+          const params = empresa ? { empresa } : {};
+          api.get("/account-state", { params }).then(r => setState(r.data));
+        }} 
+      />
+
+      {viewerOpen && viewerDoc && (
+        <PdfViewerModal
+          open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadInvoice(viewerDoc?.inv, viewerDoc?.kind)} 
+        />
+      )}
     </div>
   );
 }
@@ -555,6 +635,78 @@ function EstadoEditor({ inv, onUpdated }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------------- Modal de Registro de Abono ---------------- */
+export function AbonoModal({ open, onClose, onSuccess }) {
+  const [monto, setMonto] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [nroOp, setNroOp] = useState("");
+  const [file, setFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!monto || !fecha || !nroOp || !file) {
+      toast.error("Por favor completa todos los campos y sube el voucher.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("monto", monto);
+      fd.append("fecha_deposito", fecha);
+      fd.append("numero_operacion", nroOp);
+      fd.append("file", file);
+
+      await api.post("/abonos", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Abono registrado correctamente. En breve será validado.");
+      onSuccess && onSuccess();
+      onClose();
+    } catch (err) {
+      toast.error("Error al registrar el abono: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Registrar un Abono</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-1">Monto depositado (S/)</label>
+            <input type="number" step="0.01" min="0" required value={monto} onChange={e => setMonto(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-transparent outline-none" placeholder="0.00" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">Fecha de pago</label>
+              <input type="date" required value={fecha} onChange={e => setFecha(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">Nro. de Operación</label>
+              <input type="text" required value={nroOp} onChange={e => setNroOp(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" placeholder="Ej. 1234567" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-1">Voucher de Pago (PDF, JPG, PNG)</label>
+            <input type="file" required accept=".pdf,image/*" onChange={e => setFile(e.target.files[0])} className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 outline-none" />
+          </div>
+          <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Registrar Abono"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

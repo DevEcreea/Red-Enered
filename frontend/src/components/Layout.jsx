@@ -40,6 +40,7 @@ const MENU = [
 const ADMIN_ITEMS = [
   { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
   { to: "/admin/empresas", label: "Empresas & Servicios", icon: FolderCheck, testid: "nav-empresas" },
+  { to: "/admin/tesoreria", label: "Tesorería", icon: FolderCheck, testid: "nav-tesoreria" },
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin" },
 ];

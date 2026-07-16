@@ -156,7 +156,7 @@ def normalize_row(raw: dict) -> Optional[dict]:
                 norm["FECHA"] = str(norm["FECHA"])
 
     # Normalize string fields (trim)
-    for f in ["EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "SEMANA", "ESTADO"]:
+    for f in ["EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "SEMANA", "ESTADO", "FACTURA_ASOCIADA", "NOTA_DE_DESPACHO"]:
         if norm.get(f) is not None:
             norm[f] = str(norm[f]).strip().upper() if f == "ESTADO" else str(norm[f]).strip()
 

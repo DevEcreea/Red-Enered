@@ -2850,14 +2850,16 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     total_pagado = sum(_f(i.get("monto_total")) for i in invs if (i.get("estado") or "").lower() in PAID)
 
     linea_total = float(cfg.get("linea_credito") or 0)
+    saldo_a_favor = float(cfg.get("saldo_a_favor") or 0.0)
     linea_utilizada = facturas_pendientes + notas_despacho
-    disponible = max(0.0, linea_total - linea_utilizada)
-    pct = round((linea_utilizada / linea_total * 100), 2) if linea_total > 0 else 0.0
+    disponible = max(0.0, linea_total + saldo_a_favor - linea_utilizada)
+    pct = round((linea_utilizada / (linea_total + saldo_a_favor) * 100), 2) if (linea_total + saldo_a_favor) > 0 else 0.0
 
     return {
         "empresa": cfg.get("empresa") or target or "",
         "ruc": cfg.get("ruc") or "",
         "linea_credito_total": round(linea_total, 2),
+        "saldo_a_favor": round(saldo_a_favor, 2),
         "disponible": round(disponible, 2),
         "linea_credito_utilizada": round(linea_utilizada, 2),
         "facturas_pendientes": round(facturas_pendientes, 2),
@@ -4154,6 +4156,18 @@ async def download_document(
             media_type=content_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
+@app.get("/api/files/{file_id}")
+async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
+    if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
+        f = await db.files.find_one({"id": file_id})
+        if not f or f.get("created_by") != user["id"]:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    else:
+        f = await db.files.find_one({"id": file_id})
+        if not f:
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+            
+    return Response(content=f["data"], media_type=f["content_type"])
 
 app.include_router(api)
 
@@ -4164,6 +4178,8 @@ from subsidio import subsidio_router, _set_db as _set_subsidio_db
 _set_subsidio_db(db)
 app.include_router(subsidio_router)
 
+from abonos import abonos_router
+app.include_router(abonos_router)
 
 # CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
 _origins_env = os.environ.get("CORS_ORIGINS", "")
@@ -4424,6 +4440,28 @@ async def startup():
         logger.info(f"Servicios backfill: {result}")
     except Exception as e:
         logger.warning(f"Servicios backfill failed: {e}")
+        
+    # Auto-apply pending saldo_a_favor to invoices
+    async for config in db.empresas_config.find({"saldo_a_favor": {"$gt": 0}}):
+        empresa = config["empresa"]
+        saldo = float(config["saldo_a_favor"])
+        cursor = db.invoices.find({
+            "empresa": empresa,
+            "estado": {"$in": ["PENDIENTE", "pendiente", "vencida", "VENCIDA", "por_vencer"]}
+        }).sort("fecha_emision", 1)
+        invoices = await cursor.to_list(1000)
+        
+        for fac in invoices:
+            if saldo <= 0: break
+            deuda = float(fac.get("saldo", fac.get("monto_total", 0)))
+            if deuda <= 0: continue
+            if saldo >= deuda:
+                await db.invoices.update_one({"id": fac["id"]}, {"$set": {"estado": "pagada", "saldo": 0.0}})
+                saldo -= deuda
+            else:
+                await db.invoices.update_one({"id": fac["id"]}, {"$set": {"saldo": round(deuda - saldo, 2)}})
+                saldo = 0.0
+        await db.empresas_config.update_one({"id": config["id"]}, {"$set": {"saldo_a_favor": round(saldo, 2)}})
 
 
 @app.on_event("shutdown")

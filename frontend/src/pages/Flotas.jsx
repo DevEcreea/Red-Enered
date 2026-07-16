@@ -433,8 +433,8 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <thead>
               <tr style={{ background:HEADER_BG }}>
                 {(showAhorro
-                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","GL/100 KM","Costo/km","Conductor",""]
-                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Conductor",""]
+                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
+                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
                 ).filter(h => h !== null).map((h,i,arr)=>(
                   <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
@@ -615,24 +615,23 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     <td style={tdSt}>{galones? galones.toFixed(2):"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{precio? `S/ ${precio.toFixed(2)}`:"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{importe? `S/ ${importe.toFixed(2)}`:"—"}</td>
-                    {showAhorro ? (
-                      <>
-                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ {ahorro? ahorro.toFixed(2):"0.00"}</td>
-                        <td style={tdSt}>—</td>
-                        <td style={{ ...tdSt,whiteSpace:"nowrap" }}>—</td>
-                      </>
-                    ) : (
-                      <>
-                        <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ 0.00</td>
-                        <td style={tdSt}>
-                          {r.pdf_filename || r.factura_key || r._origen === "manual" ? (
-                            <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                              <FileText style={{ width:14,height:14 }}/>{r.NUMERO_DOCUMENTO || "Doc Adjunto"}
-                            </span>
-                          ) : "—"}
-                        </td>
-                      </>
-                    )}
+                    <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ {ahorro? ahorro.toFixed(2):"0.00"}</td>
+                    <td style={tdSt}>
+                      {r.FACTURA_ASOCIADA || r.FACTURA || r.NOTA_DE_DESPACHO || r.NUMERO_DOCUMENTO || r.pdf_filename || r.factura_key ? (
+                        <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <FileText style={{ width:14,height:14 }}/>{r.FACTURA_ASOCIADA || r.FACTURA || r.NOTA_DE_DESPACHO || r.NUMERO_DOCUMENTO || "Doc Adjunto"}
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td style={tdSt}>
+                      {(() => {
+                        const estado = (r.ESTADO || "").toUpperCase();
+                        if (estado === "FACTURADO" || estado === "PAGADA" || estado === "PAGADO") {
+                          return <span style={{ background:"#F0FDF4", color:"#16A34A", padding:"4px 8px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #BBF7D0", whiteSpace: "nowrap" }}>FACTURADO</span>;
+                        }
+                        return <span style={{ background:"#FEF3C7", color:"#D97706", padding:"4px 8px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #FDE68A", whiteSpace: "nowrap" }}>{estado || "PENDIENTE"}</span>;
+                      })()}
+                    </td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.CONDUCTOR||"—"}</td>
                     <td style={tdSt}>
                       <RowActions row={r} onEdit={onEdit} onDelete={onDelete} onDownloadPdf={onDownloadPdf}/>

@@ -92,7 +92,9 @@ export default function AdminEmpresas() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <Dot on={!!s.gps} />
                       {s.gps && w.configurado && (
-                        <span style={{ fontSize: 11, color: "#059669", fontFamily: "monospace" }}>{w.token_mask}</span>
+                        <span style={{ fontSize: 11, color: "#059669", fontFamily: "monospace", display: "inline-block", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "middle" }} title={w.token_mask}>
+                          {w.token_mask}
+                        </span>
                       )}
                       {s.gps && !w.configurado && (
                         <span style={{ fontSize: 11, color: "#DC2626", fontWeight: 600 }}>sin token</span>
