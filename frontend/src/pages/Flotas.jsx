@@ -195,6 +195,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
         if (filtros.hasta) {
           const dHasta = new Date(filtros.hasta + "T23:59:59");
           if (rDate > dHasta) return false;
+        }
       }
       return true;
     });
