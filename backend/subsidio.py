@@ -1808,10 +1808,33 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     inv = await db.consumos_subsidio.find_one({"id": invoice_id})
     if not inv or not inv.get("factura_storage_key"):
         raise HTTPException(status_code=404, detail="Archivo de factura no encontrado")
-    return storage.download_response(
-        inv["factura_storage_key"],
-        inv["factura_filename"],
-        inv.get("factura_content_type", "application/octet-stream")
+    
+    # Generate unique filename based on numero_documento to prevent OS/Browser mix-ups
+    original = inv.get("factura_filename") or "factura.pdf"
+    ext = original.split(".")[-1] if "." in original else "pdf"
+    ndoc = inv.get("numero_documento")
+    
+    if ndoc:
+        safe_ndoc = "".join(c for c in ndoc if c.isalnum() or c == "-")
+        dl_name = f"Factura_{safe_ndoc}.{ext}"
+    else:
+        dl_name = original
+
+    import urllib.parse
+    encoded_name = urllib.parse.quote(dl_name)
+    
+    try:
+        data = storage.get_object_bytes(inv["factura_storage_key"])
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en almacenamiento")
+
+    from fastapi.responses import Response
+    return Response(
+        content=data,
+        media_type=inv.get("factura_content_type", "application/octet-stream"),
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"
+        },
     )
 
 
