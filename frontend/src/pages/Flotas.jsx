@@ -177,7 +177,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
   }, [rows]);
 
   const filteredRows = useMemo(() => {
-    return rows.filter(r => {
+    const filtered = rows.filter(r => {
       if (filtros.empresa && r.EMPRESA !== filtros.empresa) return false;
       if (filtros.placa && r.PLACA !== filtros.placa) return false;
       if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
@@ -195,9 +195,11 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
         if (filtros.hasta) {
           const dHasta = new Date(filtros.hasta + "T23:59:59");
           if (rDate > dHasta) return false;
-        }
+      }
       return true;
-    }).sort((a, b) => {
+    });
+
+    return filtered.sort((a, b) => {
       const getSortValue = (r) => {
         if (!r) return 0;
         let f = r.FECHA || r.FECHA_TRANSACCION || "";
@@ -1306,7 +1308,7 @@ export default function Flotas() {
         setViewerOpen(true);
       }
     } catch (err) {
-      alert("No se pudo descargar el comprobante para esta carga.");
+      alert(err.response?.data?.detail || "No se pudo descargar el comprobante para esta carga.");
     }
   };
 
