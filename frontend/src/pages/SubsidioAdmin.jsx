@@ -4,7 +4,7 @@ import {
   Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
   Pencil, Plus, Trash2, PlusCircle, X,
 } from "lucide-react";
-import { api } from "../lib/api";
+import { api, API } from "../lib/api";
 
 const ESTADO_BADGE = {
   uploading:  { label: "En carga",   color: "bg-amber-100 text-amber-700 border-amber-200" },
@@ -1183,145 +1183,160 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
             </div>
 
             {showInvoiceForm && (
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 max-w-3xl space-y-4">
+              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 w-full space-y-4">
                 <div className="flex items-center justify-between border-b border-neutral-200 pb-2">
                   <h5 className="font-bold text-sm text-neutral-950">{editingInvoice ? "Editar Factura" : "Agregar Nueva Factura Manual"}</h5>
                   <button onClick={() => setShowInvoiceForm(false)} className="text-neutral-400 hover:text-neutral-600">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
-                <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Número de Factura *</label>
-                    <input
-                      type="text"
-                      required
-                      value={invNumero}
-                      onChange={(e) => setInvNumero(e.target.value)}
-                      placeholder="Ej. F001-12345"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-mono uppercase"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Fecha de Emisión *</label>
-                    <input
-                      type="date"
-                      required
-                      value={invFecha}
-                      onChange={(e) => setInvFecha(e.target.value)}
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Placa Vehículo *</label>
-                    <select
-                      value={invPlaca}
-                      required
-                      onChange={(e) => setInvPlaca(e.target.value)}
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white font-mono"
-                    >
-                      <option value="">Selecciona placa...</option>
-                      {vehicles.map((v) => (
-                        <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
-                    <input
-                      type="text"
-                      value={invEstacion}
-                      onChange={(e) => setInvEstacion(e.target.value)}
-                      placeholder="Ej. GRIFO PRIMAX S.A."
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
-                    <input
-                      type="text"
-                      value={invRuc}
-                      onChange={(e) => setInvRuc(e.target.value)}
-                      placeholder="Ej. 20601234567"
-                      maxLength="11"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Ciudad</label>
-                    <input
-                      type="text"
-                      value={invCiudad}
-                      onChange={(e) => setInvCiudad(e.target.value)}
-                      placeholder="Ej. Lima"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Combustible</label>
-                    <select
-                      value={invProducto}
-                      onChange={(e) => setInvProducto(e.target.value)}
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
-                    >
-                      <option value="DIESEL B5">DIESEL B5</option>
-                      <option value="DIESEL B20">DIESEL B20</option>
-                      <option value="GASOHOL 90">GASOHOL 90</option>
-                      <option value="GASOHOL 95">GASOHOL 95</option>
-                      <option value="GASOHOL 97">GASOHOL 97</option>
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Cantidad (Galones)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={invGalones}
-                      onChange={(e) => setInvGalones(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-neutral-600">Precio Unitario (S/)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={invPrecio}
-                      onChange={(e) => setInvPrecio(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1 md:col-span-3">
-                    <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
-                    <input
-                      type="number"
-                      step="any"
-                      value={invImporte}
-                      onChange={(e) => setInvImporte(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
-                    />
-                  </div>
-                  <div className="md:col-span-3 flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowInvoiceForm(false)}
-                      className="h-10 px-4 bg-white border border-neutral-300 hover:bg-neutral-50 font-bold rounded-lg text-xs"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={savingInv}
-                      className="h-10 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      {savingInv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                      Guardar Factura
-                    </button>
-                  </div>
-                </form>
+                
+                <div className={`grid gap-6 ${editingInvoice?.factura_filename || editingInvoice?.pdf_filename ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
+                  {/* Formulario */}
+                  <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4 h-min">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Número de Factura *</label>
+                      <input
+                        type="text"
+                        required
+                        value={invNumero}
+                        onChange={(e) => setInvNumero(e.target.value)}
+                        placeholder="Ej. F001-12345"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-mono uppercase"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Fecha de Emisión *</label>
+                      <input
+                        type="date"
+                        required
+                        value={invFecha}
+                        onChange={(e) => setInvFecha(e.target.value)}
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Placa Vehículo *</label>
+                      <select
+                        value={invPlaca}
+                        required
+                        onChange={(e) => setInvPlaca(e.target.value)}
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white font-mono"
+                      >
+                        <option value="">Selecciona placa...</option>
+                        {vehicles.map((v) => (
+                          <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
+                      <input
+                        type="text"
+                        value={invEstacion}
+                        onChange={(e) => setInvEstacion(e.target.value)}
+                        placeholder="Ej. GRIFO PRIMAX S.A."
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
+                      <input
+                        type="text"
+                        value={invRuc}
+                        onChange={(e) => setInvRuc(e.target.value)}
+                        placeholder="Ej. 20601234567"
+                        maxLength="11"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Ciudad</label>
+                      <input
+                        type="text"
+                        value={invCiudad}
+                        onChange={(e) => setInvCiudad(e.target.value)}
+                        placeholder="Ej. Lima"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Combustible</label>
+                      <select
+                        value={invProducto}
+                        onChange={(e) => setInvProducto(e.target.value)}
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
+                      >
+                        <option value="DIESEL B5">DIESEL B5</option>
+                        <option value="DIESEL B20">DIESEL B20</option>
+                        <option value="GASOHOL 90">GASOHOL 90</option>
+                        <option value="GASOHOL 95">GASOHOL 95</option>
+                        <option value="GASOHOL 97">GASOHOL 97</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Cantidad (Galones)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={invGalones}
+                        onChange={(e) => setInvGalones(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-neutral-600">Precio Unitario (S/)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={invPrecio}
+                        onChange={(e) => setInvPrecio(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-3">
+                      <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
+                      <input
+                        type="number"
+                        step="any"
+                        value={invImporte}
+                        onChange={(e) => setInvImporte(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
+                      />
+                    </div>
+                    <div className="md:col-span-3 flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInvoiceForm(false)}
+                        className="h-10 px-4 bg-white border border-neutral-300 hover:bg-neutral-50 font-bold rounded-lg text-xs"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingInv}
+                        className="h-10 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        {savingInv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                        Guardar Factura
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Previsualización del PDF */}
+                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename) && (
+                    <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
+                      <iframe
+                        src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download`}
+                        className="w-full h-full min-h-[500px] bg-white"
+                        title="Previsualización de factura"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
