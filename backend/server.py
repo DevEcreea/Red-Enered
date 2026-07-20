@@ -479,7 +479,7 @@ async def list_consumptions(
         else:
             uid_filter["empresa"] = user.get("empresa")
             
-        raw_sub = await db.consumos_subsidio.find(uid_filter, {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
+        raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
         mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
         
         def keep(row):
@@ -2139,37 +2139,90 @@ async def create_manual_consumption(
 @api.delete("/consumptions/{consumo_id}")
 async def delete_consumption(consumo_id: str, user: dict = Depends(get_current_user)):
     """Elimina un consumo individual + su invoice + su PDF factura si existe."""
-    doc = await db.consumptions.find_one({"id": consumo_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Consumo no encontrado")
-    if user["role"] != "admin_enered" and doc.get("EMPRESA") != user.get("empresa"):
-        raise HTTPException(status_code=403, detail="Sin acceso")
-    # borrar PDF factura si existe
     try:
-        from storage import delete_object as _delobj
-        if doc.get("factura_key"):
-            _delobj(doc["factura_key"])
-    except Exception:
-        pass
+        from bson import ObjectId
+        oid = ObjectId(consumo_id)
+    except:
+        oid = None
+
+    q = {"$or": [{"id": consumo_id}, {"_id": oid}]} if oid else {"id": consumo_id}
+    
+    doc = await db.consumptions.find_one(q, {"_id": 0})
+    sub_doc = await db.consumos_subsidio.find_one(q, {"_id": 0})
+    
+    if not doc and not sub_doc:
+        raise HTTPException(status_code=404, detail=f"Consumo no encontrado ({consumo_id})")
+        
+    if user["role"] != "admin_enered":
+        empresa = user.get("empresa")
+        if doc and doc.get("EMPRESA") != empresa:
+            raise HTTPException(status_code=403, detail="Sin acceso en Combustible")
+        if sub_doc and sub_doc.get("empresa") != empresa:
+            raise HTTPException(status_code=403, detail="Sin acceso en Subsidio")
+
+    # borrar PDF factura si existe
+    if doc:
+        try:
+            from storage import delete_object as _delobj
+            if doc.get("factura_key"):
+                _delobj(doc["factura_key"])
+        except Exception:
+            pass
+
     # borrar invoice asociada si es manual
     await db.invoices.delete_many({"consumo_id": consumo_id})
-    r = await db.consumptions.delete_one({"id": consumo_id})
-    return {"ok": True, "deleted": r.deleted_count}
+    if oid:
+        await db.invoices.delete_many({"consumo_id": str(oid)})
+        
+    deleted_count = 0
+    if doc:
+        r1 = await db.consumptions.delete_one(q)
+        deleted_count += r1.deleted_count
+    if sub_doc:
+        r2 = await db.consumos_subsidio.delete_one(q)
+        deleted_count += r2.deleted_count
+        
+    return {"ok": True, "deleted": deleted_count}
 
 
 @api.get("/consumptions/{consumo_id}/factura")
+@api.get("/consumptions/{consumo_id}/download/pdf")
 async def download_manual_factura(consumo_id: str, user: dict = Depends(get_current_user)):
-    """Descargar la factura PDF asociada a una carga manual."""
-    doc = await db.consumptions.find_one({"id": consumo_id}, {"_id": 0})
-    if not doc:
+    """Descargar la factura PDF asociada a una carga manual o de subsidio."""
+    try:
+        from bson import ObjectId
+        oid = ObjectId(consumo_id)
+    except:
+        oid = None
+
+    q = {"$or": [{"id": consumo_id}, {"_id": oid}]} if oid else {"id": consumo_id}
+    
+    doc = await db.consumptions.find_one(q, {"_id": 0})
+    sub_doc = await db.consumos_subsidio.find_one(q, {"_id": 0})
+    
+    if not doc and not sub_doc:
         raise HTTPException(status_code=404, detail="Consumo no encontrado")
-    # Tenant check
-    if user["role"] != "admin_enered" and doc.get("EMPRESA") != user.get("empresa"):
-        raise HTTPException(status_code=403, detail="Sin acceso")
-    key = doc.get("factura_key")
+        
+    empresa = user.get("empresa")
+    if user["role"] != "admin_enered":
+        if doc and doc.get("EMPRESA") != empresa:
+            raise HTTPException(status_code=403, detail="Sin acceso en Combustible")
+        if sub_doc and sub_doc.get("empresa") != empresa:
+            raise HTTPException(status_code=403, detail="Sin acceso en Subsidio")
+            
+    key = None
+    ct = "application/pdf"
+    
+    if doc:
+        key = doc.get("factura_key")
+        ct = doc.get("factura_content_type") or "application/pdf"
+    if not key and sub_doc:
+        key = sub_doc.get("factura_storage_key")
+        # Subsidio might not save content_type, default is pdf
+        
     if not key:
         raise HTTPException(status_code=404, detail="Esta carga no tiene factura adjunta")
-    ct = doc.get("factura_content_type") or "application/pdf"
+        
     filename = key.rsplit("/", 1)[-1]
     return download_response(key, filename=filename, content_type=ct)
 
@@ -2736,8 +2789,13 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     
     inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
     if not inv:
-        # Check in consumos_subsidio
-        sub_doc = await db.consumos_subsidio.find_one({"id": inv_id}, {"_id": 0})
+        try:
+            from bson import ObjectId
+            oid = ObjectId(inv_id)
+        except:
+            oid = None
+        q_sub = {"$or": [{"id": inv_id}, {"_id": oid}]} if oid else {"id": inv_id}
+        sub_doc = await db.consumos_subsidio.find_one(q_sub, {"_id": 0})
         if sub_doc:
             inv = {
                 "empresa": sub_doc.get("empresa"),

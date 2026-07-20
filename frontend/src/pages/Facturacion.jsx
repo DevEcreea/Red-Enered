@@ -144,8 +144,8 @@ export default function Facturacion() {
       a.download = `${inv.n_doc}.${kind}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      toast.error(`No se encontró el ${kind.toUpperCase()} de la factura`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || `No se encontró el ${kind.toUpperCase()} de la factura`);
     }
   };
 
