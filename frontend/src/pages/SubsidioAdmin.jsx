@@ -764,7 +764,9 @@ const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigit
 const fmtDate = (s, withTime) => {
   if (!s) return "—";
   try {
-    const d = new Date(s);
+    const isDateOnly = typeof s === 'string' && s.length === 10 && s.includes('-');
+    const dateStr = isDateOnly ? s + "T12:00:00" : s;
+    const d = new Date(dateStr);
     return withTime ? d.toLocaleString("es-PE") : d.toLocaleDateString("es-PE");
   } catch { return s; }
 };
@@ -804,6 +806,33 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
   const [invImporte, setInvImporte] = useState("");
   const [invProducto, setInvProducto] = useState("DIESEL B5");
   const [savingInv, setSavingInv] = useState(false);
+
+  // Auto-calculate Importe Total
+  useEffect(() => {
+    if (invGalones && invPrecio) {
+      const g = parseFloat(invGalones);
+      const p = parseFloat(invPrecio);
+      if (!isNaN(g) && !isNaN(p)) {
+        setInvImporte((g * p).toFixed(2));
+      }
+    }
+  }, [invGalones, invPrecio]);
+
+  // Auto-fetch Razón Social from SUNAT
+  useEffect(() => {
+    const ruc = invRuc.trim();
+    if (ruc.length === 11) {
+      api.get(`/sunat/ruc/${ruc}`).then(res => {
+        if (res.data && res.data.razonSocial) {
+          setInvEstacion(res.data.razonSocial);
+        } else if (res.data && res.data.razon_social) {
+          setInvEstacion(res.data.razon_social);
+        } else if (res.data && res.data.nombre) {
+          setInvEstacion(res.data.nombre);
+        }
+      }).catch(() => {});
+    }
+  }, [invRuc]);
 
   const saveRepresentante = async (e) => {
     e.preventDefault();

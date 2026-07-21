@@ -2584,6 +2584,141 @@ def _parse_sunat_xml(xml_bytes: bytes) -> dict:
     }
 
 
+class AdminConfirmItem(BaseModel):
+    id: str
+    factura_filename: str
+    pdf_key: str
+    empresa: str
+    n_doc: str
+    f_emision: Optional[str] = ""
+    f_vencimiento: Optional[str] = ""
+    importe_total: Optional[float] = None
+    override_empresa: Optional[str] = ""
+
+class AdminConfirmPayload(BaseModel):
+    items: List[AdminConfirmItem]
+    estado_override: Optional[str] = ""
+
+@api.post("/admin/invoices/ocr-preview")
+async def admin_invoices_ocr_preview(
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    from services.invoice_ocr import extract_invoice_data
+    from datetime import datetime, timezone
+    import uuid
+
+    rucs_to_empresa = {}
+    name_to_empresa = {}
+    cfgs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
+    for c in cfgs:
+        if c.get("ruc"):
+            rucs_to_empresa[str(c["ruc"]).strip().lstrip("0")] = c["empresa"]
+
+    items = []
+    for f in files:
+        content = await f.read()
+        uid = str(uuid.uuid4())
+        pdf_filename = _safe_doc(f.filename) + f"_{uid[:8]}.pdf"
+        storage.save_object(f"tmp_admin/{pdf_filename}", content, "application/pdf")
+        
+        try:
+            ocr = await extract_invoice_data(content, f.content_type, f"ocr-admin-{uid[:8]}")
+            ext = ocr.get("extracted", {})
+            
+            empresa = ""
+            ruc_cliente = ext.get("ruc_cliente")
+            if ruc_cliente:
+                ruc_clean = ruc_cliente.strip().lstrip("0")
+                if ruc_clean in rucs_to_empresa:
+                    empresa = rucs_to_empresa[ruc_clean]
+
+            items.append({
+                "id": uid,
+                "factura_filename": f.filename,
+                "pdf_key": f"tmp_admin/{pdf_filename}",
+                "empresa": empresa,
+                "n_doc": ext.get("numero_documento") or "",
+                "f_emision": ext.get("fecha") or "",
+                "f_vencimiento": ext.get("fecha_vencimiento") or "",
+                "importe_total": ext.get("importe_total"),
+            })
+        except Exception as e:
+            logger.error(f"Error OCR: {e}")
+            items.append({
+                "id": uid,
+                "factura_filename": f.filename,
+                "pdf_key": f"tmp_admin/{pdf_filename}",
+                "error": str(e)
+            })
+    return {"items": items}
+
+@api.post("/admin/invoices/confirm-ocr")
+async def admin_invoices_confirm_ocr(
+    payload: AdminConfirmPayload,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    from datetime import date as _date, datetime, timezone
+    today = _date.today()
+    saved = 0
+
+    for it in payload.items:
+        empresa = it.override_empresa or it.empresa
+        if not empresa:
+            continue
+        
+        pdf_bytes = storage.get_object(it.pdf_key)
+        if not pdf_bytes:
+            continue
+            
+        final_filename = _safe_doc(it.n_doc or it.factura_filename) + ".pdf"
+        final_key = _inv_key(empresa, final_filename)
+        storage.save_object(final_key, pdf_bytes, "application/pdf")
+        
+        estado = "pendiente"
+        atraso_dias = 0
+        f_venc = it.f_vencimiento or it.f_emision
+        
+        if payload.estado_override in ("pagada", "pendiente", "vencida"):
+            estado = payload.estado_override
+            if estado == "vencida" and f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    atraso_dias = max(0, (today - fv).days)
+                except Exception:
+                    pass
+        else:
+            if f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    if fv < today:
+                        estado = "vencida"
+                        atraso_dias = (today - fv).days
+                except Exception:
+                    pass
+
+        doc = {
+            "id": it.id,
+            "empresa": empresa,
+            "match_source": "ocr_admin",
+            "n_doc": it.n_doc,
+            "f_emision": it.f_emision,
+            "f_vencimiento": it.f_vencimiento,
+            "moneda": "PEN",
+            "importe_total": it.importe_total or 0.0,
+            "estado": estado,
+            "atraso_dias": atraso_dias,
+            "xml_filename": None,
+            "pdf_filename": final_filename,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.empresas_invoices.insert_one(doc)
+        saved += 1
+        
+    return {"saved": saved}
+
+
 def _safe_doc(name: str) -> str:
     base = name.rsplit(".", 1)[0].strip()
     return "".join(c for c in base if c.isalnum() or c in ("-", "_"))

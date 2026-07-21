@@ -19,10 +19,12 @@ Analiza esta imagen y devuelve EXCLUSIVAMENTE un JSON válido (sin markdown, sin
 
 {
   "fecha": "YYYY-MM-DD o null",
+  "fecha_vencimiento": "YYYY-MM-DD o null",
   "hora": "HH:MM o null",
   "estacion": "Nombre / razón social del grifo (string) o null",
   "ciudad": "Ciudad del grifo o null",
-  "ruc_emisor": "RUC del grifo (11 dígitos) o null",
+  "ruc_emisor": "RUC del emisor (11 dígitos) o null",
+  "ruc_cliente": "RUC del cliente/receptor (11 dígitos) o null",
   "placa": "Placa del vehículo (formato ABC-123 o ABC123) o null",
   "producto": "Tipo de combustible (DIESEL B5, DIESEL B20, GASOHOL 90, etc.) o null",
   "galones": número decimal (cantidad en galones) o null,
@@ -94,24 +96,32 @@ def _normalize_to_image(content: bytes, content_type: str) -> tuple[bytes, str]:
 
 async def extract_invoice_data(content: bytes, content_type: str, session_id: str) -> dict:
     """Main entry point. Returns dict with extracted fields + raw response."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    import google.generativeai as genai
 
-    img_bytes, mime = _normalize_to_image(content, content_type)
-    b64 = base64.b64encode(img_bytes).decode("ascii")
+    ct = (content_type or "").lower()
+    if "pdf" in ct or content[:4] == b"%PDF":
+        mime = "application/pdf"
+        file_data = content
+    else:
+        img_bytes, mime = _normalize_to_image(content, content_type)
+        file_data = img_bytes
 
-    chat = LlmChat(
-        api_key=_emergent_key(),
-        session_id=session_id,
-        system_message="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown.",
-    ).with_model("gemini", "gemini-2.5-flash")
-
-    msg = UserMessage(
-        text=OCR_PROMPT,
-        file_contents=[ImageContent(image_base64=b64)],
+    genai.configure(api_key=_emergent_key())
+    
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."
     )
 
-    raw = await chat.send_message(msg)
-    text = raw if isinstance(raw, str) else str(raw)
+    try:
+        response = await model.generate_content_async([
+            {"mime_type": mime, "data": file_data},
+            OCR_PROMPT
+        ])
+        text = response.text
+    except Exception as e:
+        logger.error(f"Error llamando a Gemini API: {e}")
+        return {"extracted": _normalize_fields({}), "raw_response": str(e), "error": str(e)}
 
     # Strip code fences if present
     cleaned = text.strip()
@@ -165,10 +175,12 @@ def _normalize_fields(p: dict) -> dict:
 
     return {
         "fecha": _to_str(p.get("fecha")),
+        "fecha_vencimiento": _to_str(p.get("fecha_vencimiento")),
         "hora": _to_str(p.get("hora")),
         "estacion": _to_str(p.get("estacion")),
         "ciudad": _to_str(p.get("ciudad")),
         "ruc_emisor": _to_str(p.get("ruc_emisor")),
+        "ruc_cliente": _to_str(p.get("ruc_cliente")),
         "placa": placa,
         "producto": _to_str(p.get("producto")),
         "galones": _to_float(p.get("galones")),

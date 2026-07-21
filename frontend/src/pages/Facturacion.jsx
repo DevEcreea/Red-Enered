@@ -220,11 +220,7 @@ export default function Facturacion() {
               </div>
               <div className="border-t border-neutral-200" />
               <div className="grid grid-cols-2 gap-x-10">
-                <KpiRow label="Saldo a Favor (Prepago)" value={formatSoles(state.saldo_a_favor)} testid="ec-saldo-favor" highlight />
                 <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
-              </div>
-              <div className="border-t border-neutral-200" />
-              <div className="grid grid-cols-2 gap-x-10">
                 <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
               </div>
               <div className="border-t border-neutral-200" />

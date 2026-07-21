@@ -256,7 +256,7 @@ async def lookup_ruc(ruc: str):
     # Leer token desde variable de entorno con fallback
     token = os.getenv("DECOLECTA_TOKEN", "").strip()
     if not token:
-        token = "sk_16580.IMOLc0SewJrvEsXBlAWFnYEKB1YQdsPz"
+        token = "sk_17602.EtG1u5naGp52wXGBfMWGY5QjvZFEYmJH"
 
     url = f"https://api.decolecta.com/v1/sunat/ruc?numero={ruc}"
     headers = {
@@ -1826,14 +1826,28 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     try:
         data = storage.get_object_bytes(inv["factura_storage_key"])
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en almacenamiento")
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(
+            status_code=404,
+            content="""
+            <html>
+                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;background-color:#f5f5f5;color:#666;">
+                    <div style="text-align:center;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;color:#999;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                        <h3>Archivo no disponible</h3>
+                        <p style="font-size:14px;">El documento físico no se encontró en el servidor<br/>(probablemente fue ingresado manualmente).</p>
+                    </div>
+                </body>
+            </html>
+            """
+        )
 
     from fastapi.responses import Response
     return Response(
         content=data,
-        media_type=inv.get("factura_content_type", "application/octet-stream"),
+        media_type=inv.get("factura_content_type", "application/pdf"),
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"
         },
     )
 
