@@ -1730,21 +1730,35 @@ async def admin_list_expedientes(
     return {"items": out, "total": len(out)}
 
 
+async def _get_company_uids(user_id: str) -> list[str]:
+    u = await db.users.find_one({"id": user_id})
+    if u and u.get("empresa"):
+        users = await db.users.find({"empresa": u["empresa"]}).to_list(100)
+        return [usr["id"] for usr in users]
+    return [user_id]
+
+
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
 async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
     """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración."""
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    
+    uids = await _get_company_uids(user_id)
+    
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": user_id}, {"_id": 0})
-    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
-    vehicles = await db.subsidio_vehicles.find({"user_id": user_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    
+    # Obtener el último banco y declaración (cualquiera de la empresa sirve)
+    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)])
+    decl = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
+    
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).sort("created_at", 1).to_list(200)
     invoices = await db.consumos_subsidio.find(
-        {"user_id": user_id},
+        {"user_id": {"$in": uids}},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("fecha", -1).to_list(2000)
-    decl = await db.subsidio_declaraciones.find_one({"user_id": user_id}, {"_id": 0})
 
     # Etiquetas legibles
     for d in docs:
@@ -1930,21 +1944,24 @@ async def admin_update_vehicle(
     payload: VehicleAdminIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    v = await db.subsidio_vehicles.find_one({"id": vehicle_id, "user_id": user_id})
+    v = await db.subsidio_vehicles.find_one({"id": vehicle_id})
     if not v:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+        
+    uids = await _get_company_uids(user_id)
+    
     placa_new = payload.placa.upper().strip()
     if placa_new != v["placa"]:
-        if await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa_new}):
+        if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa_new}):
             raise HTTPException(status_code=409, detail="La nueva placa ya está registrada")
     
     if placa_new != v["placa"]:
         await db.subsidio_documents.update_many(
-            {"user_id": user_id, "placa": v["placa"]},
+            {"user_id": {"$in": uids}, "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
         await db.consumos_subsidio.update_many(
-            {"user_id": user_id, "placa": v["placa"]},
+            {"user_id": {"$in": uids}, "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
 
@@ -2043,15 +2060,17 @@ async def admin_update_invoice(
     payload: InvoiceUpdateIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user_id})
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
+    
+    uids = await _get_company_uids(user_id)
     
     patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if "placa" in patch and patch["placa"]:
         placa = patch["placa"].upper().strip()
         patch["placa"] = placa
-        own = await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa})
+        own = await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa})
         patch["placa_match"] = placa if own else None
 
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
