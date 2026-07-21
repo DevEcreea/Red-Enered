@@ -131,6 +131,8 @@ async def get_current_user(request: Request) -> dict:
         if auth.startswith("Bearer "):
             token = auth[7:]
     if not token:
+        token = request.query_params.get("t")
+    if not token:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
