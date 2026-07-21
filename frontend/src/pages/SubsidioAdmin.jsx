@@ -1361,7 +1361,7 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                     const dlUrl = `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${tk}`;
                     return (
                       <div className="space-y-2">
-                        <div className="flex justify-between items-center">
+                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
                           <span className="text-xs font-bold text-neutral-500 uppercase">Documento Adjunto</span>
                           <a 
                             href={dlUrl} 
@@ -1370,19 +1370,18 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                             className="text-xs font-bold text-brand hover:underline flex items-center gap-1"
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
-                            Abrir en pestaña nueva (Recomendado para celulares)
+                            Si se ve en blanco, ábrelo aquí
                           </a>
                         </div>
-                        <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
+                        <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 h-[300px] md:h-[500px] flex items-center justify-center relative">
                           <iframe
                             src={dlUrl}
-                            className="w-full h-full min-h-[500px] bg-white hidden md:block"
+                            className="w-full h-full bg-white absolute inset-0 z-10"
                             title="Previsualización de factura"
                           />
-                          <div className="md:hidden flex flex-col items-center justify-center p-8 text-center text-neutral-500">
-                            <FileText className="w-12 h-12 mb-3 text-neutral-400" />
-                            <p className="text-sm">La previsualización integrada no está disponible en pantallas pequeñas.</p>
-                            <p className="text-xs mt-1">Por favor, usa el botón de arriba para abrir el documento.</p>
+                          <div className="absolute inset-0 z-0 flex flex-col items-center justify-center p-4 text-center text-neutral-400">
+                            <FileText className="w-8 h-8 mb-2 opacity-50" />
+                            <p className="text-xs">Cargando documento...</p>
                           </div>
                         </div>
                       </div>
