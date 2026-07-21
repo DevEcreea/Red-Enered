@@ -545,7 +545,7 @@ function InvoicesBulkUpload() {
                   </button>
                 </div>
                 {!it.error && (
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+                  <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 text-sm">
                     <div>
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Empresa Destino</label>
                       <select
@@ -560,6 +560,14 @@ function InvoicesBulkUpload() {
                     <div>
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">N° Documento</label>
                       <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.n_doc || ""} onChange={(e) => setItemField(it.id, "n_doc", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Placa</label>
+                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.placa || ""} onChange={(e) => setItemField(it.id, "placa", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Producto</label>
+                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.producto || ""} onChange={(e) => setItemField(it.id, "producto", e.target.value)} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Emisión</label>

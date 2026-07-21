@@ -2594,6 +2594,8 @@ class AdminConfirmItem(BaseModel):
     f_vencimiento: Optional[str] = ""
     importe_total: Optional[float] = None
     override_empresa: Optional[str] = ""
+    placa: Optional[str] = ""
+    producto: Optional[str] = ""
 
 class AdminConfirmPayload(BaseModel):
     items: List[AdminConfirmItem]
@@ -2633,6 +2635,9 @@ async def admin_invoices_ocr_preview(
                 if ruc_clean in rucs_to_empresa:
                     empresa = rucs_to_empresa[ruc_clean]
 
+            if ocr.get("error"):
+                raise Exception(ocr["error"])
+
             items.append({
                 "id": uid,
                 "factura_filename": f.filename,
@@ -2642,6 +2647,8 @@ async def admin_invoices_ocr_preview(
                 "f_emision": ext.get("fecha") or "",
                 "f_vencimiento": ext.get("fecha_vencimiento") or "",
                 "importe_total": ext.get("importe_total"),
+                "placa": ext.get("placa") or "",
+                "producto": ext.get("producto") or "",
             })
         except Exception as e:
             logger.error(f"Error OCR: {e}")
@@ -2708,6 +2715,8 @@ async def admin_invoices_confirm_ocr(
             "importe_total": it.importe_total or 0.0,
             "estado": estado,
             "atraso_dias": atraso_dias,
+            "placa": it.placa,
+            "producto": it.producto,
             "xml_filename": None,
             "pdf_filename": final_filename,
             "created_at": datetime.now(timezone.utc).isoformat(),
