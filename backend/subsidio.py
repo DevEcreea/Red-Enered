@@ -99,6 +99,14 @@ async def _get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token inválido")
 
 
+async def _get_company_uids(user_id: str) -> list[str]:
+    u = await db.users.find_one({"id": user_id})
+    if u and u.get("empresa"):
+        users = await db.users.find({"empresa": u["empresa"]}).to_list(100)
+        return [usr["id"] for usr in users]
+    return [user_id]
+
+
 async def _require_subsidio(request: Request) -> dict:
     user = await _get_current_user(request)
     allowed = ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]
@@ -444,20 +452,22 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     # Cálculo
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
 
+    uids = await _get_company_uids(user["id"])
+    
     # Vehículos
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0}
     ).to_list(200)
 
     # Documentos
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"]}, {"_id": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0}
     ).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
 
     # Cuenta bancaria
     bank = await db.subsidio_bank_accounts.find_one(
-        {"user_id": user["id"]}, {"_id": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)]
     )
 
     # Construir checklist
@@ -500,8 +510,8 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     )
 
     # Conteos de facturas (drafts y confirmadas)
-    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "draft"})
-    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "confirmed"})
+    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "draft"})
+    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
 
     return {
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "_id")},
@@ -538,17 +548,19 @@ async def aceptar_declaracion(
     if not payload.accepted:
         raise HTTPException(status_code=400, detail="Debes marcar la casilla de aceptación")
 
-    # Idempotente: si ya aceptó, devolver el registro existente
-    existing = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    
+    # Idempotente: si ya aceptó alguien de la empresa, devolver el registro existente
+    existing = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0})
     if existing:
         return {"ok": True, "declaracion": existing, "already": True}
 
     # Validar que hayan terminado etapas 1, 2 y 3
     drafts_pendientes = await db.consumos_subsidio.count_documents(
-        {"user_id": user["id"], "status": "draft"}
+        {"user_id": {"$in": uids}, "status": "draft"}
     )
     confirmadas = await db.consumos_subsidio.count_documents(
-        {"user_id": user["id"], "status": "confirmed"}
+        {"user_id": {"$in": uids}, "status": "confirmed"}
     )
     if drafts_pendientes > 0:
         raise HTTPException(status_code=400, detail="Aún tienes facturas en borrador. Confírmalas antes de firmar la declaración.")
@@ -556,9 +568,9 @@ async def aceptar_declaracion(
         raise HTTPException(status_code=400, detail="Debes subir y confirmar al menos una factura de combustible.")
 
     # Verificar docs empresa + flota subidos
-    docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
     missing = []
     for cat in EMPRESA_CATEGORIES:
@@ -594,9 +606,9 @@ async def aceptar_declaracion(
         ),
     }
     await db.subsidio_declaraciones.insert_one(record)
-    # Marcar expediente como enviado a la ATU + iniciar etapa "solicitud enviada"
-    await db.users.update_one(
-        {"id": user["id"]},
+    # Marcar expediente como enviado a la ATU para toda la empresa
+    await db.users.update_many(
+        {"id": {"$in": uids}},
         {"$set": {"expediente_status": "submitted", "documentos_completos": True,
                   "expediente_submitted_at": record["accepted_at"],
                   "expediente_stage": "solicitud_enviada",
@@ -608,7 +620,8 @@ async def aceptar_declaracion(
 
 @subsidio_router.get("/subsidio/declaracion")
 async def get_declaracion(user: dict = Depends(_require_subsidio)):
-    rec = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    rec = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
     return {"declaracion": rec}
 
 
@@ -668,7 +681,8 @@ async def upload_document(
 
 @subsidio_router.delete("/subsidio/documents/{doc_id}")
 async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": user["id"]})
+    uids = await _get_company_uids(user["id"])
+    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     try:
@@ -681,7 +695,8 @@ async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
 
 @subsidio_router.get("/subsidio/documents/{doc_id}/download")
 async def download_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
@@ -696,8 +711,9 @@ async def my_docs_summary(user: dict = Depends(_require_subsidio)):
       - por_placa: { "ABC-123": [{...docs de esa placa...}], ... }
       - combustible: [{...docs comprobantes...}]
     """
+    uids = await _get_company_uids(user["id"])
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"]}, {"_id": 0, "storage_key": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}
     ).sort("uploaded_at", -1).to_list(2000)
 
     empresa = []
@@ -739,20 +755,25 @@ async def update_bank_account(payload: BankAccountIn, user: dict = Depends(_requ
     if not payload.es_banco_nacion and not payload.cci:
         raise HTTPException(status_code=400, detail="CCI obligatorio si no es Banco de la Nación")
     doc = payload.model_dump()
+    uids = await _get_company_uids(user["id"])
     doc["user_id"] = user["id"]
     doc["empresa"] = user.get("empresa")
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.subsidio_bank_accounts.update_one(
-        {"user_id": user["id"]}, {"$set": doc}, upsert=True
-    )
+    # Find existing bank account for company or insert new
+    existing = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}})
+    if existing:
+        await db.subsidio_bank_accounts.update_one({"user_id": existing["user_id"]}, {"$set": doc})
+    else:
+        await db.subsidio_bank_accounts.insert_one(doc)
     return {"ok": True, "bank_account": doc}
 
 
 @subsidio_router.post("/subsidio/vehicles")
 async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio)):
     placa = payload.placa.upper().strip()
-    if await db.subsidio_vehicles.find_one({"user_id": user["id"], "placa": placa}):
-        raise HTTPException(status_code=409, detail="La placa ya está registrada")
+    uids = await _get_company_uids(user["id"])
+    if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa}):
+        raise HTTPException(status_code=409, detail="La placa ya está registrada en la empresa")
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -848,17 +869,18 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
 @subsidio_router.delete("/subsidio/vehicles/{placa}")
 async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
     placa_norm = placa.upper().strip()
-    await db.subsidio_vehicles.delete_one({"user_id": user["id"], "placa": placa_norm})
+    uids = await _get_company_uids(user["id"])
+    await db.subsidio_vehicles.delete_one({"user_id": {"$in": uids}, "placa": placa_norm})
     # Borra docs de esa placa
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"], "placa": placa_norm}, {"_id": 0}
+        {"user_id": {"$in": uids}, "placa": placa_norm}, {"_id": 0}
     ).to_list(100)
     for d in docs:
         try:
             storage.delete_object(d["storage_key"])
         except Exception:
             pass
-    await db.subsidio_documents.delete_many({"user_id": user["id"], "placa": placa_norm})
+    await db.subsidio_documents.delete_many({"user_id": {"$in": uids}, "placa": placa_norm})
     return {"ok": True}
 
 
@@ -866,10 +888,11 @@ async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
 async def finalize(user: dict = Depends(_require_subsidio)):
     """Marca el expediente como completado. Valida que todo esté presente."""
     # Re-construir el dashboard para verificar can_finalize
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
-    docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    uids = await _get_company_uids(user["id"])
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": user["id"]}, {"_id": 0})
+    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0})
 
     missing = []
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
@@ -1040,13 +1063,14 @@ async def invoices_upload(
 @subsidio_router.get("/subsidio/invoices/preview")
 async def invoices_preview(user: dict = Depends(_require_subsidio)):
     """Devuelve facturas en draft (pendientes de confirmar) del usuario."""
+    uids = await _get_company_uids(user["id"])
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "draft"},
+        {"user_id": {"$in": uids}, "status": "draft"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("created_at", -1).to_list(500)
     # Placas registradas para mostrar dropdown de corrección
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0, "placa": 1, "categoria": 1}
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
     return {"items": rows, "vehicles": vehicles}
 
@@ -1057,8 +1081,9 @@ async def invoices_update(
     payload: InvoiceUpdateIn,
     user: dict = Depends(_require_subsidio),
 ):
+    uids = await _get_company_uids(user["id"])
     inv = await db.consumos_subsidio.find_one(
-        {"id": invoice_id, "user_id": user["id"]}, {"_id": 0}
+        {"id": invoice_id, "user_id": {"$in": uids}}, {"_id": 0}
     )
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
@@ -1076,7 +1101,8 @@ async def invoices_update(
 
 @subsidio_router.delete("/subsidio/invoices/{invoice_id}")
 async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidio)):
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user["id"]})
+    uids = await _get_company_uids(user["id"])
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": {"$in": uids}})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     try:
@@ -1099,7 +1125,8 @@ async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     """Confirma TODAS las facturas en draft del usuario → status=confirmed.
     Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed."""
     now = datetime.now(timezone.utc).isoformat()
-    drafts = await db.consumos_subsidio.find({"user_id": user["id"], "status": "draft"}).to_list(1000)
+    uids = await _get_company_uids(user["id"])
+    drafts = await db.consumos_subsidio.find({"user_id": {"$in": uids}, "status": "draft"}).to_list(1000)
 
     for d in drafts:
         fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
@@ -1184,8 +1211,9 @@ def _combustible_to_subsidio(r: dict) -> dict:
 @subsidio_router.get("/subsidio/invoices/confirmed")
 async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
     """Lista facturas confirmadas (para módulos del cliente_subsidio)."""
+    uids = await _get_company_uids(user["id"])
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "confirmed"},
+        {"user_id": {"$in": uids}, "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(2000)
 
@@ -1211,9 +1239,11 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     Fila 5: Semáforo de vencimientos de documentos
     """
     from datetime import date, timedelta
+    
+    uids = await _get_company_uids(user["id"])
 
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "confirmed"},
+        {"user_id": {"$in": uids}, "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(5000)
 
@@ -1256,7 +1286,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
 
     # === Unidades (vehículos) ===
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
     unidades_incluidas = len(vehicles)
     placas_activas = {(r.get("placa") or "").upper().strip() for r in rows if (r.get("placa") or "").strip()}
     unidades_activas = len({v["placa"] for v in vehicles if v["placa"].upper() in placas_activas})
@@ -1730,12 +1760,7 @@ async def admin_list_expedientes(
     return {"items": out, "total": len(out)}
 
 
-async def _get_company_uids(user_id: str) -> list[str]:
-    u = await db.users.find_one({"id": user_id})
-    if u and u.get("empresa"):
-        users = await db.users.find({"empresa": u["empresa"]}).to_list(100)
-        return [usr["id"] for usr in users]
-    return [user_id]
+
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
