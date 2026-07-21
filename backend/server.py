@@ -1238,19 +1238,24 @@ async def dashboard_overview(
         if not p: continue
         km = _f(r.get("KILOMETRAJE"))
         gl = _f(r.get("CANTIDAD_GL"))
-        if km > 0:
-            d = by_placa_km.setdefault(p, {"kms": [], "gal": 0})
-            d["kms"].append(km)
+        if km > 0 and r.get("FECHA"):
+            d = by_placa_km.setdefault(p, {"readings": [], "gal": 0})
+            d["readings"].append((r["FECHA"], km))
             d["gal"] += gl
             
     total_dist = 0
     total_gal_km = 0
+    MAX_KM_PER_DELTA = 3000
     for p, d in by_placa_km.items():
-        if len(d["kms"]) >= 2:
-            dist = max(d["kms"]) - min(d["kms"])
-            if dist > 0:
-                total_dist += dist
-                total_gal_km += d["gal"]
+        d["readings"].sort(key=lambda x: x[0])
+        km_trav = 0
+        for i in range(1, len(d["readings"])):
+            delta = d["readings"][i][1] - d["readings"][i - 1][1]
+            if 0 < delta <= MAX_KM_PER_DELTA:
+                km_trav += delta
+        if km_trav > 0 and d["gal"] > 0:
+            total_dist += km_trav
+            total_gal_km += d["gal"]
                 
     rendimiento = total_dist / total_gal_km if total_gal_km > 0 else 0
     costo_km = total_gasto / total_dist if total_dist > 0 else 0
@@ -1828,8 +1833,9 @@ async def analytics_fleet(
     except Exception:
         dias_unicos = 1
 
-    rendimientos_validos = [r["km_por_gal"] for r in rendimiento if r["km_por_gal"]]
-    rend_prom = round(sum(rendimientos_validos) / len(rendimientos_validos), 2) if rendimientos_validos else 0
+    total_km_validos = sum(r["km_recorridos"] for r in rendimiento if r.get("km_por_gal") is not None)
+    total_gal_validos = sum(r["gal"] for r in rendimiento if r.get("km_por_gal") is not None)
+    rend_prom = round(total_km_validos / total_gal_validos, 2) if total_gal_validos > 0 else 0
 
     ahorro_pct = round((total_ahorro_all / (total_gasto_all + total_ahorro_all) * 100) if (total_gasto_all + total_ahorro_all) else 0, 2)
 
