@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import {
   Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText,
   Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
-  Pencil, Plus, Trash2, PlusCircle, X,
+  Pencil, Plus, Trash2, PlusCircle, X, ExternalLink,
 } from "lucide-react";
 import { api, API } from "../lib/api";
 
