@@ -1,11 +1,74 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle,
-  Trash2, Plus, Building2, Truck, Fuel,
-  Banknote, FileText, Save, ScanLine, ShieldCheck,
-  Send, Lock, FileCheck2, PartyPopper,
+  FileText, CheckCircle2, ChevronRight, Upload, Trash2, ShieldCheck, Download, 
+  MapPin, Phone, Building2, User, Loader2, PlayCircle, Lock, LockOpen, ArrowRight, X, Image as ImgIcon, File, Fuel, Save, AlertCircle, AlertTriangle, Send, Plus
 } from "lucide-react";
+
+// --- Subcomponente para cada factura editable ---
+function InvoiceRow({ item, setField, saveRow, deleteRow, vehicles, saving }) {
+  const isVehicleOk = vehicles.some((v) => v.placa === item.placa);
+  const placaColor = !item.placa ? "border-red-300 bg-red-50" : isVehicleOk ? "border-green-300 bg-green-50" : "border-yellow-300 bg-yellow-50";
+
+  return (
+    <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm mb-4 relative">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2 truncate">
+          <FileText className="w-4 h-4 text-neutral-400" />
+          <span className="font-medium text-sm text-neutral-800 truncate" title={item.factura_filename}>{item.factura_filename}</span>
+        </div>
+        <button onClick={() => deleteRow(item.id)} className="text-neutral-400 hover:text-red-500" title="Eliminar archivo">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Proveedor</label>
+          <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.estacion || ""} onChange={(e) => setField(item.id, "estacion", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Fecha Emisión</label>
+          <input type="text" placeholder="YYYY-MM-DD" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.fecha || ""} onChange={(e) => setField(item.id, "fecha", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Placa</label>
+          <input type="text" className={`w-full border rounded p-1.5 focus:outline-none ${placaColor}`} value={item.placa || ""} onChange={(e) => setField(item.id, "placa", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Producto</label>
+          <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.producto || ""} onChange={(e) => setField(item.id, "producto", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Cant (Gal)</label>
+          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.galones ?? ""} onChange={(e) => setField(item.id, "galones", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Precio Uni</label>
+          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.precio_unitario ?? ""} onChange={(e) => setField(item.id, "precio_unitario", e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Importe</label>
+          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.importe_total ?? ""} onChange={(e) => setField(item.id, "importe_total", e.target.value)} />
+        </div>
+      </div>
+
+      {item._dirty && (
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={() => saveRow(item)}
+            disabled={saving}
+            className="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded flex items-center gap-2 disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            Guardar cambios
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -591,7 +654,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
 
   return (
     <div>
-      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · OCR Gemini Vision · Solo PDF" />
+      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · Extracción OCR · Solo PDF" />
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex gap-2">
         <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -655,25 +718,19 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
               <strong>Tienes {items.length} factura(s) en borrador pendiente(s) de envío.</strong> Haz clic en "Enviar reporte" para registrarlas.
             </div>
           </div>
-          <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm space-y-2">
-            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Archivos cargados:</h4>
-            <div className="divide-y divide-neutral-100">
+          <div className="space-y-2 mt-4">
+            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Comprobantes subidos: (Si falta algún dato, llénalo manualmente y guarda)</h4>
+            <div>
               {items.map((it) => (
-                <div key={it.id} className="flex items-center justify-between py-2 text-sm">
-                  <div className="flex items-center gap-2 truncate">
-                    <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />
-                    <span className="truncate font-medium text-neutral-800" title={it.factura_filename}>
-                      {it.factura_filename}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => deleteRow(it.id)}
-                    className="text-neutral-400 hover:text-red-500 p-1 rounded hover:bg-neutral-100"
-                    title="Eliminar archivo"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <InvoiceRow 
+                  key={it.id} 
+                  item={it} 
+                  setField={setField} 
+                  saveRow={saveRow} 
+                  deleteRow={deleteRow} 
+                  vehicles={vehicles}
+                  saving={savingId === it.id}
+                />
               ))}
             </div>
           </div>
