@@ -43,6 +43,8 @@ def _normalize_col(name: str) -> str:
         s = "PRECIO_UNITARIO"
     if s in ("ESTACION",):
         s = "ESTACION"
+    if s in ("CALIDAD", "TIPO_DE_COMBUSTIBLE", "PRODUCTO"):
+        s = "COMBUSTIBLE"
     if s in ("UNIDAD_DE_MEDIDA", "UNIDAD"):
         s = "UNIDAD"
     if s in ("NRO_TARJETA", "NRO_DE_TARJETA", "N_TARJETA", "NUMERO_DE_TARJETA"):
@@ -102,12 +104,22 @@ def _fetch_rows_sync(sheet_id: str, tab_name: str):
     try:
         ws = sh.worksheet(tab_name)
     except gspread.WorksheetNotFound:
-        for variant in [tab_name.strip(), "Hoja1", "Hoja 1", "Sheet1", "Sheet 1"]:
-            try:
-                ws = sh.worksheet(variant)
+        # Intento de coincidencia ignorando espacios y mayúsculas
+        target = tab_name.strip().upper()
+        for w in sh.worksheets():
+            if w.title.strip().upper() == target:
+                ws = w
                 break
-            except gspread.WorksheetNotFound:
-                continue
+        
+        # Fallbacks si no se encontró el tab con el nombre exacto ni ignorando espacios
+        if ws is None:
+            for variant in ["Hoja1", "Hoja 1", "Sheet1", "Sheet 1"]:
+                try:
+                    ws = sh.worksheet(variant)
+                    break
+                except gspread.WorksheetNotFound:
+                    continue
+                    
     if ws is None:
         available = [w.title for w in sh.worksheets()]
         raise RuntimeError(f"Pestaña '{tab_name}' no encontrada. Disponibles: {available}")
