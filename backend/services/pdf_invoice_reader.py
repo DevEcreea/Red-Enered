@@ -108,6 +108,7 @@ async def extract_invoice_data(content, content_type, session_id=None):
     return {
         "extracted": {
             "fecha": fecha,
+            "fecha_vencimiento": fecha,
             "estacion": estacion,
             "ciudad": ciudad,
             "ruc_emisor": ruc,

@@ -2642,7 +2642,7 @@ async def admin_invoices_ocr_preview(
     files: List[UploadFile] = File(...),
     user: dict = Depends(require_roles("admin_enered")),
 ):
-    from services.invoice_ocr import extract_invoice_data
+    from services.pdf_invoice_reader import extract_invoice_data
     from datetime import datetime, timezone
     import uuid
 
