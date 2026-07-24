@@ -2876,6 +2876,67 @@ async def admin_invoices_confirm_ocr(
     return {"saved": saved}
 
 
+@api.post("/admin/invoices/sync-to-subsidio")
+async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("admin_enered"))):
+    """Backfills/syncs all existing admin invoices from empresas_invoices into db.consumos_subsidio for eligible clients."""
+    all_admin_invs = await db.empresas_invoices.find({}, {"_id": 0}).to_list(2000)
+    synced = 0
+    import uuid
+    for inv in all_admin_invs:
+        empresa = inv.get("empresa")
+        n_doc = inv.get("n_doc")
+        if not empresa or not n_doc:
+            continue
+        
+        sub_user = await db.users.find_one({
+            "empresa": empresa,
+            "$or": [
+                {"role": "cliente_subsidio"},
+                {"servicios.subsidio": True}
+            ]
+        })
+        if not sub_user:
+            continue
+
+        existing = await db.consumos_subsidio.find_one({"empresa": empresa, "numero_documento": n_doc})
+        if not existing:
+            sub_id = str(uuid.uuid4())
+            sub_doc = {
+                "id": sub_id,
+                "user_id": sub_user["id"],
+                "empresa": empresa,
+                "empresa_id": empresa,
+                "calc_id": sub_user.get("calc_id"),
+                "factura_filename": inv.get("pdf_filename") or f"{n_doc}.pdf",
+                "factura_storage_key": _inv_key(empresa, inv.get("pdf_filename") or f"{n_doc}.pdf"),
+                "factura_content_type": "application/pdf",
+                "factura_size": 0,
+                "raw_ocr_response": "",
+                "ocr_ok": True,
+                "ocr_error": None,
+                "placa_match": True if inv.get("placa") else False,
+                "status": "confirmed",
+                "created_at": inv.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "confirmed_at": inv.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "fecha": inv.get("f_emision"),
+                "hora": None,
+                "estacion": "ENERED",
+                "ciudad": None,
+                "ruc_emisor": "20609304082",
+                "placa": inv.get("placa"),
+                "producto": inv.get("producto"),
+                "galones": inv.get("galones") or 0.0,
+                "precio_unitario": inv.get("precio_unitario") or 0.0,
+                "importe_total": inv.get("importe_total") or 0.0,
+                "numero_documento": n_doc,
+                "confianza": 1.0,
+            }
+            await db.consumos_subsidio.insert_one(sub_doc)
+            synced += 1
+            
+    return {"synced": synced, "total_admin_invoices": len(all_admin_invs)}
+
+
 def _safe_doc(name: str) -> str:
     base = name.rsplit(".", 1)[0].strip()
     return "".join(c for c in base if c.isalnum() or c in ("-", "_"))
