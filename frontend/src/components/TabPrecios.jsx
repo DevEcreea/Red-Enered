@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
 import { 
   MapPin, Star, Navigation, Map, TrendingDown,
-  CheckCircle2, AlertCircle, RefreshCw, Zap
+  CheckCircle2, AlertCircle, RefreshCw, Zap, Lock, Bell
 } from "lucide-react";
 
 export default function TabPrecios({ user, ahorroCapturado }) {
@@ -12,6 +12,17 @@ export default function TabPrecios({ user, ahorroCapturado }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  const [notified, setNotified] = useState(() => {
+    return localStorage.getItem("notify_grifos_virtuales") === "true";
+  });
+
+  const handleNotifyToggle = (e) => {
+    e.stopPropagation();
+    const nextState = !notified;
+    setNotified(nextState);
+    localStorage.setItem("notify_grifos_virtuales", String(nextState));
+  };
 
   useEffect(() => {
     fetchPrecios();
@@ -110,32 +121,70 @@ export default function TabPrecios({ user, ahorroCapturado }) {
             <div className="text-[10px] text-white/80 mt-1 uppercase tracking-wider">Precio garantizado en tu zona</div>
           </div>
         </div>
-      </div>
-
-      {/* Map Banner */}
+      {/* Red de Grifos Virtuales Banner */}
       <div 
-        onClick={openMap}
-        className="bg-neutral-100 border border-neutral-200 rounded-2xl h-[280px] w-full flex items-center justify-center relative overflow-hidden cursor-pointer hover:opacity-95 transition-opacity"
-        style={{
-          backgroundImage: "url('https://maps.googleapis.com/maps/api/staticmap?center=-8.11599,-79.0258&zoom=13&size=800x300&maptype=roadmap&style=feature:all|element:labels|visibility:off&style=feature:road|color:0xffffff&style=feature:landscape|color:0xf3f4f6')",
-          backgroundSize: 'cover',
-          backgroundPosition: 'center'
-        }}
+        className="bg-gradient-to-br from-purple-50/70 via-white to-indigo-50/60 border border-purple-100/80 rounded-3xl p-8 md:p-10 w-full flex flex-col items-center justify-center text-center relative overflow-hidden shadow-sm"
       >
-        <div className="absolute top-1/3 left-1/4 bg-emerald-500 px-3 py-1.5 rounded-full shadow-lg font-bold text-sm text-white flex items-center gap-1">
-          <Star className="w-4 h-4 text-amber-400 fill-amber-400" /> {formatSoles(mejorPrecio)}
+        {/* Decorative Blurred Price Badges in Background */}
+        <div className="absolute top-8 left-10 md:left-20 bg-white/40 border border-purple-200/40 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-neutral-400 blur-[2px] pointer-events-none select-none">
+          S/ 17.50
         </div>
-        <div className="absolute top-1/2 right-1/3 bg-[#F59E0B] px-3 py-1.5 rounded-full shadow-lg font-bold text-sm text-white flex items-center gap-1">
-          {formatSoles(mejorPrecio + 0.3)}
+        <div className="absolute bottom-10 left-16 md:left-32 bg-emerald-500/20 border border-emerald-500/30 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-emerald-600 blur-[2.5px] pointer-events-none select-none">
+          S/ 16.90
         </div>
-        <div className="absolute bottom-1/4 left-1/2 bg-neutral-400 px-3 py-1.5 rounded-full shadow-lg font-bold text-sm text-white flex items-center gap-1">
-          {formatSoles(mejorPrecio + 1.2)}
+        <div className="absolute top-12 right-12 md:right-28 bg-white/40 border border-purple-200/40 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-neutral-400 blur-[2px] pointer-events-none select-none">
+          S/ 18.20
         </div>
-        
-        <div className="z-10 flex flex-col items-center bg-white/80 backdrop-blur-sm p-4 rounded-xl border border-white/50 shadow-sm">
-          <Map className="w-8 h-8 text-brand mb-1" />
-          <h3 className="font-cabinet font-bold text-lg text-neutral-800">Red de grifos</h3>
-          <p className="text-xs font-semibold text-neutral-500 uppercase tracking-widest mt-1">Ver mapa interactivo</p>
+        <div className="absolute bottom-12 right-16 md:right-36 bg-amber-500/20 border border-amber-500/30 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-amber-600 blur-[2.5px] pointer-events-none select-none">
+          S/ 17.80
+        </div>
+
+        {/* Lock Icon Box */}
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-b from-purple-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-purple-500/20 mb-4 z-10">
+          <Lock className="w-6 h-6 stroke-[2.5]" />
+        </div>
+
+        {/* Status Pill */}
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100/80 border border-purple-200 text-purple-700 text-[11px] font-extrabold uppercase tracking-wider mb-4 z-10">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-600 animate-pulse"></span>
+          EN DESARROLLO
+        </div>
+
+        {/* Main Heading */}
+        <h2 className="font-cabinet font-black text-2xl md:text-3xl text-neutral-900 max-w-2xl leading-tight mb-3 z-10">
+          Aquí nace la <span className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-600 bg-clip-text text-transparent">1.ª red de grifos virtuales</span> a nivel nacional
+        </h2>
+
+        {/* Description */}
+        <p className="text-sm md:text-base text-neutral-500 max-w-xl leading-relaxed mb-6 z-10">
+          Muy pronto ENERED te mostrará, en tiempo real, el precio de combustible de <strong className="text-neutral-700 font-bold">todos los grifos del Perú</strong> — para que sepas siempre dónde te conviene repostar, antes de llegar al surtidor.
+        </p>
+
+        {/* Action Button */}
+        <button
+          onClick={handleNotifyToggle}
+          className={`px-6 py-3 rounded-xl font-bold text-sm shadow-md transition-all duration-200 flex items-center gap-2.5 z-10 transform active:scale-95 ${
+            notified
+              ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20"
+              : "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/25 hover:shadow-purple-500/35"
+          }`}
+        >
+          {notified ? (
+            <>
+              <CheckCircle2 className="w-4 h-4" />
+              ¡Te avisaremos cuando esté disponible!
+            </>
+          ) : (
+            <>
+              <Bell className="w-4 h-4" />
+              Avísame cuando esté disponible
+            </>
+          )}
+        </button>
+
+        {/* Sub-label */}
+        <div className="flex items-center gap-1 text-[11px] font-semibold text-neutral-400 mt-3 z-10">
+          <Star className="w-3 h-3 text-neutral-400" /> Exclusivo para flotas ENERED
         </div>
       </div>
 

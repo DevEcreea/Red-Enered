@@ -595,36 +595,6 @@ async def list_consumptions(
             r.pop("_id", None)
             rows.append(r)
 
-    # 2. Fetch from db.consumos_subsidio if applicable
-    is_subsidio = user.get("role") == "cliente_subsidio"
-    if not is_subsidio and user.get("empresa"):
-        cfg = await db.empresas_config.find_one({"empresa": user["empresa"]}, {"_id": 0, "servicios": 1})
-        if cfg and cfg.get("servicios", {}).get("subsidio"):
-            is_subsidio = True
-
-    if is_subsidio:
-        uid_filter = {"status": "confirmed"}
-        if user.get("role") == "cliente_subsidio":
-            uid_filter["user_id"] = user["id"]
-        else:
-            uid_filter["empresa"] = user.get("empresa")
-            
-        raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
-        mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
-        
-        def keep(row):
-            if fecha_desde and (row["FECHA"] or "") < fecha_desde: return False
-            if fecha_hasta and (row["FECHA"] or "") > fecha_hasta: return False
-            if placa and row["PLACA"] != placa: return False
-            if ciudad and row["CIUDAD"] != ciudad: return False
-            if estacion and row["ESTACION"] != estacion: return False
-            if producto and row["PRODUCTO"] != producto: return False
-            if semana and row["SEMANA"] != semana: return False
-            return True
-            
-        rows.extend([r for r in mapped if keep(r)])
-        rows.sort(key=lambda x: x.get("FECHA") or "", reverse=True)
-
     return rows
 
 
@@ -2859,6 +2829,49 @@ async def admin_invoices_confirm_ocr(
         }
         await db.empresas_invoices.insert_one(doc)
         saved += 1
+        
+        # --- MIRROR TO SUBSIDIO DOSSIER ---
+        sub_user = await db.users.find_one({
+            "empresa": empresa,
+            "$or": [
+                {"role": "cliente_subsidio"},
+                {"servicios.subsidio": True}
+            ]
+        })
+        if sub_user:
+            import uuid
+            sub_id = str(uuid.uuid4())
+            sub_doc = {
+                "id": sub_id,
+                "user_id": sub_user["id"],
+                "empresa": empresa,
+                "empresa_id": empresa,
+                "calc_id": sub_user.get("calc_id"),
+                "factura_filename": it.factura_filename,
+                "factura_storage_key": final_key,
+                "factura_content_type": "application/pdf",
+                "factura_size": len(pdf_bytes),
+                "raw_ocr_response": "",
+                "ocr_ok": True,
+                "ocr_error": None,
+                "placa_match": True if it.placa else False,
+                "status": "confirmed",
+                "created_at": doc["created_at"],
+                "confirmed_at": doc["created_at"],
+                "fecha": it.f_emision,
+                "hora": None,
+                "estacion": "ENERED",
+                "ciudad": None,
+                "ruc_emisor": "20609304082",
+                "placa": it.placa,
+                "producto": it.producto,
+                "galones": it.galones or 0.0,
+                "precio_unitario": it.precio_unitario or 0.0,
+                "importe_total": it.importe_total,
+                "numero_documento": it.n_doc,
+                "confianza": 1.0,
+            }
+            await db.consumos_subsidio.insert_one(sub_doc)
         
     return {"saved": saved}
 
