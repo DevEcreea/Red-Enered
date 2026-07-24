@@ -961,9 +961,20 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
       } else {
         await api.post(`/admin/subsidio/expedientes/${user.id}/invoices`, payload);
       }
+      
+      // En lugar de ocultar el form y correr el riesgo de perder foco o estado, 
+      // limpiamos los campos si es nueva factura, o simplemente refrescamos.
       alert("Factura guardada correctamente.");
-      setShowInvoiceForm(false);
-      onRefresh();
+      
+      if (!editingInvoice) {
+        setInvNumero("");
+        setInvFecha("");
+        setInvGalones("");
+        setInvPrecio("");
+        setInvImporte("");
+      }
+      
+      await onRefresh();
     } catch (err) {
       alert(`Error al guardar factura: ${err.response?.data?.detail || err.message}`);
     } finally {
