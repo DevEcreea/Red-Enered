@@ -47,6 +47,12 @@ def _normalize_col(name: str) -> str:
         s = "COMBUSTIBLE"
     if s in ("UNIDAD_DE_MEDIDA", "UNIDAD"):
         s = "UNIDAD"
+    if s in ("DEPARTAMENTO", "DEPTO", "DEP"):
+        s = "DEPARTAMENTO"
+    if s in ("PROVINCIA", "PROV"):
+        s = "PROVINCIA"
+    if s in ("DISTRITO", "DIST"):
+        s = "DISTRITO"
     if s in ("PRECIO_VENT", "PRECIO", "VENTA", "PRECIO_FINAL", "PRECIO_ENERED"):
         s = "PRECIO_VENTA"
     return s
@@ -263,9 +269,12 @@ async def sync_precios_to_mongo(db):
             elif not current_empresa:
                 current_empresa = "GENERAL"
         
-        ciudad = str(norm.get("CIUDAD", "")).strip()
-        combustible = str(norm.get("COMBUSTIBLE", "")).strip()
-        estacion = str(norm.get("ESTACION", "")).strip()
+        departamento = str(norm.get("DEPARTAMENTO", r.get("DEPARTAMENTO", r.get("DEP", "")))).strip()
+        provincia = str(norm.get("PROVINCIA", r.get("PROVINCIA", r.get("PROV", "")))).strip()
+        distrito = str(norm.get("DISTRITO", r.get("DISTRITO", r.get("DIST", "")))).strip()
+        ciudad = str(norm.get("CIUDAD", r.get("CIUDAD", ""))).strip()
+        combustible = str(norm.get("COMBUSTIBLE", r.get("COMBUSTIBLE", ""))).strip()
+        estacion = str(norm.get("ESTACION", r.get("ESTACION", ""))).strip()
         
         # We need at least one valid price to insert
         precio_venta = _parse_number(norm.get("PRECIO_VENTA"))
@@ -293,6 +302,9 @@ async def sync_precios_to_mongo(db):
         normalized.append({
             "id": str(uuid.uuid4()),
             "empresa": current_empresa,
+            "departamento": departamento,
+            "provincia": provincia,
+            "distrito": distrito,
             "ciudad": ciudad,
             "estacion": estacion,
             "combustible": combustible,
