@@ -278,6 +278,65 @@ async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
         raise HTTPException(status_code=500, detail=res.get("error", "Error sincronizando precios"))
     return res
 
+@api.get("/admin/precios/debug")
+async def debug_precios(user: dict = Depends(require_roles("admin_enered"))):
+    """Diagnostic endpoint — reads the sheet and returns raw + normalized data without inserting."""
+    import google_sheets_sync
+    sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+    tab = os.environ.get("GOOGLE_SHEETS_TAB_PRECIOS", "PRECIOS")
+    
+    debug = {"sheet_id": sheet_id, "tab_configured": tab, "env_vars_set": {
+        "GOOGLE_SHEETS_ID": bool(sheet_id),
+        "GOOGLE_SHEETS_TAB_PRECIOS": bool(os.environ.get("GOOGLE_SHEETS_TAB_PRECIOS")),
+    }}
+    
+    try:
+        records, actual_tab = await google_sheets_sync.fetch_rows(sheet_id, tab)
+        debug["actual_tab"] = actual_tab
+        debug["total_rows_read"] = len(records)
+        debug["first_3_raw"] = records[:3] if records else []
+        
+        # Show column headers from first row
+        if records:
+            debug["column_headers"] = list(records[0].keys())
+            normalized_headers = {k: google_sheets_sync._normalize_col(k) for k in records[0].keys()}
+            debug["normalized_headers"] = normalized_headers
+        
+        # Try normalizing first 3 rows
+        sample_normalized = []
+        for r in records[:3]:
+            norm = {}
+            for k, v in r.items():
+                key = google_sheets_sync._normalize_col(k)
+                if key:
+                    norm[key] = v
+            pv = google_sheets_sync._parse_number(norm.get("PRECIO_VENTA"))
+            if pv is None:
+                pv = google_sheets_sync._parse_number(norm.get("ENERED"))
+            pp = google_sheets_sync._parse_number(norm.get("PRECIO_PIZARRA"))
+            if pp is None:
+                pp = google_sheets_sync._parse_number(norm.get("PIZARRA"))
+            sample_normalized.append({
+                "norm_keys": list(norm.keys()),
+                "empresa": norm.get("EMPRESA", "?"),
+                "estacion": norm.get("ESTACION", "?"),
+                "combustible": norm.get("COMBUSTIBLE", "?"),
+                "precio_venta_parsed": pv,
+                "precio_pizarra_parsed": pp,
+                "raw_enered": norm.get("ENERED"),
+                "raw_pizarra": norm.get("PIZARRA"),
+            })
+        debug["first_3_normalized"] = sample_normalized
+        
+        # Count how many precios are in DB right now
+        count = await db.precios.count_documents({})
+        debug["precios_in_db"] = count
+        
+    except Exception as e:
+        debug["error"] = str(e)
+    
+    return debug
+
 
 # ---------- Auth Endpoints ----------
 @api.post("/auth/login")
@@ -2771,50 +2830,6 @@ async def admin_invoices_confirm_ocr(
         }
         await db.empresas_invoices.insert_one(doc)
         saved += 1
-        
-        # --- MIRROR TO SUBSIDIO ---
-        # If this company has subsidio enabled, mirror the invoice to their subsidio dossier
-        sub_user = await db.users.find_one({
-            "empresa": empresa,
-            "$or": [
-                {"role": "cliente_subsidio"},
-                {"servicios.subsidio": True}
-            ]
-        })
-        if sub_user:
-            import uuid
-            sub_id = str(uuid.uuid4())
-            sub_doc = {
-                "id": sub_id,
-                "user_id": sub_user["id"],
-                "empresa": empresa,
-                "empresa_id": empresa,
-                "calc_id": sub_user.get("calc_id"),
-                "factura_filename": it.factura_filename,
-                "factura_storage_key": final_key,
-                "factura_content_type": "application/pdf",
-                "factura_size": len(pdf_bytes),
-                "raw_ocr_response": "",
-                "ocr_ok": True,
-                "ocr_error": None,
-                "placa_match": True if it.placa else False,
-                "status": "confirmed",
-                "created_at": doc["created_at"],
-                "confirmed_at": doc["created_at"],
-                "fecha": it.f_emision,
-                "hora": None,
-                "estacion": "ENERED",
-                "ciudad": None,
-                "ruc_emisor": "20609304082",
-                "placa": it.placa,
-                "producto": it.producto,
-                "galones": it.galones or 0.0,
-                "precio_unitario": it.precio_unitario or 0.0,
-                "importe_total": it.importe_total,
-                "numero_documento": it.n_doc,
-                "confianza": 1.0,
-            }
-            await db.consumos_subsidio.insert_one(sub_doc)
         
     return {"saved": saved}
 
