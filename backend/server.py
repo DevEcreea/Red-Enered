@@ -284,18 +284,28 @@ async def cleanup_consumptions(
     empresa: Optional[str] = None,
     user: dict = Depends(require_roles("admin_enered"))
 ):
-    """Delete consumption records by filter. Used to clean up duplicates from invoice uploads."""
-    query = {}
+    """Delete consumption records by filter from both consumptions and consumos_subsidio."""
+    q_cons = {}
+    q_sub = {}
     if estacion:
-        query["ESTACION"] = estacion
+        q_cons["ESTACION"] = estacion
+        q_sub["estacion"] = estacion
     if empresa:
-        query["EMPRESA"] = empresa
-    if not query:
+        q_cons["EMPRESA"] = empresa
+        q_sub["empresa"] = empresa
+    if not q_cons:
         raise HTTPException(status_code=400, detail="Debes especificar al menos un filtro (estacion o empresa)")
     
-    count = await db.consumptions.count_documents(query)
-    result = await db.consumptions.delete_many(query)
-    return {"deleted": result.deleted_count, "matched": count, "filter": query}
+    r1 = await db.consumptions.delete_many(q_cons)
+    r2 = await db.consumos_subsidio.delete_many(q_sub)
+    
+    total_deleted = r1.deleted_count + r2.deleted_count
+    return {
+        "deleted": total_deleted,
+        "consumptions_deleted": r1.deleted_count,
+        "consumos_subsidio_deleted": r2.deleted_count,
+        "filter": {"estacion": estacion, "empresa": empresa}
+    }
 
 @api.get("/admin/precios/debug")
 async def debug_precios(user: dict = Depends(require_roles("admin_enered"))):
