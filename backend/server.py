@@ -540,6 +540,7 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
         "AHORRO": round(gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón (alineado con dashboard subsidio)
         "SEMANA": semana,
         "RUC_EMISOR": r.get("ruc_emisor") or "",
+        "RAZON_SOCIAL_EMISOR": r.get("razon_social_emisor") or r.get("proveedor") or r.get("estacion") or r.get("ruc_emisor") or "",
         "NUMERO_DOCUMENTO": r.get("numero_documento") or "",
         "ESTADO": "FACTURADO",
         "_origen": "subsidio",
@@ -594,6 +595,37 @@ async def list_consumptions(
                 r["id"] = str(r["_id"])
             r.pop("_id", None)
             rows.append(r)
+
+    # 2. Fetch fuel consumptions uploaded by client via Subsidio (excluding admin_ocr)
+    target_emp = empresa if (empresa and user["role"] == "admin_enered") else user.get("empresa")
+    is_subsidio = user.get("role") == "cliente_subsidio"
+    if not is_subsidio and target_emp:
+        cfg = await db.empresas_config.find_one({"empresa": target_emp}, {"_id": 0, "servicios": 1})
+        if cfg and cfg.get("servicios", {}).get("subsidio"):
+            is_subsidio = True
+
+    if is_subsidio:
+        uid_filter = {"status": "confirmed", "origin": {"$ne": "admin_ocr"}}
+        if user.get("role") == "cliente_subsidio":
+            uid_filter["user_id"] = user["id"]
+        elif target_emp:
+            uid_filter["empresa"] = target_emp
+            
+        raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
+        mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
+        
+        def keep(row):
+            if fecha_desde and (row.get("FECHA") or "") < fecha_desde: return False
+            if fecha_hasta and (row.get("FECHA") or "") > fecha_hasta: return False
+            if placa and row.get("PLACA") != placa: return False
+            if ciudad and row.get("CIUDAD") != ciudad: return False
+            if estacion and row.get("ESTACION") != estacion: return False
+            if producto and row.get("PRODUCTO") != producto: return False
+            if semana and row.get("SEMANA") != semana: return False
+            return True
+            
+        rows.extend([r for r in mapped if keep(r)])
+        rows.sort(key=lambda x: x.get("FECHA") or "", reverse=True)
 
     return rows
 
@@ -2386,13 +2418,26 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
             q["empresa"] = empresa
     elif user["role"] == "logistica":
         raise HTTPException(status_code=403, detail="Sin acceso a facturación")
-    else:
-        q["empresa"] = user.get("empresa")
-    
-    rows = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
+    rows_inv = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
+    rows_emp = await db.empresas_invoices.find(q, {"_id": 0}).to_list(1000)
 
-    # Dynamically pull confirmed subsidio invoices and merge them
-    sub_q = {"status": "confirmed"}
+    # Normalize rows_emp to standard invoice schema
+    existing_ids = {r.get("id") for r in rows_inv}
+    existing_ndocs = {r.get("n_doc") for r in rows_inv if r.get("n_doc")}
+
+    for r in rows_emp:
+        n_doc = r.get("n_doc")
+        if r.get("id") not in existing_ids and n_doc not in existing_ndocs:
+            r["monto_total"] = r.get("monto_total", r.get("importe_total", 0.0))
+            r["saldo"] = r.get("saldo", r["monto_total"] if r.get("estado") != "pagada" else 0.0)
+            r["tipo_doc"] = r.get("tipo_doc", "factura")
+            rows_inv.append(r)
+            existing_ndocs.add(n_doc)
+
+    rows = rows_inv
+
+    # Dynamically pull confirmed subsidio invoices (uploaded by client/subsidio) and merge them as TERCERO
+    sub_q = {"status": "confirmed", "origin": {"$ne": "admin_ocr"}}
     if q.get("empresa"):
         sub_q["empresa"] = q["empresa"]
     elif user["role"] != "admin_enered":
@@ -2818,6 +2863,9 @@ async def admin_invoices_confirm_ocr(
             "f_vencimiento": it.f_vencimiento,
             "moneda": "PEN",
             "importe_total": it.importe_total or 0.0,
+            "monto_total": it.importe_total or 0.0,
+            "saldo": it.importe_total or 0.0 if estado != "pagada" else 0.0,
+            "tipo_doc": "factura",
             "estado": estado,
             "atraso_dias": atraso_dias,
             "placa": it.placa,
@@ -2828,6 +2876,7 @@ async def admin_invoices_confirm_ocr(
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.empresas_invoices.insert_one(doc)
+        await db.invoices.insert_one(doc)
         saved += 1
         
         # --- MIRROR TO SUBSIDIO DOSSIER ---
@@ -2870,6 +2919,7 @@ async def admin_invoices_confirm_ocr(
                 "importe_total": it.importe_total,
                 "numero_documento": it.n_doc,
                 "confianza": 1.0,
+                "origin": "admin_ocr",
             }
             await db.consumos_subsidio.insert_one(sub_doc)
         
@@ -2930,6 +2980,7 @@ async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("ad
                 "importe_total": inv.get("importe_total") or 0.0,
                 "numero_documento": n_doc,
                 "confianza": 1.0,
+                "origin": "admin_ocr",
             }
             await db.consumos_subsidio.insert_one(sub_doc)
             synced += 1

@@ -443,6 +443,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     "Placa": r.PLACA || "—",
                     ...(isAdmin ? { "Empresa": r.EMPRESA || "—" } : {}),
                     "Fecha y Hora": fecha,
+                    "Red": r._origen === "subsidio" ? (r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor Externo") : "Enered",
                     "Ciudad / Estación": `${r.CIUDAD||""} / ${r.ESTACION||""}`,
                     "Kilometraje": km ? `${km} km` : "—",
                     "Producto": r.PRODUCTO || "—",
@@ -481,8 +482,8 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <thead>
               <tr style={{ background:HEADER_BG }}>
                 {(showAhorro
-                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
-                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
+                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Red","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
+                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Red","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
                 ).filter(h => h !== null).map((h,i,arr)=>(
                   <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
@@ -696,6 +697,17 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>
+                      {r._origen === "subsidio" ? (
+                        <span style={{ background:"#F3E8FF", color:"#7C3AED", padding:"4px 10px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #DDD6FE" }}>
+                          {r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor"}
+                        </span>
+                      ) : (
+                        <span style={{ background:"#ECFDF5", color:"#059669", padding:"4px 10px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #A7F3D0" }}>
+                          Enered
+                        </span>
+                      )}
+                    </td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{ciudadEstacion}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
                     <td style={tdSt}>{r.PRODUCTO||"—"}</td>
@@ -728,7 +740,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
               })}
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={showAhorro?16:14} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
+                  <td colSpan={showAhorro?17:15} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
                     Aún no hay cargas registradas. {!showAhorro && "Haz clic en \"Nueva carga\" para registrar la primera."}
                   </td>
                 </tr>
