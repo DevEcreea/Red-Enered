@@ -4,6 +4,8 @@ import {
   FileText, CheckCircle2, ChevronRight, Upload, Trash2, ShieldCheck, Download, 
   MapPin, Phone, Building2, User, Loader2, PlayCircle, Lock, LockOpen, ArrowRight, X, Image as ImgIcon, File, Fuel, Save, AlertCircle, AlertTriangle, Send, Plus
 } from "lucide-react";
+import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 
 // --- Subcomponente para cada factura editable ---
 function InvoiceRow({ item, setField, saveRow, deleteRow, vehicles, saving }) {
@@ -68,9 +70,6 @@ function InvoiceRow({ item, setField, saveRow, deleteRow, vehicles, saving }) {
     </div>
   );
 }
-
-import { api } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
 
 const ETAPAS = [
   { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
