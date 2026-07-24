@@ -121,6 +121,8 @@ export default function TabPrecios({ user, ahorroCapturado }) {
             <div className="text-[10px] text-white/80 mt-1 uppercase tracking-wider">Precio garantizado en tu zona</div>
           </div>
         </div>
+      </div>
+
       {/* Red de Grifos Virtuales Banner */}
       <div 
         className="bg-gradient-to-br from-purple-50/70 via-white to-indigo-50/60 border border-purple-100/80 rounded-3xl p-8 md:p-10 w-full flex flex-col items-center justify-center text-center relative overflow-hidden shadow-sm"
