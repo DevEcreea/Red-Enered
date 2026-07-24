@@ -11,6 +11,7 @@ export default function TabPrecios({ user, ahorroCapturado }) {
   const [mejorPrecio, setMejorPrecio] = useState(0);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     fetchPrecios();
@@ -19,11 +20,13 @@ export default function TabPrecios({ user, ahorroCapturado }) {
   const fetchPrecios = async () => {
     try {
       setLoading(true);
+      setErrorMsg("");
       const res = await api.get("/precios");
       setPrecios(res.data.precios || []);
       setMejorPrecio(res.data.mejor_precio || 0);
     } catch (error) {
       console.error("Error fetching precios:", error);
+      setErrorMsg(error.response?.status === 404 ? "El backend aún no se actualiza (Error 404)." : error.message);
     } finally {
       setLoading(false);
     }
@@ -173,6 +176,12 @@ export default function TabPrecios({ user, ahorroCapturado }) {
                 <tr>
                   <td colSpan="9" className="p-8 text-center text-neutral-400">
                     Cargando precios...
+                  </td>
+                </tr>
+              ) : errorMsg ? (
+                <tr>
+                  <td colSpan="9" className="p-8 text-center text-red-500 font-bold">
+                    {errorMsg}
                   </td>
                 </tr>
               ) : precios.length === 0 ? (
