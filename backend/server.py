@@ -2635,6 +2635,8 @@ class AdminConfirmItem(BaseModel):
     override_empresa: Optional[str] = ""
     placa: Optional[str] = ""
     producto: Optional[str] = ""
+    galones: Optional[float] = 0.0
+    precio_unitario: Optional[float] = 0.0
 
 class AdminConfirmPayload(BaseModel):
     items: List[AdminConfirmItem]
@@ -2688,6 +2690,8 @@ async def admin_invoices_ocr_preview(
                 "importe_total": ext.get("importe_total"),
                 "placa": ext.get("placa") or "",
                 "producto": ext.get("producto") or "",
+                "galones": ext.get("galones") or 0.0,
+                "precio_unitario": ext.get("precio_unitario") or 0.0,
             })
         except Exception as e:
             logger.error(f"Error OCR: {e}")
@@ -2713,7 +2717,11 @@ async def admin_invoices_confirm_ocr(
         if not empresa:
             continue
         
-        pdf_bytes = storage.get_object(it.pdf_key)
+        try:
+            pdf_bytes = storage.get_object_bytes(it.pdf_key)
+        except Exception:
+            pdf_bytes = None
+            
         if not pdf_bytes:
             continue
             
@@ -2763,6 +2771,50 @@ async def admin_invoices_confirm_ocr(
         }
         await db.empresas_invoices.insert_one(doc)
         saved += 1
+        
+        # --- MIRROR TO SUBSIDIO ---
+        # If this company has subsidio enabled, mirror the invoice to their subsidio dossier
+        sub_user = await db.users.find_one({
+            "empresa": empresa,
+            "$or": [
+                {"role": "cliente_subsidio"},
+                {"servicios.subsidio": True}
+            ]
+        })
+        if sub_user:
+            import uuid
+            sub_id = str(uuid.uuid4())
+            sub_doc = {
+                "id": sub_id,
+                "user_id": sub_user["id"],
+                "empresa": empresa,
+                "empresa_id": empresa,
+                "calc_id": sub_user.get("calc_id"),
+                "factura_filename": it.factura_filename,
+                "factura_storage_key": final_key,
+                "factura_content_type": "application/pdf",
+                "factura_size": len(pdf_bytes),
+                "raw_ocr_response": "",
+                "ocr_ok": True,
+                "ocr_error": None,
+                "placa_match": True if it.placa else False,
+                "status": "confirmed",
+                "created_at": doc["created_at"],
+                "confirmed_at": doc["created_at"],
+                "fecha": it.f_emision,
+                "hora": None,
+                "estacion": "ENERED",
+                "ciudad": None,
+                "ruc_emisor": "20609304082",
+                "placa": it.placa,
+                "producto": it.producto,
+                "galones": it.galones or 0.0,
+                "precio_unitario": it.precio_unitario or 0.0,
+                "importe_total": it.importe_total,
+                "numero_documento": it.n_doc,
+                "confianza": 1.0,
+            }
+            await db.consumos_subsidio.insert_one(sub_doc)
         
     return {"saved": saved}
 
