@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  FileText, CheckCircle2, ChevronRight, Upload, Trash2, ShieldCheck, Download, 
-  MapPin, Phone, Building2, User, Loader2, PlayCircle, Lock, LockOpen, ArrowRight, X, Image as ImgIcon, File, Fuel, Save, AlertCircle, AlertTriangle, Send, Plus
+  Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle,
+  Trash2, Plus, Building2, Truck, Fuel,
+  Banknote, FileText, Save, ScanLine, ShieldCheck,
+  Send, Lock, FileCheck2, PartyPopper,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
