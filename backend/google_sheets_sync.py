@@ -43,16 +43,12 @@ def _normalize_col(name: str) -> str:
         s = "PRECIO_UNITARIO"
     if s in ("ESTACION",):
         s = "ESTACION"
-    if s in ("CALIDAD", "TIPO_DE_COMBUSTIBLE", "PRODUCTO"):
+    if s in ("CALIDAD", "TIPO_DE_COMBUSTIBLE", "PRODUCTO", "COMBUSTIBLE"):
         s = "COMBUSTIBLE"
     if s in ("UNIDAD_DE_MEDIDA", "UNIDAD"):
         s = "UNIDAD"
-    if s in ("NRO_TARJETA", "NRO_DE_TARJETA", "N_TARJETA", "NUMERO_DE_TARJETA"):
-        s = "NRO_DE_TARJETA"
-    if s in ("MEDIO_DE_IDENTIFICACION", "MEDIO_IDENTIFICACION"):
-        s = "MEDIO_DE_IDENTIFICACION"
-    if s in ("NOTA_DE_DESPACHO", "NOTA_DESPACHO"):
-        s = "NOTA_DE_DESPACHO"
+    if s in ("PRECIO_VENT", "PRECIO", "VENTA", "PRECIO_FINAL", "PRECIO_ENERED"):
+        s = "PRECIO_VENTA"
     return s
 
 
@@ -60,7 +56,8 @@ def _parse_number(v) -> Optional[float]:
     if v is None or v == "":
         return None
     try:
-        s = str(v).replace("S/", "").replace("S/.", "").replace(",", "").strip()
+        # Need to replace the longer string 'S/.' first, before 'S/'
+        s = str(v).upper().replace("S/.", "").replace("S/", "").replace("S.", "").replace("S", "").replace(",", "").strip()
         if s == "" or s == "-":
             return None
         return float(s)
@@ -256,19 +253,16 @@ async def sync_precios_to_mongo(db):
                 norm[key] = v
                 
         # Handle merged cells for Empresa: if it's empty, use the previous one
-        empresa_val = str(norm.get("EMPRESA", r.get("", ""))).strip()
+        empresa_val = str(norm.get("EMPRESA", r.get("EMPRESA", ""))).strip()
         if empresa_val:
             current_empresa = empresa_val
-        elif not current_empresa:
-            # Maybe the column name is different, check first col or just skip
-            # Often it's an unnamed column if it's the first one without a header
-            first_val = list(r.values())[0] if r else ""
-            if str(first_val).strip() and not str(first_val).strip().isdigit():
-                current_empresa = str(first_val).strip()
+        else:
+            # If there's no Empresa column at all, default to GENERAL
+            if "EMPRESA" not in norm:
+                current_empresa = "GENERAL"
+            elif not current_empresa:
+                current_empresa = "GENERAL"
         
-        if not current_empresa:
-            continue
-            
         ciudad = str(norm.get("CIUDAD", "")).strip()
         combustible = str(norm.get("COMBUSTIBLE", "")).strip()
         estacion = str(norm.get("ESTACION", "")).strip()
@@ -276,14 +270,24 @@ async def sync_precios_to_mongo(db):
         # We need at least one valid price to insert
         precio_venta = _parse_number(norm.get("PRECIO_VENTA"))
         if precio_venta is None:
-            # Fallback to ENERED if they rename it
             precio_venta = _parse_number(norm.get("ENERED"))
+        if precio_venta is None:
+            # Look for ANY column that might be a price
+            for k, v in norm.items():
+                if "PRECIO" in k or "B5" in k or "B20" in k:
+                    parsed = _parse_number(v)
+                    if parsed is not None and parsed > 0 and parsed < 50: # valid price range per galon
+                        precio_venta = parsed
+                        break
             
         precio_pizarra = _parse_number(norm.get("PRECIO_PIZARRA"))
         if precio_pizarra is None:
             precio_pizarra = _parse_number(norm.get("PIZARRA"))
 
-        if not ciudad and not estacion:
+        if not estacion and not combustible:
+            continue
+            
+        if precio_venta is None:
             continue
             
         normalized.append({

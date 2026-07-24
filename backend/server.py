@@ -251,7 +251,10 @@ async def get_precios(user: dict = Depends(get_current_user), empresa: Optional[
 
     query = {}
     if target_empresa:
-        query["empresa"] = target_empresa
+        query["empresa"] = {"$in": [target_empresa, "GENERAL", ""]}
+    else:
+        # If no target_empresa is provided (e.g. admin viewing all), we can just fetch all
+        pass
 
     cursor = db.precios.find(query, {"_id": 0})
     precios = []
