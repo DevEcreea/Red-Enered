@@ -96,6 +96,8 @@ async def extract_invoice_data(content: bytes, content_type: str, session_id: st
     ct = (content_type or "").lower()
     is_pdf = "pdf" in ct or content[:4] == b"%PDF"
 
+    sample_file = None
+    tmp_path = None
     try:
         genai.configure(api_key=_emergent_key())
         
@@ -103,9 +105,6 @@ async def extract_invoice_data(content: bytes, content_type: str, session_id: st
             model_name="gemini-1.5-flash",
             system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."
         )
-
-        sample_file = None
-        tmp_path = None
         
         if is_pdf:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:

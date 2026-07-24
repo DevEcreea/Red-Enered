@@ -239,6 +239,43 @@ class CourseSubmit(BaseModel):
     respuestas: List[int]
 
 
+# ---------- Precios de Combustible (Google Sheets) ----------
+
+@api.get("/precios")
+async def get_precios(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
+    # Determine the company to filter by
+    if user["role"] in ["admin_enered", "administrador"]:
+        target_empresa = empresa
+    else:
+        target_empresa = user.get("empresa")
+
+    query = {}
+    if target_empresa:
+        query["empresa"] = target_empresa
+
+    cursor = db.precios.find(query, {"_id": 0})
+    precios = []
+    async for p in cursor:
+        precios.append(p)
+        
+    mejor_precio = min([p.get("precio_venta", 9999) for p in precios if p.get("precio_venta") is not None] or [0])
+    if mejor_precio == 9999:
+        mejor_precio = 0
+
+    return {
+        "precios": precios,
+        "mejor_precio": mejor_precio
+    }
+
+@api.post("/admin/precios/sync")
+async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
+    import google_sheets_sync
+    res = await google_sheets_sync.sync_precios_to_mongo(db)
+    if not res.get("ok"):
+        raise HTTPException(status_code=500, detail=res.get("error", "Error sincronizando precios"))
+    return res
+
+
 # ---------- Auth Endpoints ----------
 @api.post("/auth/login")
 async def login(data: LoginIn, response: Response):
@@ -4414,8 +4451,17 @@ async def download_document(
             media_type=content_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
-@app.get("/api/files/{file_id}")
+@app.get("/api/files/{file_id:path}")
 async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
+    if file_id.startswith("tmp_admin/"):
+        if user["role"] not in ["admin_enered", "administrador"]:
+            raise HTTPException(status_code=403, detail="No autorizado")
+        import storage
+        file_bytes = storage.get_object_bytes(file_id)
+        if not file_bytes:
+            raise HTTPException(status_code=404, detail="Temporal no encontrado")
+        return Response(content=file_bytes, media_type="application/pdf")
+
     if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
         f = await db.files.find_one({"id": file_id})
         if not f or f.get("created_by") != user["id"]:

@@ -12,6 +12,7 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
 import PdfViewerModal from "../components/PdfViewerModal";
 import * as XLSX from "xlsx";
+import TabPrecios from "../components/TabPrecios";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -1313,7 +1314,7 @@ export default function Flotas() {
     }
   };
 
-  const TABS = ["Resumen","Control","QR","Eventos"];
+  const TABS = ["Resumen","Precios","Control","QR","Eventos"];
 
   return (
     <div style={{ padding:"22px 26px", background:"transparent", minHeight:"100%" }} data-testid="flotas-page">
@@ -1344,6 +1345,7 @@ export default function Flotas() {
           onDownloadPdf={handleDownloadPdf}
         />
       )}
+      {activeTab==="Precios" && <TabPrecios user={user} ahorroCapturado={totals.ahorro} />}
       {activeTab==="Control" && <TabControl onToast={showToast}/>}
       {activeTab==="QR"      && <TabQR onToast={showToast}/>}
       {activeTab==="Eventos" && <TabEventos user={user}/>}

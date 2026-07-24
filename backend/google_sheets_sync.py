@@ -217,3 +217,83 @@ async def sync_to_mongo(db, mode: str = "replace"):
 async def last_sync_status(db):
     doc = await db.sheets_sync_log.find_one({}, {"_id": 0}, sort=[("finished_at", -1)])
     return doc
+
+async def sync_precios_to_mongo(db):
+    """Sync the PRECIOS tab from Google Sheets."""
+    sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+    if not sheet_id:
+        raise RuntimeError("GOOGLE_SHEETS_ID no configurado en .env")
+
+    tab = os.environ.get("GOOGLE_SHEETS_TAB_PRECIOS", "PRECIOS")
+    started_at = datetime.now(timezone.utc)
+    
+    try:
+        records, actual_tab = await fetch_rows(sheet_id, tab)
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    normalized = []
+    current_empresa = ""
+    
+    for r in records:
+        # Normalize keys
+        norm = {}
+        for k, v in r.items():
+            key = _normalize_col(k)
+            if key:
+                norm[key] = v
+                
+        # Handle merged cells for Empresa: if it's empty, use the previous one
+        empresa_val = str(norm.get("EMPRESA", r.get("", ""))).strip()
+        if empresa_val:
+            current_empresa = empresa_val
+        elif not current_empresa:
+            # Maybe the column name is different, check first col or just skip
+            # Often it's an unnamed column if it's the first one without a header
+            first_val = list(r.values())[0] if r else ""
+            if str(first_val).strip() and not str(first_val).strip().isdigit():
+                current_empresa = str(first_val).strip()
+        
+        if not current_empresa:
+            continue
+            
+        ciudad = str(norm.get("CIUDAD", "")).strip()
+        combustible = str(norm.get("COMBUSTIBLE", "")).strip()
+        estacion = str(norm.get("ESTACION", "")).strip()
+        
+        # We need at least one valid price to insert
+        precio_venta = _parse_number(norm.get("PRECIO_VENTA"))
+        if precio_venta is None:
+            # Fallback to ENERED if they rename it
+            precio_venta = _parse_number(norm.get("ENERED"))
+            
+        precio_pizarra = _parse_number(norm.get("PRECIO_PIZARRA"))
+        if precio_pizarra is None:
+            precio_pizarra = _parse_number(norm.get("PIZARRA"))
+
+        if not ciudad and not estacion:
+            continue
+            
+        normalized.append({
+            "id": str(uuid.uuid4()),
+            "empresa": current_empresa,
+            "ciudad": ciudad,
+            "estacion": estacion,
+            "combustible": combustible,
+            "precio_venta": precio_venta,
+            "precio_pizarra": precio_pizarra,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+
+    # Update DB
+    if normalized:
+        await db.precios.delete_many({})
+        await db.precios.insert_many(normalized)
+
+    return {
+        "ok": True,
+        "tab": actual_tab,
+        "rows_inserted": len(normalized),
+        "started_at": started_at.isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }
