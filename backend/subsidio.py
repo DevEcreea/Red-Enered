@@ -1743,6 +1743,29 @@ async def admin_list_expedientes(
             inv_map[uid]["conf"] += r["count"]
             inv_map[uid]["gal"] += r.get("gal", 0) or 0
             inv_map[uid]["imp"] += r.get("imp", 0) or 0
+            
+    # Traer facturas de Red-Enered
+    empresas_list = [u.get("empresa") for u in users if u.get("empresa")]
+    if empresas_list:
+        enered_inv_agg = await db.invoices.aggregate([
+            {"$match": {"empresa": {"$in": empresas_list}}},
+            {"$group": {
+                "_id": "$empresa",
+                "count": {"$sum": 1},
+                "imp": {"$sum": "$monto_total"}
+            }}
+        ]).to_list(10000)
+        
+        enered_map = {r["_id"]: r for r in enered_inv_agg}
+        # Associate to correct users
+        for u in users:
+            uid = u.get("id")
+            emp = u.get("empresa")
+            if emp and emp in enered_map:
+                if uid not in inv_map:
+                    inv_map[uid] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
+                inv_map[uid]["conf"] += enered_map[emp]["count"]
+                inv_map[uid]["imp"] += enered_map[emp].get("imp", 0) or 0
 
     decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
     decl_map = {d.get("user_id"): d for d in decl_list if d.get("user_id")}
@@ -1825,10 +1848,36 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
         vehicles_dict[placa] = sv
         
     vehicles = list(vehicles_dict.values())
-    invoices = await db.consumos_subsidio.find(
+    sub_invs = await db.consumos_subsidio.find(
         {"user_id": {"$in": uids}},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("fecha", -1).to_list(2000)
+    
+    invoices = list(sub_invs)
+    
+    if u.get("empresa"):
+        enered_invs = await db.invoices.find(
+            {"empresa": u.get("empresa")},
+            {"_id": 0}
+        ).to_list(2000)
+        for ei in enered_invs:
+            # Map db.invoices format to consumos_subsidio format for the admin table
+            mapped_inv = {
+                "id": ei.get("id"),
+                "numero_documento": ei.get("n_doc"),
+                "fecha": ei.get("f_emision"),
+                "importe_total": ei.get("monto_total"),
+                "status": "confirmed", # By default Red-Enered invoices are confirmed
+                "empresa": ei.get("empresa"),
+                "producto": ei.get("producto"),
+                "factura_filename": ei.get("pdf_filename"),
+                "origen": "RED_ENERED",
+                "is_tercero": False
+            }
+            invoices.append(mapped_inv)
+            
+    # sort all by fecha descending
+    invoices.sort(key=lambda x: x.get("fecha") or "", reverse=True)
 
     # Etiquetas legibles
     for d in docs:

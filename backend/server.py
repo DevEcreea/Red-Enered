@@ -2335,7 +2335,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "moneda": "PEN",
                 "monto_total": 0.0,
                 "saldo": 0.0,
-                "estado": "pendiente",
+                "estado": "TERCERO",
                 "atraso_dias": 0,
                 "pdf_filename": d.get("factura_filename") or "subsidio_entry.pdf",
                 "xml_filename": None,
@@ -2348,16 +2348,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     existing_ndocs = {r.get("n_doc") for r in rows if r.get("n_doc")}
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
-            sub_inv["saldo"] = sub_inv["monto_total"]
-            try:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc).date()
-                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
-                if today > venc_dt:
-                    sub_inv["atraso_dias"] = (today - venc_dt).days
-                    sub_inv["estado"] = "vencida"
-            except Exception:
-                pass
+            sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
             rows.append(sub_inv)
 
     return rows
