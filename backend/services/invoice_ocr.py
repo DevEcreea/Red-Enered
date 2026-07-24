@@ -96,16 +96,17 @@ async def extract_invoice_data(content: bytes, content_type: str, session_id: st
     ct = (content_type or "").lower()
     is_pdf = "pdf" in ct or content[:4] == b"%PDF"
 
-    genai.configure(api_key=_emergent_key())
-    
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."
-    )
-
-    sample_file = None
-    tmp_path = None
     try:
+        genai.configure(api_key=_emergent_key())
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."
+        )
+
+        sample_file = None
+        tmp_path = None
+        
         if is_pdf:
             with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                 tmp.write(content)
@@ -125,8 +126,9 @@ async def extract_invoice_data(content: bytes, content_type: str, session_id: st
             
         text = response.text
     except Exception as e:
-        logger.error(f"Error llamando a Gemini API: {e}")
-        return {"extracted": _normalize_fields({}), "raw_response": str(e), "error": str(e)}
+        logger.warning(f"OCR bypass / Error: {e}")
+        # Return empty data so frontend allows manual filling
+        return {"extracted": _normalize_fields({}), "raw_response": str(e)}
     finally:
         if sample_file:
             try:

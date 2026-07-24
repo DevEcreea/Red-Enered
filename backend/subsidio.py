@@ -535,12 +535,22 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     # Conteos de facturas (drafts y confirmadas)
     invoices_draft = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "draft"})
     invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
+    
+    # Calcular ahorro_reconocido real (galones confirmados * 4)
+    ahorro_reconocido_real = 0
+    if invoices_confirmed > 0:
+        agg = await db.consumos_subsidio.aggregate([
+            {"$match": {"user_id": {"$in": uids}, "status": "confirmed"}},
+            {"$group": {"_id": None, "total_gal": {"$sum": "$galones"}}}
+        ]).to_list(1)
+        if agg and agg[0].get("total_gal"):
+            ahorro_reconocido_real = round(float(agg[0]["total_gal"]) * 4.0, 2)
 
     return {
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "_id")},
         "calculation": calc,
         "ahorro_estimado": calc.get("subsidio_estimado", 0),
-        "ahorro_reconocido": calc.get("subsidio_estimado", 0),  # MOCKED hasta validación
+        "ahorro_reconocido": ahorro_reconocido_real,
         "vehicles": vehicles,
         "bank_account": bank,
         "checklist": checklist,
