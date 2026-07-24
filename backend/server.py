@@ -605,7 +605,11 @@ async def list_consumptions(
             is_subsidio = True
 
     if is_subsidio:
-        uid_filter = {"status": "confirmed", "origin": {"$ne": "admin_ocr"}}
+        uid_filter = {
+            "status": "confirmed",
+            "origin": {"$ne": "admin_ocr"},
+            "estacion": {"$ne": "ENERED"}
+        }
         if user.get("role") == "cliente_subsidio":
             uid_filter["user_id"] = user["id"]
         elif target_emp:
