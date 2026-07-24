@@ -278,6 +278,25 @@ async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
         raise HTTPException(status_code=500, detail=res.get("error", "Error sincronizando precios"))
     return res
 
+@api.delete("/admin/consumptions/cleanup")
+async def cleanup_consumptions(
+    estacion: Optional[str] = None,
+    empresa: Optional[str] = None,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Delete consumption records by filter. Used to clean up duplicates from invoice uploads."""
+    query = {}
+    if estacion:
+        query["ESTACION"] = estacion
+    if empresa:
+        query["EMPRESA"] = empresa
+    if not query:
+        raise HTTPException(status_code=400, detail="Debes especificar al menos un filtro (estacion o empresa)")
+    
+    count = await db.consumptions.count_documents(query)
+    result = await db.consumptions.delete_many(query)
+    return {"deleted": result.deleted_count, "matched": count, "filter": query}
+
 @api.get("/admin/precios/debug")
 async def debug_precios(user: dict = Depends(require_roles("admin_enered"))):
     """Diagnostic endpoint — reads the sheet and returns raw + normalized data without inserting."""
@@ -2434,7 +2453,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "moneda": "PEN",
                 "monto_total": 0.0,
                 "saldo": 0.0,
-                "estado": "TERCERO",
+                "estado": "pendiente",
                 "atraso_dias": 0,
                 "pdf_filename": d.get("factura_filename") or "subsidio_entry.pdf",
                 "xml_filename": None,
@@ -2442,12 +2461,23 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "uploaded_by": "subsidio_system",
                 "created_via": "subsidio_dynamic",
             }
+            # Auto-calculate estado from f_vencimiento
+            try:
+                from datetime import date as _date
+                today = _date.today()
+                fv = _date.fromisoformat(f_venc)
+                if fv < today:
+                    grouped_sub[n_doc]["estado"] = "vencida"
+                    grouped_sub[n_doc]["atraso_dias"] = (today - fv).days
+                else:
+                    grouped_sub[n_doc]["estado"] = "pendiente"
+            except Exception:
+                pass
         grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
 
     existing_ndocs = {r.get("n_doc") for r in rows if r.get("n_doc")}
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
-            sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
             rows.append(sub_inv)
 
     return rows
