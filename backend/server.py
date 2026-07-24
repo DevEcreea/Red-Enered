@@ -3500,11 +3500,28 @@ async def list_vehiculos(req: Request):
         filt["empresa"] = u["empresa"]
     
     cursor = db.vehiculos.find(filt)
-    vehiculos = []
+    vehiculos_dict = {}
     async for v in cursor:
         v["_id"] = str(v["_id"])
-        vehiculos.append(v)
-    return vehiculos
+        placa = (v.get("placa") or v.get("veh") or "").strip().upper()
+        if placa:
+            vehiculos_dict[placa] = v
+        else:
+            vehiculos_dict[str(uuid.uuid4())] = v
+            
+    # Traer también los vehículos creados en subsidio
+    if u.get("empresa"):
+        sub_veh = db.subsidio_vehicles.find({"empresa": u["empresa"]})
+        async for sv in sub_veh:
+            placa = (sv.get("placa") or "").strip().upper()
+            if placa and placa not in vehiculos_dict:
+                # Add to main vehicles list dynamically
+                sv["_id"] = str(sv.get("_id", uuid.uuid4()))
+                sv["veh"] = placa
+                sv["categoria"] = sv.get("categoria", "N1")
+                vehiculos_dict[placa] = sv
+                
+    return list(vehiculos_dict.values())
 
 
 @api.get("/vehiculos/kpis")
@@ -3514,7 +3531,6 @@ async def vehiculos_kpis(req: Request):
     empresa = None if u["role"] == "admin_enered" else u.get("empresa")
     filt_emp = {"empresa": empresa} if empresa else {}
 
-    # Total vehículos + En Taller + Sin GPS
     total_veh = 0
     en_taller = 0
     sin_gps = 0
@@ -3524,12 +3540,20 @@ async def vehiculos_kpis(req: Request):
         estado = (v.get("estado") or "").strip().upper()
         if estado == "TALLER":
             en_taller += 1
-        # "sin GPS" si el vehículo no tiene device_gps configurado
         if not (v.get("gps") or v.get("device_gps") or v.get("imei")):
             sin_gps += 1
         placa = v.get("placa") or v.get("veh")
         if placa:
             veh_placas.add(str(placa).upper().strip())
+            
+    # Include subsidio vehicles not in main fleet
+    if empresa:
+        async for sv in db.subsidio_vehicles.find({"empresa": empresa}):
+            placa = (sv.get("placa") or "").upper().strip()
+            if placa and placa not in veh_placas:
+                total_veh += 1
+                veh_placas.add(placa)
+                sin_gps += 1 # subsidio vehicles usually don't have GPS tracking by default
 
     # Docs vencidos (vehículo y chofer) — solo cuenta placas/personas UNIQUE
     docs_veh_venc_placas = set()

@@ -137,7 +137,8 @@ export default function Facturacion() {
   const downloadInvoice = async (inv, kind) => {
     try {
       const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
-      const blob = new Blob([r.data]);
+      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
+      const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -152,7 +153,8 @@ export default function Facturacion() {
   const viewInvoice = async (inv, kind) => {
     try {
       const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
-      const blob = new Blob([r.data]);
+      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
+      const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       setViewerUrl(url);
       setViewerTitle(`${inv.n_doc}.${kind}`);

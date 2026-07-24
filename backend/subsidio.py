@@ -457,9 +457,30 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     uids = await _get_company_uids(user["id"])
     
     # Vehículos
-    vehicles = await db.subsidio_vehicles.find(
-        {"user_id": {"$in": uids}}, {"_id": 0}
-    ).to_list(200)
+    vehicles_dict = {}
+    
+    # Traer primero los de la flota principal si hay empresa
+    if user.get("empresa"):
+        main_veh = await db.vehiculos.find({"empresa": user.get("empresa")}, {"_id": 0}).to_list(1000)
+        for mv in main_veh:
+            placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
+            if not placa: continue
+            vehicles_dict[placa] = {
+                "id": mv.get("id", str(uuid.uuid4())),
+                "placa": placa,
+                "categoria": mv.get("categoria") or "N1",
+                "user_id": mv.get("created_by") or user["id"],
+                "from_main_fleet": True
+            }
+            
+    # Traer los del modulo subsidio (sobreescriben si hay duplicados por placa)
+    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(500)
+    for sv in sub_veh:
+        placa = (sv.get("placa") or "").strip().upper()
+        if not placa: continue
+        vehicles_dict[placa] = sv
+        
+    vehicles = list(vehicles_dict.values())
 
     # Documentos
     docs = await db.subsidio_documents.find(
@@ -1781,7 +1802,29 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     decl = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
     
     docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
-    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    
+    # Merge vehicles from both main fleet and subsidio
+    vehicles_dict = {}
+    if u.get("empresa"):
+        main_veh = await db.vehiculos.find({"empresa": u.get("empresa")}, {"_id": 0}).to_list(1000)
+        for mv in main_veh:
+            placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
+            if not placa: continue
+            vehicles_dict[placa] = {
+                "id": mv.get("id", str(uuid.uuid4())),
+                "placa": placa,
+                "categoria": mv.get("categoria") or "N1",
+                "user_id": mv.get("created_by") or user_id,
+                "from_main_fleet": True
+            }
+    
+    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    for sv in sub_veh:
+        placa = (sv.get("placa") or "").strip().upper()
+        if not placa: continue
+        vehicles_dict[placa] = sv
+        
+    vehicles = list(vehicles_dict.values())
     invoices = await db.consumos_subsidio.find(
         {"user_id": {"$in": uids}},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
