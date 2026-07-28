@@ -66,12 +66,21 @@ export default function Monitoreo() {
   const servicios = user?.servicios || {};
   const clienteHasGps = !isAdmin && servicios.gps === true;
 
+  const [empresasLoading, setEmpresasLoading] = useState(isAdmin);
+
   useEffect(() => {
     if (!isAdmin) return;
-    api.get("/wialon/empresas").then(({ data }) => {
-      setEmpresas(data || []);
-      if ((data || []).length > 0) setSelectedEmpresa(data[0].empresa);
-    }).catch(() => {});
+    setEmpresasLoading(true);
+    api.get("/wialon/empresas")
+      .then(({ data }) => {
+        const list = data || [];
+        setEmpresas(list);
+        if (list.length > 0) {
+          setSelectedEmpresa(list[0].empresa);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setEmpresasLoading(false));
   }, [isAdmin]);
 
   async function loadUnits(empresa) {
@@ -122,10 +131,16 @@ export default function Monitoreo() {
     });
   }, [unitIdsKey]); // eslint-disable-line
 
-  if (!isAdmin && !clienteHasGps) {
-    return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Tu empresa aún no tiene el servicio GPS con Wialon activado. Contacta a tu administrador ENERED para habilitarlo." />;
+  if (isAdmin && empresasLoading) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 12, padding: 60, textAlign: "center", color: "#6b7280" }}>
+        <Loader2 style={{ width: 32, height: 32, animation: "spin 1s linear infinite", color: "#3B82F6", margin: "0 auto" }} />
+        <div style={{ marginTop: 12, fontWeight: 500 }}>Cargando información de Wialon…</div>
+      </div>
+    );
   }
-  if (isAdmin && empresas.length === 0) {
+
+  if (isAdmin && !empresasLoading && empresas.length === 0) {
     return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Aún no hay empresas con servicio GPS activo y token Wialon configurado. Ve a Admin › Empresas & Servicios para activarlas." ctaTexto="Ir a Empresas" ctaTo="/admin/empresas" />;
   }
 
