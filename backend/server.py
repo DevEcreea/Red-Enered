@@ -2432,12 +2432,12 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     elif user["role"] != "admin_enered":
         sub_q["empresa"] = user.get("empresa")
     
-    sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0}).to_list(1000)
+    sub_raw = await db.consumos_subsidio.find(sub_q, {"raw_ocr_response": 0}).to_list(1000)
     
     # Group subsidio invoices by numero_documento to avoid duplicates
     grouped_sub = {}
     for d in sub_raw:
-        n_doc = (d.get("numero_documento") or "").upper().strip()
+        n_doc = (d.get("numero_documento") or d.get("n_doc") or "").upper().strip()
         if not n_doc:
             continue
         if n_doc not in grouped_sub:
@@ -2457,7 +2457,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 except Exception:
                     pass
             grouped_sub[n_doc] = {
-                "id": d.get("id") or str(d.get("_id")) or "",
+                "id": d.get("id") or n_doc,
                 "empresa": d.get("empresa") or "",
                 "n_doc": n_doc,
                 "tipo_doc": "factura",
@@ -2469,7 +2469,8 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "saldo": 0.0,
                 "estado": "TERCERO",
                 "atraso_dias": 0,
-                "pdf_filename": d.get("factura_filename") or "subsidio_entry.pdf",
+                "pdf_filename": d.get("factura_filename") or f"{n_doc}.pdf",
+                "factura_storage_key": d.get("factura_storage_key"),
                 "xml_filename": None,
                 "uploaded_at": d.get("created_at"),
                 "uploaded_by": "subsidio_system",
@@ -3180,37 +3181,48 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     if kind not in ("pdf", "xml"):
         raise HTTPException(status_code=400, detail="kind inválido")
     
+    inv_clean = inv_id.strip()
+    import re
+    reg_clean = {"$regex": f"^{re.escape(inv_clean)}$", "$options": "i"}
+
     # 1. Buscar factura por ID, n_doc o numero_documento
-    inv = await db.invoices.find_one({"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}, {"_id": 0})
+    inv = await db.invoices.find_one({"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"n_doc": reg_clean}, {"numero_documento": reg_clean}]}, {"_id": 0})
     if not inv:
-        inv = await db.empresas_invoices.find_one({"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}, {"_id": 0})
+        inv = await db.empresas_invoices.find_one({"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"n_doc": reg_clean}, {"numero_documento": reg_clean}]}, {"_id": 0})
     if not inv:
         try:
             from bson import ObjectId
-            oid = ObjectId(inv_id)
+            oid = ObjectId(inv_clean)
         except Exception:
             oid = None
-        q_sub = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
+        q_sub = {"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"numero_documento": reg_clean}]}
         if oid:
             q_sub["$or"].append({"_id": oid})
         sub_doc = await db.consumos_subsidio.find_one(q_sub, {"_id": 0})
+        if not sub_doc:
+            sub_doc = await db.consumos_subsidio.find_one(q_sub)
         if sub_doc:
             inv = {
-                "id": sub_doc.get("id") or str(sub_doc.get("_id")),
-                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or "SUB-001",
+                "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_clean,
+                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or inv_clean,
                 "empresa": sub_doc.get("empresa"),
                 "pdf_filename": sub_doc.get("factura_filename") or sub_doc.get("pdf_filename"),
                 "factura_storage_key": sub_doc.get("factura_storage_key"),
                 "factura_content_type": sub_doc.get("factura_content_type") or "application/pdf",
-                "monto_total": sub_doc.get("monto_total") or sub_doc.get("monto") or 0,
+                "monto_total": sub_doc.get("monto_total") or sub_doc.get("monto") or sub_doc.get("importe_total") or 0,
                 "f_emision": sub_doc.get("fecha") or sub_doc.get("f_emision")
             }
 
     if not inv:
-        raise HTTPException(status_code=404, detail="Factura no encontrada")
+        raise HTTPException(status_code=404, detail=f"Factura {inv_clean} no encontrada")
     
-    if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
-        raise HTTPException(status_code=403, detail="Sin acceso")
+    # Validar permisos flexibilizando formato de empresa (mayúsculas, sin puntos)
+    def _norm_e(e): return (e or "").strip().upper().replace(".", "").replace(",", "")
+    if user["role"] != "admin_enered":
+        u_emp = _norm_e(user.get("empresa"))
+        i_emp = _norm_e(inv.get("empresa"))
+        if i_emp and u_emp and i_emp != u_emp:
+            raise HTTPException(status_code=403, detail="Sin acceso a esta factura")
     
     # 2. Recolectar posibles llaves del archivo en storage
     candidate_keys = []
