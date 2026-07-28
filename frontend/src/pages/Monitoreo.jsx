@@ -217,8 +217,8 @@ Ubicación/Dirección: ${formData.direccion}`;
                 const hasPos = u.lat != null && u.lon != null;
                 const isFocused = focusedUnit?.id === u.id;
                 const speed = Math.round(u.speed || 0);
-                const isMoving = speed > 3;
-                const kilometraje = Math.round((u.odometer || 0) / 1000);
+                const rawOdo = u.odometer || 0;
+                const kilometraje = rawOdo > 500000 ? Math.round(rawOdo / 1000) : Math.round(rawOdo);
                 
                 return (
                   <div key={u.id} onClick={() => hasPos && setFocusedUnit(isFocused ? null : u)}

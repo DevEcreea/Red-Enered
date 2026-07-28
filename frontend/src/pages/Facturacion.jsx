@@ -377,14 +377,12 @@ export default function Facturacion() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
-                          {inv.pdf_filename && (<>
-                            <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
-                              <FileText className="w-4 h-4" />
-                            </button>
-                          </>)}
+                          <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
+                            <FileText className="w-4 h-4" />
+                          </button>
                           {inv.xml_filename && (
                             <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                               <FileSpreadsheet className="w-4 h-4" />

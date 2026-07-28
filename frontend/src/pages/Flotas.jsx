@@ -697,16 +697,48 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
-                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>
-                      {r._origen === "subsidio" ? (
-                        <span style={{ background:"#F3E8FF", color:"#7C3AED", padding:"4px 10px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #DDD6FE" }}>
-                          {r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor"}
-                        </span>
-                      ) : (
-                        <span style={{ background:"#ECFDF5", color:"#059669", padding:"4px 10px", borderRadius:12, fontSize:11, fontWeight:700, border:"1px solid #A7F3D0" }}>
-                          Enered
-                        </span>
-                      )}
+                    <td style={{ ...tdSt, whiteSpace: "nowrap", maxWidth: 130 }}>
+                      {(() => {
+                        if (r._origen === "subsidio") {
+                          const supplierName = r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor";
+                          return (
+                            <span 
+                              title={supplierName}
+                              style={{ 
+                                background: "#EFF6FF", 
+                                color: "#1D4ED8", 
+                                padding: "3px 8px", 
+                                borderRadius: 8, 
+                                fontSize: 11, 
+                                fontWeight: 700, 
+                                border: "1px solid #BFDBFE",
+                                maxWidth: 125,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                display: "inline-block",
+                                verticalAlign: "middle"
+                              }}
+                            >
+                              {supplierName}
+                            </span>
+                          );
+                        }
+                        return (
+                          <span style={{ 
+                            background: "#ECFDF5", 
+                            color: "#059669", 
+                            padding: "3px 8px", 
+                            borderRadius: 8, 
+                            fontSize: 11, 
+                            fontWeight: 700, 
+                            border: "1px solid #A7F3D0",
+                            display: "inline-block"
+                          }}>
+                            Enered
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{ciudadEstacion}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
