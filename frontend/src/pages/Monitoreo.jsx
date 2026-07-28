@@ -7,7 +7,7 @@ import {
   MapPin, Gauge, Clock, Truck, Plus, Power, Navigation, Route, Calendar, X, MessageCircle
 } from "lucide-react";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -404,7 +404,6 @@ Ubicación/Dirección: ${formData.direccion}`;
 }
 
 // Componente helper para actualizar la vista del mapa cuando cambia el centro
-import { useMap } from "react-leaflet";
 function MapUpdater({ center, zoom }) {
   const map = useMap();
   useEffect(() => {

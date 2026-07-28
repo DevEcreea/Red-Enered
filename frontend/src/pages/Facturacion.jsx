@@ -135,14 +135,19 @@ export default function Facturacion() {
   };
 
   const downloadInvoice = async (inv, kind) => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) {
+      toast.error("Identificador de factura no válido");
+      return;
+    }
     try {
-      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
+      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
       const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
       const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${inv.n_doc}.${kind}`;
+      a.download = `${inv.n_doc || docId}.${kind}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -151,13 +156,18 @@ export default function Facturacion() {
   };
 
   const viewInvoice = async (inv, kind) => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) {
+      toast.error("Identificador de factura no válido");
+      return;
+    }
     try {
-      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
+      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
       const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
       const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       setViewerUrl(url);
-      setViewerTitle(`${inv.n_doc}.${kind}`);
+      setViewerTitle(`${inv.n_doc || docId}.${kind}`);
       setViewerDoc({ inv, kind });
       setViewerOpen(true);
     } catch {

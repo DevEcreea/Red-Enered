@@ -697,7 +697,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
-                    <td style={{ ...tdSt, whiteSpace: "nowrap", maxWidth: 130 }}>
+                    <td style={{ ...tdSt, whiteSpace: "normal", maxWidth: 150, minWidth: 110, textOverflow: "clip" }}>
                       {(() => {
                         if (r._origen === "subsidio") {
                           const supplierName = r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor";
@@ -707,15 +707,16 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                               style={{ 
                                 background: "#EFF6FF", 
                                 color: "#1D4ED8", 
-                                padding: "3px 8px", 
+                                padding: "4px 8px", 
                                 borderRadius: 8, 
                                 fontSize: 11, 
                                 fontWeight: 700, 
                                 border: "1px solid #BFDBFE",
-                                maxWidth: 125,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
+                                maxWidth: 145,
+                                whiteSpace: "normal",
+                                wordBreak: "break-word",
+                                textAlign: "center",
+                                lineHeight: 1.25,
                                 display: "inline-block",
                                 verticalAlign: "middle"
                               }}
