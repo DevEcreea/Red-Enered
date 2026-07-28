@@ -434,7 +434,10 @@ function TabBanco({ bank }) {
 function TabDocumentos({ docs, onDelete }) {
   if (!docs?.length) return <Empty msg="Sin documentos subidos." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
+  };
   return (
     <table className="w-full text-sm">
       <thead className="bg-neutral-50 text-[10px] uppercase tracking-widest font-bold text-neutral-500 border-b">
@@ -480,7 +483,10 @@ function TabDocumentos({ docs, onDelete }) {
 function TabFlota({ vehicles, docs = [], onDelete }) {
   if (!vehicles?.length) return <Empty msg="Sin unidades registradas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
+  };
 
   return (
     <table className="w-full text-sm">
@@ -570,7 +576,10 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
 function TabFacturas({ invoices, onDelete }) {
   if (!invoices?.length) return <Empty msg="Sin facturas cargadas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${tk}`;
+  };
 
   return (
     <div className="overflow-auto">
@@ -894,17 +903,30 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
     setShowInvoiceForm(true);
   };
 
+  const toIsoDate = (d) => {
+    if (!d) return "";
+    let str = String(d).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    if (str.includes("/")) {
+      const parts = str.split("/");
+      if (parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+    }
+    return str.slice(0, 10);
+  };
+
   const startEditInvoice = (inv) => {
     setEditingInvoice(inv);
-    setInvNumero(inv.numero_documento || "");
-    setInvFecha(inv.fecha || "");
+    setInvNumero(inv.numero_documento || inv.n_doc || "");
+    setInvFecha(toIsoDate(inv.fecha || inv.f_emision || ""));
     setInvEstacion(inv.estacion || "");
     setInvRuc(inv.ruc_emisor || "");
     setInvCiudad(inv.ciudad || "");
     setInvPlaca(inv.placa || "");
     setInvGalones(inv.galones || "");
     setInvPrecio(inv.precio_unitario || "");
-    setInvImporte(inv.importe_total || "");
+    setInvImporte(inv.importe_total || inv.monto_total || "");
     setInvProducto(inv.producto || "DIESEL B5");
     setShowInvoiceForm(true);
   };
@@ -1191,7 +1213,7 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                   </button>
                 </div>
                 
-                <div className={`grid gap-6 ${editingInvoice?.factura_filename || editingInvoice?.pdf_filename ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
+                <div className={`grid gap-6 ${editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
                   {/* Formulario */}
                   <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4 h-min">
                     <div className="space-y-1">
@@ -1327,7 +1349,7 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                   </form>
 
                   {/* Previsualización del PDF */}
-                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename) && (
+                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
                     <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
                       <iframe
                         src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download`}

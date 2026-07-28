@@ -108,6 +108,7 @@ function FSel({ label, icon:Icon, grow, value, onChange, options = [] }) {
 // ═════════════════════════════════ TABS ══════════════════════════════════════
 
 function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -116,6 +117,17 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
     window.addEventListener("mousedown", h);
     return () => window.removeEventListener("mousedown", h);
   }, [open]);
+
+  // Consumos ENERED oficiales (etiqueta verde Enered) son 100% confirmados y no editables/eliminables por el cliente
+  const isEnered = row._origen !== "subsidio" && row._origen !== "manual";
+  const isAdmin = user?.role === "admin_enered";
+  const canEditOrDelete = isAdmin || !isEnered;
+  const hasPdf = Boolean(row.pdf_filename || row.factura_key || row.factura_storage_key || row._origen === "subsidio");
+
+  if (!canEditOrDelete && !hasPdf) {
+    return <span style={{ color: "#D1D5DB", fontSize: 13.5, paddingLeft: 12 }}>—</span>;
+  }
+
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={()=>setOpen(v=>!v)} data-testid={`row-actions-${row.id||row.PLACA}`}
@@ -124,26 +136,30 @@ function RowActions({ row, onEdit, onDelete, onDownloadPdf }) {
       </button>
       {open && (
         <div style={{ position:"absolute",right:0,top:"110%",background:"#fff",border:"1px solid #E5E7EB",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,.12)",zIndex:20,minWidth:170 }}>
-          <button onClick={() => { setOpen(false); onEdit(row); }} data-testid={`row-edit-${row.id||row.PLACA}`}
-            style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
-            <Edit2 style={{ width:14,height:14,color:"#3B82F6" }}/> Editar
-          </button>
-          {(row.pdf_filename || row.factura_key || row._origen==="manual") && (
+          {canEditOrDelete && (
+            <button onClick={() => { setOpen(false); onEdit(row); }} data-testid={`row-edit-${row.id||row.PLACA}`}
+              style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
+              <Edit2 style={{ width:14,height:14,color:"#3B82F6" }}/> Editar
+            </button>
+          )}
+          {hasPdf && (
             <>
-              <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA, row.NUMERO_DOCUMENTO, false); }}
+              <button onClick={() => { setOpen(false); onDownloadPdf(row.id || row._id, row.PLACA, row.NUMERO_DOCUMENTO, false); }}
                 style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
                 <Eye style={{ width:14,height:14,color:"#10B981" }}/> Visualizar
               </button>
-              <button onClick={() => { setOpen(false); onDownloadPdf(row.id, row.PLACA, row.NUMERO_DOCUMENTO, true); }}
+              <button onClick={() => { setOpen(false); onDownloadPdf(row.id || row._id, row.PLACA, row.NUMERO_DOCUMENTO, true); }}
                 style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#374151",textDecoration:"none",borderBottom:"1px solid #F3F4F6",background:"none",border:"none",width:"100%",textAlign:"left",cursor:"pointer" }}>
                 <Download style={{ width:14,height:14,color:"#8B3DFF" }}/> Descargar
               </button>
             </>
           )}
-          <button onClick={()=>{setOpen(false); onDelete(row.id || row._id);}} data-testid={`row-delete-${row.id||row.PLACA}`}
-            style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
-            <Trash2 style={{ width:14,height:14 }}/> Eliminar
-          </button>
+          {canEditOrDelete && (
+            <button onClick={()=>{setOpen(false); onDelete(row.id || row._id);}} data-testid={`row-delete-${row.id||row.PLACA}`}
+              style={{ display:"flex",alignItems:"center",gap:8,padding:"9px 12px",fontSize:13.5,color:"#DC2626",background:"none",border:"none",cursor:"pointer",width:"100%",textAlign:"left" }}>
+              <Trash2 style={{ width:14,height:14 }}/> Eliminar
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -222,12 +238,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           }
         }
         
-        // If the month is > 7 (we are in July) and day <= 12, it's definitely a swapped date from pandas
-        if (m > 7 && d <= 12) {
-           let temp = m;
-           m = d;
-           d = temp;
-        }
+
         
         let th = 0, tm = 0, ts = 0;
         let hp = h.split(":");
@@ -496,11 +507,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     let y = parseInt(parts[0], 10);
                     let m = parseInt(parts[1], 10);
                     let d = parseInt(parts[2], 10);
-                    if (m > 7 && d <= 12) {
-                      let temp = m;
-                      m = d;
-                      d = temp;
-                    }
+
                     fecha = `${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}`;
                   } else {
                     fecha = r.FECHA;
@@ -1313,7 +1320,7 @@ export default function Flotas() {
     }
   };
 
-  const TABS = ["Resumen","Control","QR","Eventos"];
+  const TABS = ["Resumen", "Precios", "Eventos", "QR", "Control"];
 
   return (
     <div style={{ padding:"22px 26px", background:"transparent", minHeight:"100%" }} data-testid="flotas-page">

@@ -3,12 +3,19 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response
-from server import db, get_current_user
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Response, Request
 
 logger = logging.getLogger("enered.abonos")
 
 abonos_router = APIRouter(prefix="/api/abonos", tags=["abonos"])
+
+def _get_db():
+    import server
+    return server.db
+
+async def get_current_user_dynamic(request: Request):
+    import server
+    return await server.get_current_user(request)
 
 @abonos_router.post("")
 async def registrar_abono(
@@ -16,18 +23,17 @@ async def registrar_abono(
     fecha_deposito: str = Form(...),
     numero_operacion: str = Form(...),
     file: UploadFile = File(...),
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(get_current_user_dynamic)
 ):
+    db = _get_db()
     empresa = user.get("empresa")
     if not empresa:
         raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
 
-    # Guardar archivo
     file_bytes = await file.read()
     file_id = str(uuid.uuid4())
     ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
     
-    # Podemos guardarlo en db.files (storage) o directo
     await db.files.insert_one({
         "id": file_id,
         "filename": file.filename,
@@ -60,164 +66,143 @@ async def registrar_abono(
         "empresa": empresa,
         "tipo": "ABONO_REGISTRADO",
         "monto": monto,
-        "descripcion": f"Abono registrado (Op. {numero_operacion}), pendiente de validación",
-        "abono_id": abono_id,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "created_by": user["id"]
+        "descripcion": f"Abono registrado por S/ {monto:.2f} (Op: {numero_operacion})",
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "referencia_id": abono_id
     })
-    
-    return {"ok": True, "id": abono_id}
 
-@abonos_router.get("")
-async def list_abonos(user: dict = Depends(get_current_user)):
-    query = {}
-    if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
-        if not user.get("empresa"):
-            return {"data": []}
-        query["empresa"] = user["empresa"]
+    return {"ok": True, "abono": doc}
+
+
+@abonos_router.get("/mis-abonos")
+async def listar_mis_abonos(user: dict = Depends(get_current_user_dynamic)):
+    db = _get_db()
+    empresa = user.get("empresa")
+    if not empresa:
+        return []
+    cursor = db.abonos.find({"empresa": empresa}, {"_id": 0}).sort("created_at", -1)
+    return await cursor.to_list(500)
+
+
+@abonos_router.get("/admin/pendientes")
+async def listar_abonos_pendientes(user: dict = Depends(get_current_user_dynamic)):
+    db = _get_db()
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="No autorizado")
+    cursor = db.abonos.find({"estado": "POR VALIDAR"}, {"_id": 0}).sort("created_at", 1)
+    return await cursor.to_list(500)
+
+
+@abonos_router.post("/admin/{abono_id}/aprobar")
+async def aprobar_abono(abono_id: str, user: dict = Depends(get_current_user_dynamic)):
+    db = _get_db()
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="No autorizado")
         
-    cursor = db.abonos.find(query).sort("created_at", -1)
-    abonos = await cursor.to_list(1000)
-    for a in abonos:
-        a["_id"] = str(a["_id"])
-    return {"data": abonos}
-
-@abonos_router.get("/files/{file_id}")
-async def get_file(file_id: str, user: dict = Depends(get_current_user)):
-    if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
-        # El cliente solo puede ver sus propios archivos
-        f = await db.files.find_one({"id": file_id})
-        if not f or f.get("created_by") != user["id"]:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    else:
-        f = await db.files.find_one({"id": file_id})
-        if not f:
-            raise HTTPException(status_code=404, detail="Archivo no encontrado")
-            
-    return Response(content=f["data"], media_type=f["content_type"])
-
-@abonos_router.get("/historial")
-async def list_historial(user: dict = Depends(get_current_user)):
-    query = {}
-    if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
-        if not user.get("empresa"):
-            return {"data": []}
-        query["empresa"] = user["empresa"]
-        
-    cursor = db.transacciones_historial.find(query).sort("created_at", -1)
-    transacciones = await cursor.to_list(1000)
-    for t in transacciones:
-        t["_id"] = str(t["_id"])
-    return {"data": transacciones}
-
-@abonos_router.put("/{abono_id}/validar")
-async def validar_abono(abono_id: str, user: dict = Depends(get_current_user)):
-    if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
-        raise HTTPException(status_code=403, detail="Sin permisos para validar abonos")
-        
-    abono = await db.abonos.find_one({"id": abono_id})
+    abono = await db.abonos.find_one({"id": abono_id}, {"_id": 0})
     if not abono:
         raise HTTPException(status_code=404, detail="Abono no encontrado")
     if abono["estado"] != "POR VALIDAR":
-        raise HTTPException(status_code=400, detail=f"El abono ya está {abono['estado']}")
-        
-    monto_restante = float(abono["monto"])
-    empresa_nombre = abono["empresa"]
-    
+        raise HTTPException(status_code=400, detail="El abono ya fue procesado")
+
+    empresa = abono["empresa"]
+    monto_abono = float(abono["monto"])
+    monto_restante = monto_abono
+
     cursor = db.invoices.find({
-        "empresa": empresa_nombre,
+        "empresa": empresa,
         "estado": {"$in": ["PENDIENTE", "pendiente", "vencida", "VENCIDA", "por_vencer"]}
-    }).sort("f_emision", 1)  # campo correcto es f_emision, no fecha_emision
-    facturas_pendientes = await cursor.to_list(1000)
-    
-    facturas_pagadas = []
-    
-    for fac in facturas_pendientes:
+    }).sort("fecha_emision", 1)
+    invoices = await cursor.to_list(1000)
+
+    for fac in invoices:
         if monto_restante <= 0:
             break
-            
         deuda = float(fac.get("saldo", fac.get("monto_total", 0)))
         if deuda <= 0:
             continue
             
         if monto_restante >= deuda:
-            await db.invoices.update_one(
-                {"id": fac["id"]},
-                {"$set": {"estado": "pagada", "saldo": 0.0}}
-            )
+            await db.invoices.update_one({"id": fac["id"]}, {"$set": {"estado": "pagada", "saldo": 0.0}})
             monto_restante -= deuda
-            facturas_pagadas.append({"fac_id": fac["id"], "monto_aplicado": deuda})
-            
-            await db.transacciones_historial.insert_one({
-                "id": str(uuid.uuid4()),
-                "empresa": empresa_nombre,
-                "tipo": "PAGO_FACTURA",
-                "monto": deuda,
-                "descripcion": f"Factura {fac.get('n_doc', fac.get('id', ''))} pagada con abono {abono['numero_operacion']}",
-                "abono_id": abono_id,
-                "factura_id": fac["id"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "created_by": user["id"]
-            })
         else:
-            await db.invoices.update_one(
-                {"id": fac["id"]},
-                {"$set": {"saldo": round(deuda - monto_restante, 2)}}
-            )
-            facturas_pagadas.append({"fac_id": fac["id"], "monto_aplicado": monto_restante})
-            
-            await db.transacciones_historial.insert_one({
-                "id": str(uuid.uuid4()),
-                "empresa": empresa_nombre,
-                "tipo": "PAGO_PARCIAL_FACTURA",
-                "monto": monto_restante,
-                "descripcion": f"Abono parcial ({monto_restante}) a factura {fac.get('n_doc', fac.get('id', ''))}",
-                "abono_id": abono_id,
-                "factura_id": fac["id"],
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "created_by": user["id"]
-            })
+            nuevo_saldo = round(deuda - monto_restante, 2)
+            await db.invoices.update_one({"id": fac["id"]}, {"$set": {"saldo": nuevo_saldo}})
             monto_restante = 0.0
-            
-    excedente = monto_restante
+
+    excedente = round(monto_restante, 2)
+    if excedente > 0:
+        config = await db.empresas_config.find_one({"empresa": empresa})
+        saldo_actual = float(config.get("saldo_a_favor", 0.0)) if config else 0.0
+        nuevo_saldo_favor = round(saldo_actual + excedente, 2)
+        await db.empresas_config.update_one(
+            {"empresa": empresa},
+            {"$set": {"saldo_a_favor": nuevo_saldo_favor}},
+            upsert=True
+        )
+
     await db.abonos.update_one(
         {"id": abono_id},
         {"$set": {
-            "estado": "CONCILIADO",
+            "estado": "APROBADO",
             "monto_excedente": excedente,
-            "validated_at": datetime.now(timezone.utc).isoformat(),
-            "validated_by": user["id"]
+            "procesado_at": datetime.now(timezone.utc).isoformat(),
+            "procesado_por": user["id"]
         }}
     )
-    
-    if excedente > 0:
-        await db.empresas_config.update_one(
-            {"empresa": empresa_nombre},
-            {"$inc": {"saldo_a_favor": excedente}},
-            upsert=True
-        )
-        t_id = None
-        if t_id:
-            await db.transacciones_historial.update_one(
-                {"id": t_id},
-                {"$set": {"monto": excedente}}
-            )
-        else:
-            await db.transacciones_historial.insert_one({
-                "id": str(uuid.uuid4()),
-                "empresa": empresa_nombre,
-                "tipo": "SALDO_PREPAGO_GENERADO",
-                "monto": excedente,
-                "descripcion": f"Saldo a favor generado por abono {abono['numero_operacion']}",
-                "abono_id": abono_id,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "created_by": user["id"]
-            })
+
+    await db.transacciones_historial.insert_one({
+        "id": str(uuid.uuid4()),
+        "empresa": empresa,
+        "tipo": "ABONO_APROBADO",
+        "monto": monto_abono,
+        "descripcion": f"Abono de S/ {monto_abono:.2f} APROBADO. Excedente a favor: S/ {excedente:.2f}",
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "referencia_id": abono_id
+    })
+
+    return {"ok": True, "estado": "APROBADO", "excedente": excedente}
+
+
+@abonos_router.post("/admin/{abono_id}/rechazar")
+async def rechazar_abono(abono_id: str, motivo: str = Form(...), user: dict = Depends(get_current_user_dynamic)):
+    db = _get_db()
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="No autorizado")
         
-    return {
-        "ok": True,
-        "monto_original": abono["monto"],
-        "monto_usado": abono["monto"] - excedente,
-        "monto_excedente": excedente,
-        "facturas_pagadas": facturas_pagadas
-    }
+    abono = await db.abonos.find_one({"id": abono_id}, {"_id": 0})
+    if not abono:
+        raise HTTPException(status_code=404, detail="Abono no encontrado")
+    if abono["estado"] != "POR VALIDAR":
+        raise HTTPException(status_code=400, detail="El abono ya fue procesado")
+
+    await db.abonos.update_one(
+        {"id": abono_id},
+        {"$set": {
+            "estado": "RECHAZADO",
+            "motivo_rechazo": motivo,
+            "procesado_at": datetime.now(timezone.utc).isoformat(),
+            "procesado_por": user["id"]
+        }}
+    )
+
+    await db.transacciones_historial.insert_one({
+        "id": str(uuid.uuid4()),
+        "empresa": abono["empresa"],
+        "tipo": "ABONO_RECHAZADO",
+        "monto": float(abono["monto"]),
+        "descripcion": f"Abono RECHAZADO: {motivo}",
+        "fecha": datetime.now(timezone.utc).isoformat(),
+        "referencia_id": abono_id
+    })
+
+    return {"ok": True, "estado": "RECHAZADO"}
+
+
+@abonos_router.get("/files/{file_id}")
+async def get_file(file_id: str):
+    db = _get_db()
+    doc = await db.files.find_one({"id": file_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return Response(content=doc["data"], media_type=doc.get("content_type", "application/pdf"))

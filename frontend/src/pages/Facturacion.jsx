@@ -370,7 +370,7 @@ export default function Facturacion() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
-                          {inv.pdf_filename && (<>
+                          {(inv.pdf_filename || inv.factura_storage_key || inv.factura_filename) && (<>
                             <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
                               <Eye className="w-4 h-4" />
                             </button>

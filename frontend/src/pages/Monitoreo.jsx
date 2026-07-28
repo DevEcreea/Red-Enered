@@ -24,30 +24,62 @@ function fmtDate(ts) {
   } catch { return "—"; }
 }
 
+class MapErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error) {
+    console.error("Map Error caught by boundary:", error);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#FEF2F2", color: "#991B1B", padding: 24, borderRadius: 12, flexDirection: "column", gap: 12 }}>
+          <AlertTriangle style={{ width: 32, height: 32 }} />
+          <div style={{ fontWeight: 700 }}>Vista de mapa no disponible</div>
+          <button onClick={() => this.setState({ hasError: false })} style={{ padding: "6px 14px", background: "#DC2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            Reintentar Carga del Mapa
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Ícono personalizado para los marcadores en el mapa
 const createUnitIcon = (course = 0, isMoving = false) => {
-  const color = isMoving ? "#10B981" : "#F59E0B"; // Verde si se mueve, naranja si no
-  return L.divIcon({
-    className: "custom-wialon-marker",
-    html: `
-      <div style="
-        width: 32px; height: 32px; 
-        background: ${color}; 
-        border: 2px solid white; 
-        border-radius: 50%; 
-        display: flex; align-items: center; justify-content: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      ">
-        <div style="transform: rotate(${course}deg);">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
-          </svg>
+  const color = isMoving ? "#10B981" : "#F59E0B";
+  const safeCourse = isNaN(Number(course)) ? 0 : Number(course);
+  try {
+    return L.divIcon({
+      className: "custom-wialon-marker",
+      html: `
+        <div style="
+          width: 32px; height: 32px; 
+          background: ${color}; 
+          border: 2px solid white; 
+          border-radius: 50%; 
+          display: flex; align-items: center; justify-content: center;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        ">
+          <div style="transform: rotate(${safeCourse}deg);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
+            </svg>
+          </div>
         </div>
-      </div>
-    `,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
-  });
+      `,
+      iconSize: [32, 32],
+      iconAnchor: [16, 16],
+    });
+  } catch (e) {
+    return L.divIcon({ className: "custom-wialon-marker", html: "<div>📍</div>" });
+  }
 };
 
 export default function Monitoreo() {
@@ -86,18 +118,40 @@ export default function Monitoreo() {
     }
   }
 
-  useEffect(() => { if (clienteHasGps) loadUnits(); }, [clienteHasGps]);
-  useEffect(() => { if (isAdmin && selectedEmpresa) loadUnits(selectedEmpresa); }, [isAdmin, selectedEmpresa]);
+  const requestedGeocodes = useRef(new Set());
+
+  const userId = user?.id || user?.email;
+  const userEmpresa = user?.empresa;
+
+  useEffect(() => {
+    if (!userId) return;
+    if (!isAdmin) loadUnits();
+  }, [isAdmin, userId, userEmpresa]);
+
+  useEffect(() => {
+    if (isAdmin && selectedEmpresa) loadUnits(selectedEmpresa);
+  }, [isAdmin, selectedEmpresa]);
 
   const data = state.data;
   const units = data?.units || [];
-  const unitsWithPos = units.filter(u => u.lat != null && u.lon != null);
 
-  // Lazy Geocoding con retraso para no bloquear a Nominatim (1 req/sec)
+  // Filtrado 100% estricto de coordenadas válidas (numéricas y no NaN)
+  const unitsWithPos = useMemo(() => {
+    return units.filter(u => {
+      const lat = Number(u.lat);
+      const lon = Number(u.lon);
+      return !isNaN(lat) && !isNaN(lon) && lat !== 0 && lon !== 0;
+    });
+  }, [units]);
+
+  const unitIdsKey = unitsWithPos.map(u => u.id).join(",");
+
+  // Lazy Geocoding controlado con Set ref para evitar bucles infinitos
   useEffect(() => {
     if (unitsWithPos.length === 0) return;
     unitsWithPos.forEach((u, i) => {
-      if (!addresses[u.id]) {
+      if (!addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
+        requestedGeocodes.current.add(u.id);
         setTimeout(() => {
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${u.lat}&lon=${u.lon}&zoom=18&addressdetails=1`)
             .then(res => res.json())
@@ -110,7 +164,7 @@ export default function Monitoreo() {
         }, i * 1100);
       }
     });
-  }, [unitsWithPos]); // eslint-disable-line
+  }, [unitIdsKey]); // eslint-disable-line
 
   if (!isAdmin && !clienteHasGps) {
     return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Tu empresa aún no tiene el servicio GPS con Wialon activado. Contacta a tu administrador ENERED para habilitarlo." />;
@@ -119,20 +173,32 @@ export default function Monitoreo() {
     return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Aún no hay empresas con servicio GPS activo y token Wialon configurado. Ve a Admin › Empresas & Servicios para activarlas." ctaTexto="Ir a Empresas" ctaTo="/admin/empresas" />;
   }
 
-  // Bounding box (para el mapa inicial)
+  // Bounding box sanitizado para el mapa
   let center = [-9.19, -75.01]; // Peru centro por defecto
   let zoom = 5;
-  if (focusedUnit && focusedUnit.lat != null) {
-    center = [focusedUnit.lat, focusedUnit.lon];
+
+  if (focusedUnit && !isNaN(Number(focusedUnit.lat)) && Number(focusedUnit.lat) !== 0) {
+    center = [Number(focusedUnit.lat), Number(focusedUnit.lon)];
     zoom = 16;
   } else if (unitsWithPos.length > 0) {
-    const lats = unitsWithPos.map(u => u.lat);
-    const lons = unitsWithPos.map(u => u.lon);
-    center = [
-      (Math.min(...lats) + Math.max(...lats)) / 2,
-      (Math.min(...lons) + Math.max(...lons)) / 2
-    ];
-    zoom = unitsWithPos.length === 1 ? 14 : 5; // Ajuste básico
+    const lats = unitsWithPos.map(u => Number(u.lat)).filter(n => !isNaN(n));
+    const lons = unitsWithPos.map(u => Number(u.lon)).filter(n => !isNaN(n));
+    if (lats.length > 0 && lons.length > 0) {
+      const minLat = Math.min(...lats);
+      const maxLat = Math.max(...lats);
+      const minLon = Math.min(...lons);
+      const maxLon = Math.max(...lons);
+      if (!isNaN(minLat) && !isNaN(maxLat) && !isNaN(minLon) && !isNaN(maxLon)) {
+        center = [(minLat + maxLat) / 2, (minLon + maxLon) / 2];
+        zoom = unitsWithPos.length === 1 ? 14 : 6;
+      }
+    }
+  }
+
+  // Garantía total contra valores NaN
+  if (isNaN(center[0]) || isNaN(center[1])) {
+    center = [-9.19, -75.01];
+    zoom = 5;
   }
 
   const handleAgendarWhatsApp = () => {
@@ -214,11 +280,12 @@ Ubicación/Dirección: ${formData.direccion}`;
             
             <div style={{ overflowY: "auto", flex: 1, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
               {units.map((u) => {
-                const hasPos = u.lat != null && u.lon != null;
+                const hasPos = u.lat != null && u.lon != null && !isNaN(Number(u.lat)) && !isNaN(Number(u.lon));
                 const isFocused = focusedUnit?.id === u.id;
                 const speed = Math.round(u.speed || 0);
                 const isMoving = speed > 3;
-                const kilometraje = Math.round((u.odometer || 0) / 1000);
+                const rawOdo = u.odometer || 0;
+                const kilometraje = rawOdo > 500000 ? Math.round(rawOdo / 1000) : Math.round(rawOdo);
                 
                 return (
                   <div key={u.id} onClick={() => hasPos && setFocusedUnit(isFocused ? null : u)}
@@ -305,36 +372,38 @@ Ubicación/Dirección: ${formData.direccion}`;
               )}
             </div>
             
-            {unitsWithPos.length > 0 ? (
-              <MapContainer center={center} zoom={zoom} style={{ width: "100%", height: "100%" }}>
-                <TileLayer
-                  attribution='&copy; <a href="https://www.google.com/maps">Google Maps</a>'
-                  url="https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
-                />
-                {/* Trick to fly to center when focused unit changes */}
-                <MapUpdater center={center} zoom={zoom} />
-                
-                {unitsWithPos.map(u => (
-                  <Marker 
-                    key={u.id} 
-                    position={[u.lat, u.lon]} 
-                    icon={createUnitIcon(u.course, (u.speed || 0) > 3)}
-                    eventHandlers={{ click: () => setFocusedUnit(u) }}
-                  >
-                    <Popup>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{u.name}</div>
-                      <div style={{ fontSize: 12, color: "#6b7280" }}>{(u.speed || 0)} km/h · {u.ignition ? "Encendido" : "Apagado"}</div>
-                      <div style={{ fontSize: 11, marginTop: 4 }}>{addresses[u.id] || "Buscando dirección..."}</div>
-                    </Popup>
-                  </Marker>
-                ))}
-              </MapContainer>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", flexDirection: "column", gap: 12 }}>
-                <Navigation style={{ width: 48, height: 48, opacity: 0.3 }} />
-                <span>Ninguna unidad reporta posición GPS actualmente</span>
-              </div>
-            )}
+            <MapErrorBoundary>
+              {unitsWithPos.length > 0 ? (
+                <MapContainer center={center} zoom={zoom} style={{ width: "100%", height: "100%" }}>
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.google.com/maps">Google Maps</a>'
+                    url="https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
+                  />
+                  {/* Trick to fly to center when focused unit changes */}
+                  <MapUpdater center={center} zoom={zoom} />
+                  
+                  {unitsWithPos.map(u => (
+                    <Marker 
+                      key={u.id} 
+                      position={[Number(u.lat), Number(u.lon)]} 
+                      icon={createUnitIcon(u.course, (u.speed || 0) > 3)}
+                      eventHandlers={{ click: () => setFocusedUnit(u) }}
+                    >
+                      <Popup>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{u.name}</div>
+                        <div style={{ fontSize: 12, color: "#6b7280" }}>{(u.speed || 0)} km/h · {u.ignition ? "Encendido" : "Apagado"}</div>
+                        <div style={{ fontSize: 11, marginTop: 4 }}>{addresses[u.id] || "Buscando dirección..."}</div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
+              ) : (
+                <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", flexDirection: "column", gap: 12 }}>
+                  <Navigation style={{ width: 48, height: 48, opacity: 0.3 }} />
+                  <span>Ninguna unidad reporta posición GPS actualmente</span>
+                </div>
+              )}
+            </MapErrorBoundary>
           </div>
         </div>
       )}
@@ -408,7 +477,13 @@ import { useMap } from "react-leaflet";
 function MapUpdater({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
-    map.flyTo(center, zoom, { duration: 0.8 });
+    if (center && !isNaN(Number(center[0])) && !isNaN(Number(center[1]))) {
+      try {
+        map.flyTo(center, zoom, { duration: 0.8 });
+      } catch (e) {
+        console.error("flyTo error:", e);
+      }
+    }
   }, [center, zoom, map]);
   return null;
 }
