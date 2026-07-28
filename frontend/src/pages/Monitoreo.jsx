@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ModuloBloqueado from "./ModuloBloqueado";
@@ -86,31 +86,41 @@ export default function Monitoreo() {
     }
   }
 
-  useEffect(() => { if (clienteHasGps) loadUnits(); }, [clienteHasGps]);
-  useEffect(() => { if (isAdmin && selectedEmpresa) loadUnits(selectedEmpresa); }, [isAdmin, selectedEmpresa]);
+  const requestedGeocodes = useRef(new Set());
+
+  useEffect(() => {
+    if (!user) return;
+    if (!isAdmin) loadUnits();
+  }, [isAdmin, user]);
+
+  useEffect(() => {
+    if (isAdmin && selectedEmpresa) loadUnits(selectedEmpresa);
+  }, [isAdmin, selectedEmpresa]);
 
   const data = state.data;
   const units = data?.units || [];
-  const unitsWithPos = units.filter(u => u.lat != null && u.lon != null);
+  const unitsWithPos = useMemo(() => units.filter(u => u.lat != null && u.lon != null), [units]);
+  const unitIdsKey = unitsWithPos.map(u => u.id).join(",");
 
-  // Lazy Geocoding con retraso para no bloquear a Nominatim (1 req/sec)
+  // Lazy Geocoding controlado con Set ref para evitar bucles infinitos y cuelgues
   useEffect(() => {
     if (unitsWithPos.length === 0) return;
     unitsWithPos.forEach((u, i) => {
-      if (!addresses[u.id]) {
+      if (u.id && !addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
+        requestedGeocodes.current.add(u.id);
         setTimeout(() => {
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${u.lat}&lon=${u.lon}&zoom=18&addressdetails=1`)
             .then(res => res.json())
             .then(json => {
-              setAddresses(prev => ({ ...prev, [u.id]: json.display_name || "Dirección desconocida" }));
+              setAddresses(prev => ({ ...prev, [u.id]: json.display_name || "Dirección localizada" }));
             })
             .catch(() => {
-              setAddresses(prev => ({ ...prev, [u.id]: "Error obteniendo dirección" }));
+              setAddresses(prev => ({ ...prev, [u.id]: "Ubicación en mapa" }));
             });
-        }, i * 1100);
+        }, i * 1200);
       }
     });
-  }, [unitsWithPos]); // eslint-disable-line
+  }, [unitIdsKey]); // eslint-disable-line
 
   if (!isAdmin && !clienteHasGps) {
     return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Tu empresa aún no tiene el servicio GPS con Wialon activado. Contacta a tu administrador ENERED para habilitarlo." />;
