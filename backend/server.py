@@ -2501,25 +2501,72 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_roles
 async def update_invoice(inv_id: str, data: InvoiceUpdate,
                          user: dict = Depends(require_roles("admin_enered"))):
     patch = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
-    res = await db.invoices.update_one({"id": inv_id}, {"$set": patch})
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
+    res = await db.invoices.update_one(q, {"$set": patch})
     if res.matched_count == 0:
+        # Check in subsidio as fallback
+        res_sub = await db.consumos_subsidio.update_many(q, {"$set": patch})
+        if res_sub.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Factura no encontrada")
+    inv = await db.invoices.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q, {"_id": 0})
+    return inv
+
+
+@api.post("/admin/invoices/{inv_id}/upload-file")
+async def admin_upload_invoice_file(
+    inv_id: str,
+    kind: str = Form("pdf"),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Permite al admin volver a cargar o reemplazar el archivo PDF/XML de una factura."""
+    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
+    inv = await db.invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    
+    if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
-    return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
+    emp = inv.get("empresa") or "GENERAL"
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
+    
+    file_bytes = await file.read()
+    ext = file.filename.split(".")[-1] if "." in file.filename else kind
+    storage_key = _inv_key(emp, f"{n_doc}.{ext}")
+    
+    storage.upload(storage_key, file_bytes, file.content_type or "application/pdf")
+    
+    update_data = {
+        "factura_storage_key": storage_key,
+        f"{kind}_filename": file.filename,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    if kind == "pdf":
+        update_data["pdf_key"] = storage_key
+        update_data["pdf_filename"] = file.filename
+    elif kind == "xml":
+        update_data["xml_filename"] = file.filename
+
+    await db.invoices.update_many(q, {"$set": update_data})
+    await db.consumos_subsidio.update_many(q, {"$set": update_data})
+
+    return {"ok": True, "storage_key": storage_key, "filename": file.filename}
 
 
 @api.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
-    inv = await db.invoices.find_one({"id": inv_id})
+    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
+    inv = await db.invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
         
     if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
         raise HTTPException(status_code=403, detail="Sin permisos para eliminar esta factura")
         
-    n_doc = inv.get("n_doc")
+    n_doc = inv.get("n_doc") or inv.get("numero_documento")
     empresa = inv.get("empresa")
     
-    await db.invoices.delete_one({"id": inv_id})
+    await db.invoices.delete_many(q)
     
     if n_doc and empresa:
         await db.consumptions.delete_many({"NUMERO_DOCUMENTO": n_doc, "EMPRESA": empresa})
@@ -3338,15 +3385,22 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     if not cfg:
         cfg = {"empresa": target or "", "linea_credito": 0.0, "dias_credito": 0, "ruc": ""}
 
-    inv_q = {"empresa": target} if target else {}
+    import re
+    inv_q = {}
+    if target:
+        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        inv_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
+
     invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
 
     # Dynamically pull and merge confirmed subsidio invoices for the account state calculations
     sub_q = {"status": "confirmed"}
     if target:
-        sub_q["empresa"] = target
-    elif user["role"] != "admin_enered":
-        sub_q["empresa"] = user.get("empresa")
+        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        sub_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
+    elif user["role"] != "admin_enered" and user.get("empresa"):
+        norm_pat = f"^{re.escape(user['empresa']).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        sub_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
 
     sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(5000)
     
@@ -3383,7 +3437,8 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
                 "moneda": "PEN",
                 "monto_total": 0.0,
                 "saldo": 0.0,
-                "estado": "pendiente",
+                "estado": "TERCERO" if d.get("origin") != "admin_ocr" else "pendiente",
+                "origin": d.get("origin") or "subsidio",
                 "atraso_dias": 0,
             }
         grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
@@ -3391,24 +3446,30 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     existing_ndocs = {r.get("n_doc") for r in invs if r.get("n_doc")}
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
-            sub_inv["saldo"] = sub_inv["monto_total"]
-            try:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc).date()
-                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
-                if today > venc_dt:
-                    sub_inv["atraso_dias"] = (today - venc_dt).days
-                    sub_inv["estado"] = "vencida"
-            except Exception:
-                pass
+            if sub_inv.get("origin") == "admin_ocr":
+                sub_inv["saldo"] = sub_inv["monto_total"]
+                try:
+                    from datetime import datetime as _dt
+                    today = _dt.now(timezone.utc).date()
+                    venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
+                    if today > venc_dt:
+                        sub_inv["atraso_dias"] = (today - venc_dt).days
+                        sub_inv["estado"] = "vencida"
+                except Exception:
+                    pass
+            else:
+                sub_inv["estado"] = "TERCERO"
+                sub_inv["saldo"] = 0.0
             invs.append(sub_inv)
 
     # Notas de despacho = consumos NO facturados (ESTADO != "FACTURADO" en el sheet)
     cons_q = {"ESTADO": {"$ne": "FACTURADO"}}
     if target:
-        cons_q["EMPRESA"] = target
-    elif user["role"] != "admin_enered":
-        cons_q["EMPRESA"] = user.get("empresa")
+        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        cons_q["EMPRESA"] = {"$regex": norm_pat, "$options": "i"}
+    elif user["role"] != "admin_enered" and user.get("empresa"):
+        norm_pat = f"^{re.escape(user['empresa']).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        cons_q["EMPRESA"] = {"$regex": norm_pat, "$options": "i"}
     cons = await db.consumptions.find(cons_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
 
     def _f(x, d=0.0):

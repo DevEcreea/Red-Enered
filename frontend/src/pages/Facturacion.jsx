@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
-  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2,
+  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2, Edit3, Upload,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
@@ -20,6 +20,7 @@ const ESTADO_BADGE = {
   vencida: "bg-red-100 text-red-700 border-red-200",
   pendiente: "bg-amber-50 text-amber-700 border-amber-200",
   pagada: "bg-green-50 text-green-700 border-green-200",
+  TERCERO: "bg-blue-50 text-blue-700 border-blue-200",
   // Legacy (datos antiguos)
   vencido: "bg-red-100 text-red-700 border-red-200",
   por_vencer: "bg-amber-50 text-amber-700 border-amber-200",
@@ -27,7 +28,7 @@ const ESTADO_BADGE = {
 };
 
 const ESTADO_LABEL = {
-  vencida: "VENCIDA", pendiente: "PENDIENTE", pagada: "PAGADA",
+  vencida: "VENCIDA", pendiente: "PENDIENTE", pagada: "PAGADA", TERCERO: "TERCERO",
   vencido: "VENCIDA", por_vencer: "PENDIENTE", pagado: "PAGADA",
 };
 
@@ -49,6 +50,8 @@ export default function Facturacion() {
   const [viewerTitle, setViewerTitle] = useState("");
   const [viewerDoc, setViewerDoc] = useState(null);
   const [abonoModalOpen, setAbonoModalOpen] = useState(false);
+  const [editingInv, setEditingInv] = useState(null);
+  const [uploadingInv, setUploadingInv] = useState(null);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -338,6 +341,7 @@ export default function Facturacion() {
             <table className="w-full text-sm" data-testid="ec-table">
               <thead className="bg-[#1E1B4B] text-white">
                 <tr className="text-[11px] font-bold uppercase tracking-wider">
+                  {user?.role === "admin_enered" && <th className="px-3 py-3 text-left">Cliente / Empresa</th>}
                   <th className="px-3 py-3 text-left">Producto</th>
                   <th className="px-3 py-3 text-left">Tipo Doc</th>
                   <th className="px-3 py-3 text-left">N° Doc</th>
@@ -348,18 +352,23 @@ export default function Facturacion() {
                   <th className="px-3 py-3 text-right">Monto Total</th>
                   <th className="px-3 py-3 text-right">Saldo</th>
                   <th className="px-3 py-3 text-center">Estado</th>
-                  <th className="px-3 py-3 text-center">Descargar</th>
+                  <th className="px-3 py-3 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {pageRows.length === 0 ? (
-                  <tr><td colSpan={11} className="text-center py-12 text-neutral-400">
+                  <tr><td colSpan={user?.role === "admin_enered" ? 12 : 11} className="text-center py-12 text-neutral-400">
                     <FileText className="w-10 h-10 mx-auto mb-2 text-neutral-300" />
                     Sin documentos pendientes
                   </td></tr>
                 ) : (
                   pageRows.map((inv) => (
                     <tr key={inv.id || inv.n_doc} className="hover:bg-neutral-50">
+                      {user?.role === "admin_enered" && (
+                        <td className="px-3 py-2.5 font-semibold text-neutral-800 truncate max-w-[160px]" title={inv.empresa}>
+                          {inv.empresa || "—"}
+                        </td>
+                      )}
                       <td className="px-3 py-2.5 truncate max-w-[150px]">{inv.producto || "—"}</td>
                       <td className="px-3 py-2.5">{inv.tipo_doc || "—"}</td>
                       <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
@@ -374,7 +383,7 @@ export default function Facturacion() {
                           <EstadoEditor
                             inv={inv}
                             onUpdated={(newEstado) => {
-                              setInvoices((prev) => prev.map((x) => x.id === inv.id ? { ...x, estado: newEstado } : x));
+                              setInvoices((prev) => prev.map((x) => x.n_doc === inv.n_doc ? { ...x, estado: newEstado } : x));
                               const params = empresa ? { empresa } : {};
                               api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
                             }}
@@ -394,13 +403,23 @@ export default function Facturacion() {
                             <FileText className="w-4 h-4" />
                           </button>
                           {inv.xml_filename && (
-                            <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
+                            <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="Descargar XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
                           )}
-                          <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {user?.role === "admin_enered" && (
+                            <>
+                              <button onClick={() => setEditingInv(inv)} className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-md" title="Editar Factura" data-testid={`ec-edit-invoice-${inv.n_doc}`}>
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => setUploadingInv(inv)} className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-md" title="Volver a Cargar Documento (PDF/XML)" data-testid={`ec-upload-doc-${inv.n_doc}`}>
+                                <Upload className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -502,9 +521,27 @@ export default function Facturacion() {
         }} 
       />
 
-      {viewerOpen && viewerDoc && (
-        <PdfViewerModal
-          open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadInvoice(viewerDoc?.inv, viewerDoc?.kind)} 
+      {editingInv && (
+        <EditInvoiceModal
+          inv={editingInv}
+          empresas={empresas}
+          onClose={() => setEditingInv(null)}
+          onSaved={() => {
+            const params = empresa ? { empresa } : {};
+            api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
+            api.get("/invoices", { params }).then((r) => setInvoices(r.data)).catch(() => {});
+          }}
+        />
+      )}
+
+      {uploadingInv && (
+        <ReuploadDocumentModal
+          inv={uploadingInv}
+          onClose={() => setUploadingInv(null)}
+          onSaved={() => {
+            const params = empresa ? { empresa } : {};
+            api.get("/invoices", { params }).then((r) => setInvoices(r.data)).catch(() => {});
+          }}
         />
       )}
     </div>
@@ -710,6 +747,160 @@ export function AbonoModal({ open, onClose, onSuccess }) {
           </div>
           <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
             {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Registrar Abono"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditInvoiceModal({ inv, empresas, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    n_doc: inv.n_doc || "",
+    empresa: inv.empresa || "",
+    f_emision: inv.f_emision || "",
+    f_vencimiento: inv.f_vencimiento || "",
+    monto_total: inv.monto_total || 0,
+    saldo: inv.saldo || 0,
+    estado: inv.estado || "pendiente",
+    producto: inv.producto || "DIESEL B5 S-50",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.put(`/invoices/${inv.id || inv.n_doc}`, form);
+      toast.success("Factura actualizada correctamente.");
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error("Error actualizando factura: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Editar Factura {inv.n_doc}</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">N° Documento</label>
+              <input type="text" value={form.n_doc} onChange={e => setForm({ ...form, n_doc: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Empresa / Cliente</label>
+              <select value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm bg-white font-medium outline-none" required>
+                <option value="">Seleccionar empresa...</option>
+                {empresas.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">F. Emisión</label>
+              <input type="date" value={form.f_emision} onChange={e => setForm({ ...form, f_emision: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">F. Vencimiento</label>
+              <input type="date" value={form.f_vencimiento} onChange={e => setForm({ ...form, f_vencimiento: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Monto Total (S/)</label>
+              <input type="number" step="0.01" value={form.monto_total} onChange={e => setForm({ ...form, monto_total: parseFloat(e.target.value) || 0 })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Saldo (S/)</label>
+              <input type="number" step="0.01" value={form.saldo} onChange={e => setForm({ ...form, saldo: parseFloat(e.target.value) || 0 })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">Estado</label>
+            <select value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm bg-white font-medium outline-none">
+              <option value="pendiente">PENDIENTE</option>
+              <option value="pagada">PAGADA</option>
+              <option value="vencida">VENCIDA</option>
+              <option value="TERCERO">TERCERO</option>
+            </select>
+          </div>
+          <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Guardar Cambios"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ReuploadDocumentModal({ inv, onClose, onSaved }) {
+  const [kind, setKind] = useState("pdf");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!file) return toast.error("Por favor selecciona un archivo");
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("kind", kind);
+    fd.append("file", file);
+
+    try {
+      await api.post(`/admin/invoices/${inv.id || inv.n_doc}/upload-file`, fd);
+      toast.success(`Archivo ${kind.toUpperCase()} cargado y asociado a la factura ${inv.n_doc}.`);
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error("Error al cargar documento: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Reemplazar / Cargar Documento</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <div className="text-xs font-bold text-neutral-500 mb-1">FACTURA</div>
+            <div className="text-base font-bold text-neutral-800">{inv.n_doc} ({inv.empresa || "—"})</div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-2">Tipo de Archivo</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-neutral-700">
+                <input type="radio" name="kind" value="pdf" checked={kind === "pdf"} onChange={() => setKind("pdf")} />
+                Archivo PDF (.pdf)
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-neutral-700">
+                <input type="radio" name="kind" value="xml" checked={kind === "xml"} onChange={() => setKind("xml")} />
+                Archivo XML (.xml)
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">Seleccionar Documento ({kind.toUpperCase()})</label>
+            <input type="file" required accept={kind === "pdf" ? ".pdf" : ".xml"} onChange={e => setFile(e.target.files[0])} className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 outline-none" />
+          </div>
+          <button type="submit" disabled={uploading} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Upload className="w-4 h-4" /> Subir y Reemplazar Documento</>}
           </button>
         </form>
       </div>

@@ -140,13 +140,25 @@ async def validar_abono(abono_id: str, user: dict = Depends(get_current_user)):
         if deuda <= 0:
             continue
             
+        or_conds = []
+        if fac.get("id"):
+            or_conds.append({"id": fac["id"]})
+        if fac.get("_id"):
+            or_conds.append({"_id": fac["_id"]})
+        if fac.get("n_doc"):
+            or_conds.append({"n_doc": fac["n_doc"]})
+        if fac.get("numero_documento"):
+            or_conds.append({"numero_documento": fac["numero_documento"]})
+
+        update_query = {"$or": or_conds} if or_conds else {"n_doc": fac.get("n_doc")}
+
         if monto_restante >= deuda:
             await db.invoices.update_one(
-                {"id": fac["id"]},
+                update_query,
                 {"$set": {"estado": "pagada", "saldo": 0.0}}
             )
             monto_restante -= deuda
-            facturas_pagadas.append({"fac_id": fac["id"], "monto_aplicado": deuda})
+            facturas_pagadas.append({"fac_id": fac.get("id") or fac.get("n_doc"), "monto_aplicado": deuda})
             
             await db.transacciones_historial.insert_one({
                 "id": str(uuid.uuid4()),
