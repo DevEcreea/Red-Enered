@@ -2407,7 +2407,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     else:
         if user.get("empresa"):
             q["empresa"] = user.get("empresa")
-    rows_inv = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
+    rows_inv = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", -1), ("fecha_emision", -1), ("n_doc", -1)]).to_list(1000)
     rows_emp = await db.empresas_invoices.find(q, {"_id": 0}).to_list(1000)
 
     # Normalize rows_emp to standard invoice schema
@@ -2483,6 +2483,12 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
         if n_doc not in existing_ndocs:
             sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
             rows.append(sub_inv)
+
+    # Sort all invoices by f_emision descending (newest first to oldest last)
+    def _sort_key(inv):
+        return inv.get("f_emision") or inv.get("fecha_emision") or inv.get("fecha") or ""
+        
+    rows.sort(key=_sort_key, reverse=True)
 
     return rows
 

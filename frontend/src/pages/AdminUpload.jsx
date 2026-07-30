@@ -8,6 +8,24 @@ import {
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];
 
+function toIsoDateString(val) {
+  if (!val) return "";
+  let s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    const p = s.split("/");
+    const d = p[0].padStart(2, "0");
+    const m = p[1].padStart(2, "0");
+    const y = p[2];
+    return `${y}-${m}-${d}`;
+  }
+  try {
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) return dt.toISOString().split("T")[0];
+  } catch {}
+  return "";
+}
+
 export default function AdminUpload() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -570,12 +588,12 @@ function InvoicesBulkUpload() {
                       <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.producto || ""} onChange={(e) => setItemField(it.id, "producto", e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Emisión</label>
-                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.f_emision || ""} onChange={(e) => setItemField(it.id, "f_emision", e.target.value)} />
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Emisión 📅</label>
+                      <input type="date" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none text-xs" value={toIsoDateString(it.f_emision)} onChange={(e) => setItemField(it.id, "f_emision", e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Vencimiento</label>
-                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.f_vencimiento || ""} onChange={(e) => setItemField(it.id, "f_vencimiento", e.target.value)} />
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Vencimiento 📅</label>
+                      <input type="date" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none text-xs" value={toIsoDateString(it.f_vencimiento)} onChange={(e) => setItemField(it.id, "f_vencimiento", e.target.value)} />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Importe Total</label>

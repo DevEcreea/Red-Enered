@@ -16,12 +16,41 @@ export function formatNumber(n, d = 2) {
 }
 
 export function formatDate(s) {
-  if (!s) return "";
+  if (!s || s === "Invalid Date") return "—";
   try {
-    return new Date(s).toLocaleDateString("es-PE", { year: "numeric", month: "short", day: "numeric" });
-  } catch {
-    return s;
-  }
+    let str = String(s).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+
+    // Check DD/MM/YYYY format
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      const parts = str.split("/");
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("es-PE", { year: "numeric", month: "short", day: "numeric" });
+      }
+    }
+
+    // Check YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const parts = str.split("-");
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("es-PE", { year: "numeric", month: "short", day: "numeric" });
+      }
+    }
+
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("es-PE", { year: "numeric", month: "short", day: "numeric" });
+    }
+  } catch {}
+  return s || "—";
 }
 
 export function formatApiError(detail) {
