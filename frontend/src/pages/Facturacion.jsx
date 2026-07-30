@@ -634,13 +634,15 @@ function EstadoEditor({ inv, onUpdated }) {
 
   const change = async (nuevo) => {
     if (nuevo === inv.estado) { setOpen(false); return; }
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     setSaving(true);
     try {
-      await api.put(`/invoices/${inv.id}`, { estado: nuevo });
+      await api.put(`/invoices/${encodeURIComponent(docId)}`, { estado: nuevo });
       onUpdated && onUpdated(nuevo);
       toast.success(`Estado cambiado a ${nuevo.toUpperCase()}`);
     } catch (e) {
-      toast.error("Error al cambiar estado");
+      toast.error("Error al cambiar estado: " + (e.response?.data?.detail || e.message));
     } finally {
       setSaving(false);
       setOpen(false);
@@ -771,9 +773,11 @@ function EditInvoiceModal({ inv, empresas, onClose, onSaved }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     setSaving(true);
     try {
-      await api.put(`/invoices/${inv.id || inv.n_doc}`, form);
+      await api.put(`/invoices/${encodeURIComponent(docId)}`, form);
       toast.success("Factura actualizada correctamente.");
       onSaved();
       onClose();
@@ -853,13 +857,15 @@ function ReuploadDocumentModal({ inv, onClose, onSaved }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!file) return toast.error("Por favor selecciona un archivo");
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     setUploading(true);
     const fd = new FormData();
     fd.append("kind", kind);
     fd.append("file", file);
 
     try {
-      await api.post(`/admin/invoices/${inv.id || inv.n_doc}/upload-file`, fd);
+      await api.post(`/admin/invoices/${encodeURIComponent(docId)}/upload-file`, fd);
       toast.success(`Archivo ${kind.toUpperCase()} cargado y asociado a la factura ${inv.n_doc}.`);
       onSaved();
       onClose();
