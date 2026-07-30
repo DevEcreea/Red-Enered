@@ -313,15 +313,27 @@ async def sync_precios_to_mongo(db):
             "updated_at": datetime.now(timezone.utc).isoformat()
         })
 
+    # Deduplicate normalized list by (empresa, estacion, ciudad, combustible)
+    dedup = {}
+    for item in normalized:
+        key = (
+            item["empresa"].strip().upper(),
+            item["estacion"].strip().upper(),
+            item["ciudad"].strip().upper(),
+            item["combustible"].strip().upper()
+        )
+        dedup[key] = item
+    final_normalized = list(dedup.values())
+
     # Update DB
-    if normalized:
+    if final_normalized:
         await db.precios.delete_many({})
-        await db.precios.insert_many(normalized)
+        await db.precios.insert_many(final_normalized)
 
     return {
         "ok": True,
         "tab": actual_tab,
-        "rows_inserted": len(normalized),
+        "rows_inserted": len(final_normalized),
         "started_at": started_at.isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
     }

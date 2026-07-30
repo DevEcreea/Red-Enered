@@ -11,13 +11,13 @@ async def main():
         count = await db.precios.count_documents({})
         print(f"Prices in DB: {count}")
         
-        # Test 2: Run sync
-        res = await google_sheets_sync.sync_precios_to_mongo(db)
-        print(f"Sync result: {res}")
-        
-        # Test 3: Check again
-        count2 = await db.precios.count_documents({})
-        print(f"Prices in DB after sync: {count2}")
+        # Sync consumos (Hoja 1)
+        res_consumos = await google_sheets_sync.sync_to_mongo(db, mode="replace")
+        print(f"Consumos Sync: {res_consumos}")
+
+        # Sync precios (PRECIOS)
+        res_precios = await google_sheets_sync.sync_precios_to_mongo(db)
+        print(f"Precios Sync: {res_precios}")
         
     except Exception as e:
         print(f"Error: {e}")

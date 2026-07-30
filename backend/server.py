@@ -2352,7 +2352,7 @@ async def download_manual_factura(consumo_id: str, user: dict = Depends(get_curr
 
 
 # ---------- Google Sheets Sync ----------
-from google_sheets_sync import sync_to_mongo, last_sync_status
+from google_sheets_sync import sync_to_mongo, sync_precios_to_mongo, last_sync_status
 
 
 class SheetsSyncIn(BaseModel):
@@ -2370,6 +2370,11 @@ async def sheets_sync(data: SheetsSyncIn, user: dict = Depends(require_roles("ad
         except Exception as e:
             logger.error(f"Failed to check dates: {e}")
         result = await sync_to_mongo(db, mode=data.mode)
+        try:
+            precios_res = await sync_precios_to_mongo(db)
+            result["precios_sync"] = precios_res
+        except Exception as pe:
+            logger.error(f"Failed to sync precios tab: {pe}")
         return result
     except Exception as e:
         logger.exception("Sheets sync error")
@@ -2482,7 +2487,39 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
             sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
-            rows.append(sub_inv)
+    # Calcular atraso_dias estrictamente por regla: pagada/pendiente/tercero -> 0; vencida -> días desde f_vencimiento hasta hoy
+    from datetime import date as _date, datetime as _dt
+    today = _date.today()
+
+    def _calc_atraso(r):
+        st = (r.get("estado") or "").lower().strip()
+        if st in ("pagada", "pagado", "pendiente", "tercero", "por_vencer"):
+            return 0
+        if st in ("vencida", "vencido"):
+            fv_str = r.get("f_vencimiento") or r.get("fecha_vencimiento")
+            if not fv_str:
+                return 0
+            try:
+                fv_str = str(fv_str).strip()
+                if len(fv_str) > 10 and "T" in fv_str:
+                    fv_str = fv_str.split("T")[0]
+                
+                if "-" in fv_str:
+                    parts = fv_str.split("-")
+                    fv = _date(int(parts[0]), int(parts[1]), int(parts[2]))
+                elif "/" in fv_str:
+                    parts = fv_str.split("/")
+                    fv = _date(int(parts[2]), int(parts[1]), int(parts[0]))
+                else:
+                    fv = _dt.fromisoformat(fv_str).date()
+                
+                return max(0, (today - fv).days)
+            except Exception:
+                return 0
+        return 0
+
+    for r in rows:
+        r["atraso_dias"] = _calc_atraso(r)
 
     # Sort all invoices by f_emision descending (newest first to oldest last)
     def _sort_key(inv):
@@ -3265,30 +3302,18 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     if kind not in ("pdf", "xml"):
         raise HTTPException(status_code=400, detail="kind inválido")
     
-    inv_clean = inv_id.strip()
-    import re
-    reg_clean = {"$regex": f"^{re.escape(inv_clean)}$", "$options": "i"}
+    q = _build_invoice_query(inv_id)
 
     # 1. Buscar factura por ID, n_doc o numero_documento
-    inv = await db.invoices.find_one({"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"n_doc": reg_clean}, {"numero_documento": reg_clean}]}, {"_id": 0})
+    inv = await db.invoices.find_one(q, {"_id": 0})
     if not inv:
-        inv = await db.empresas_invoices.find_one({"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"n_doc": reg_clean}, {"numero_documento": reg_clean}]}, {"_id": 0})
+        inv = await db.empresas_invoices.find_one(q, {"_id": 0})
     if not inv:
-        try:
-            from bson import ObjectId
-            oid = ObjectId(inv_clean)
-        except Exception:
-            oid = None
-        q_sub = {"$or": [{"id": inv_clean}, {"n_doc": inv_clean}, {"numero_documento": inv_clean}, {"numero_documento": reg_clean}]}
-        if oid:
-            q_sub["$or"].append({"_id": oid})
-        sub_doc = await db.consumos_subsidio.find_one(q_sub, {"_id": 0})
-        if not sub_doc:
-            sub_doc = await db.consumos_subsidio.find_one(q_sub)
+        sub_doc = await db.consumos_subsidio.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q)
         if sub_doc:
             inv = {
-                "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_clean,
-                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or inv_clean,
+                "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_id,
+                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or inv_id,
                 "empresa": sub_doc.get("empresa"),
                 "pdf_filename": sub_doc.get("factura_filename") or sub_doc.get("pdf_filename"),
                 "factura_storage_key": sub_doc.get("factura_storage_key"),
@@ -3298,10 +3323,14 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
             }
 
     if not inv:
-        raise HTTPException(status_code=404, detail=f"Factura {inv_clean} no encontrada")
+        raise HTTPException(status_code=404, detail=f"Factura {inv_id} no encontrada")
     
-    # Validar permisos flexibilizando formato de empresa (mayúsculas, sin puntos)
-    def _norm_e(e): return (e or "").strip().upper().replace(".", "").replace(",", "")
+    # Validar permisos flexibilizando formato de empresa (sin espacios ni puntuación)
+    import re
+    def _norm_e(e):
+        if not e: return ""
+        return re.sub(r"[^A-Z0-9]", "", str(e).upper())
+
     if user["role"] != "admin_enered":
         u_emp = _norm_e(user.get("empresa"))
         i_emp = _norm_e(inv.get("empresa"))
