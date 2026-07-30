@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import PdfViewerModal from "../components/PdfViewerModal";
+import { AbonoModal } from "./AbonoModal";
 
 const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
 
@@ -76,7 +77,6 @@ export default function Facturacion() {
   const totalPages = Math.max(1, Math.ceil(invoices.length / PAGE_SIZE));
   const pageRows = invoices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  // Donut: total = línea_credito; segmentos = facturas pendientes + notas despacho + disponible
   const donutData = useMemo(() => {
     if (!state) return [];
     const out = [];
@@ -176,7 +176,6 @@ export default function Facturacion() {
     }
   };
 
-
   if (loading || !state) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -187,7 +186,6 @@ export default function Facturacion() {
 
   return (
     <div className="space-y-6" data-testid="estado-cuenta-page">
-      {/* Header con filtro empresa para admin */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 text-xs text-neutral-500 font-semibold">
           <Clock className="w-3.5 h-3.5" />
@@ -206,13 +204,11 @@ export default function Facturacion() {
         )}
       </div>
 
-      {/* CARD PRINCIPAL: KPIs + Donut a la izquierda · botones violetas verticales a la derecha */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1500px)_280px] gap-5">
         <div className="bg-white border border-neutral-200 rounded-2xl p-7 w-full">
           <h2 className="font-cabinet font-black text-[32px] text-brand mb-6 leading-tight">Estado de Cuenta</h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6 items-center">
-            {/* KPIs en 2 columnas con divisores */}
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-x-10">
                 <KpiRow label="Línea de Crédito Total" value={formatSoles(state.linea_credito_total)} testid="ec-linea-total" />
@@ -239,7 +235,6 @@ export default function Facturacion() {
               </div>
             </div>
 
-            {/* Donut a la derecha del card */}
             <div className="w-full" data-testid="ec-donut">
               {donutData.length === 0 ? (
                 <div className="text-sm text-neutral-400 text-center pt-20">Sin datos</div>
@@ -267,7 +262,6 @@ export default function Facturacion() {
                         <Tooltip formatter={(v) => formatSoles(v)} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                       </PieChart>
                     </ResponsiveContainer>
-                    {/* Label centrado en el hueco del donut */}
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                       <div className="text-[10px] uppercase tracking-widest text-neutral-400 font-bold">Línea Total</div>
                       <div className="font-cabinet font-black text-[24px] text-neutral-900 leading-tight mt-1">
@@ -275,7 +269,6 @@ export default function Facturacion() {
                       </div>
                     </div>
                   </div>
-                  {/* Leyenda limpia debajo del donut */}
                   <div className="mt-3 space-y-1.5 px-1">
                     {donutData.map((d) => (
                       <div key={d.name} className="flex items-center justify-between text-xs">
@@ -293,7 +286,6 @@ export default function Facturacion() {
           </div>
         </div>
 
-        {/* Acciones laterales (columna vertical) */}
         <div className="flex flex-col gap-4">
           <ActionCard onClick={downloadStatePDF} icon={Download} title="Descarga tu" subtitle="estado de cuenta" testid="ec-action-download" />
           <ActionCardLarge onClick={() => navigate("/facturacion/historial")} icon={Search} title="Consulta tu historial" body="Consulta y descarga documentos de tipo pdf, Excel, etc." cta="Consultar" testid="ec-action-historial" />
@@ -302,7 +294,6 @@ export default function Facturacion() {
         </div>
       </div>
       
-      {/* TABS: Facturas vs Historial de Movimientos */}
       <div className="flex items-center gap-4 border-b border-neutral-200">
         <button
           onClick={() => setActiveTab("facturas")}
@@ -392,9 +383,11 @@ export default function Facturacion() {
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
                           )}
-                          <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {user?.role === "admin_enered" && (
+                            <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -453,7 +446,6 @@ export default function Facturacion() {
         </div>
       )}
 
-      {/* Modal "Próximamente" */}
       {comingSoon && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setComingSoon(false)}>
           <div className="bg-white rounded-2xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
@@ -532,30 +524,6 @@ function ActionCard({ onClick, icon: Icon, title, subtitle, testid }) {
   );
 }
 
-function ActionCardEmail({ onClick, testid }) {
-  const [email, setEmail] = React.useState("");
-  return (
-    <div data-testid={testid} className="bg-brand text-white rounded-2xl p-5 min-h-[110px]">
-      <div className="font-cabinet font-bold text-base leading-tight mb-3">Enviar estado de cuenta</div>
-      <div className="flex items-stretch gap-0 rounded-md overflow-hidden bg-white/10">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="Ingresa el Correo"
-          className="flex-1 h-9 px-3 bg-white text-neutral-800 text-xs font-medium outline-none placeholder:text-neutral-400"
-        />
-        <button
-          onClick={() => onClick && onClick(email)}
-          className="px-3 h-9 bg-[#5A1E96] text-white text-xs font-bold hover:bg-[#4A1880]"
-        >
-          Enviar
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function ActionCardLarge({ onClick, icon: Icon, title, body, cta, testid }) {
   return (
     <div data-testid={testid} className="bg-brand text-white rounded-2xl p-5 min-h-[140px] flex flex-col">
@@ -572,14 +540,11 @@ function ActionCardLarge({ onClick, icon: Icon, title, body, cta, testid }) {
   );
 }
 
-
-/* ---------------- Editor inline de estado (admin_enered) ---------------- */
 function EstadoEditor({ inv, onUpdated }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const ref = React.useRef(null);
 
-  // Cerrar al click fuera
   React.useEffect(() => {
     if (!open) return;
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -635,78 +600,6 @@ function EstadoEditor({ inv, onUpdated }) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ---------------- Modal de Registro de Abono ---------------- */
-export function AbonoModal({ open, onClose, onSuccess }) {
-  const [monto, setMonto] = useState("");
-  const [fecha, setFecha] = useState("");
-  const [nroOp, setNroOp] = useState("");
-  const [file, setFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-
-  if (!open) return null;
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!monto || !fecha || !nroOp || !file) {
-      toast.error("Por favor completa todos los campos y sube el voucher.");
-      return;
-    }
-    setSaving(true);
-    try {
-      const fd = new FormData();
-      fd.append("monto", monto);
-      fd.append("fecha_deposito", fecha);
-      fd.append("numero_operacion", nroOp);
-      fd.append("file", file);
-
-      await api.post("/abonos", fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success("Abono registrado correctamente. En breve será validado.");
-      onSuccess && onSuccess();
-      onClose();
-    } catch (err) {
-      toast.error("Error al registrar el abono: " + (err.response?.data?.detail || err.message));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
-          <h3 className="font-cabinet font-bold text-lg text-brand">Registrar un Abono</h3>
-          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-neutral-700 mb-1">Monto depositado (S/)</label>
-            <input type="number" step="0.01" min="0" required value={monto} onChange={e => setMonto(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-transparent outline-none" placeholder="0.00" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-neutral-700 mb-1">Fecha de pago</label>
-              <input type="date" required value={fecha} onChange={e => setFecha(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-neutral-700 mb-1">Nro. de Operación</label>
-              <input type="text" required value={nroOp} onChange={e => setNroOp(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" placeholder="Ej. 1234567" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-neutral-700 mb-1">Voucher de Pago (PDF, JPG, PNG)</label>
-            <input type="file" required accept=".pdf,image/*" onChange={e => setFile(e.target.files[0])} className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 outline-none" />
-          </div>
-          <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
-            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Registrar Abono"}
-          </button>
-        </form>
-      </div>
     </div>
   );
 }

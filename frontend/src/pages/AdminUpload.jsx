@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "../lib/api";
-import { formatApiError, formatDate } from "../lib/utils";
+import { formatApiError, formatDate, formatSoles } from "../lib/utils";
 import {
   Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
   Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode,
+  Search, Edit3, Save, X, AlertTriangle, Eye, FileUp, ChevronDown, ChevronUp,
 } from "lucide-react";
+
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];
 
@@ -67,7 +69,10 @@ export default function AdminUpload() {
 
       <InvoicesBulkUpload />
 
+      <InvoicesManager />
+
       {/* Google Sheets Sync */}
+
       <div className="chart-card border-l-4 border-l-brand" data-testid="sheets-sync-card">
         <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b border-neutral-100">
           <div className="flex items-start gap-3">
@@ -564,6 +569,542 @@ function InvoicesBulkUpload() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── InvoicesManager ─────────────────────────────────────────────────────────
+const ESTADO_BADGE = {
+  pagada:    "bg-green-100 text-green-700 border-green-200",
+  pendiente: "bg-amber-100 text-amber-700 border-amber-200",
+  vencida:   "bg-red-100  text-red-700  border-red-200",
+  pagado:    "bg-green-100 text-green-700 border-green-200",
+  por_vencer:"bg-amber-100 text-amber-700 border-amber-200",
+  vencido:   "bg-red-100  text-red-700  border-red-200",
+};
+const ESTADO_LABEL = {
+  pagada:"PAGADA", pendiente:"PENDIENTE", vencida:"VENCIDA",
+  pagado:"PAGADA", por_vencer:"PENDIENTE", vencido:"VENCIDA",
+};
+
+function InvoicesManager() {
+  const [empresas, setEmpresas]       = useState([]);
+  const [empresa, setEmpresa]         = useState("");
+  const [invoices, setInvoices]       = useState([]);
+  const [loading, setLoading]         = useState(false);
+  const [search, setSearch]           = useState("");
+  const [editInv, setEditInv]         = useState(null);   // factura en edición
+  const [sortField, setSortField]     = useState("f_emision");
+  const [sortDir, setSortDir]         = useState("desc");
+
+  useEffect(() => {
+    api.get("/empresas-config")
+      .then(r => setEmpresas((r.data || []).map(c => c.empresa)))
+      .catch(() => {});
+  }, []);
+
+  const load = async (emp) => {
+    if (!emp) { setInvoices([]); return; }
+    setLoading(true);
+    try {
+      const { data } = await api.get("/invoices", { params: { empresa: emp } });
+      // Filtrar solo facturas propias (no las de subsidio dinámico que no tienen ID permanente)
+      setInvoices((data || []).filter(i => i.id && i.created_via !== "subsidio_dynamic"));
+    } catch { setInvoices([]); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(empresa); }, [empresa]);
+
+  const handleSort = (field) => {
+    if (sortField === field) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  const filtered = useMemo(() => {
+    let rows = invoices;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      rows = rows.filter(i =>
+        (i.n_doc || "").toLowerCase().includes(q) ||
+        (i.tipo_doc || "").toLowerCase().includes(q) ||
+        (i.producto || "").toLowerCase().includes(q)
+      );
+    }
+    return [...rows].sort((a, b) => {
+      const av = a[sortField] ?? "";
+      const bv = b[sortField] ?? "";
+      const cmp = String(av).localeCompare(String(bv), "es", { numeric: true });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [invoices, search, sortField, sortDir]);
+
+  const handleDelete = async (inv) => {
+    if (!window.confirm(`¿Eliminar la factura ${inv.n_doc}?\nEsta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/invoices/${inv.id}`);
+      setInvoices(prev => prev.filter(x => x.id !== inv.id));
+    } catch (e) {
+      alert("Error al eliminar: " + (e.response?.data?.detail || e.message));
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ChevronDown className="w-3 h-3 opacity-30 inline ml-1" />;
+    return sortDir === "asc"
+      ? <ChevronUp   className="w-3 h-3 text-brand inline ml-1" />
+      : <ChevronDown className="w-3 h-3 text-brand inline ml-1" />;
+  };
+
+  const montoWarn = (inv) => parseFloat(inv.monto_total || 0) === 0;
+  const sinArchivos = (inv) => !inv.pdf_filename && !inv.xml_filename;
+
+  const alertCount = filtered.filter(i => montoWarn(i) || sinArchivos(i)).length;
+
+  return (
+    <div className="chart-card border-l-4 border-l-emerald-400" data-testid="invoices-manager-card">
+      {/* Header */}
+      <div className="flex items-start gap-3 mb-5 pb-4 border-b border-neutral-100">
+        <div className="w-10 h-10 rounded-md bg-emerald-50 border border-emerald-100 flex items-center justify-center flex-shrink-0">
+          <FileText className="w-5 h-5 text-emerald-600" strokeWidth={2.5} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-cabinet font-bold text-lg text-neutral-900">Gestión de Facturas por Cliente</h3>
+          <p className="text-xs text-neutral-500 mt-0.5">
+            Edita, elimina o re-sube archivos de facturas individuales. Las facturas con&nbsp;
+            <span className="font-bold text-amber-600">S/ 0.00</span> o sin archivos adjuntos se resaltan automáticamente.
+          </p>
+        </div>
+        {empresa && !loading && (
+          <button onClick={() => load(empresa)} className="p-2 rounded-lg border border-neutral-200 hover:border-brand text-neutral-500 hover:text-brand transition-colors" title="Refrescar">
+            <RefreshCw className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Controles */}
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
+        <div className="flex-1">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1 block">Empresa</label>
+          <select
+            value={empresa}
+            onChange={e => setEmpresa(e.target.value)}
+            className="h-10 w-full px-3 border border-border rounded-md bg-white text-sm font-semibold focus:border-brand focus:ring-1 focus:ring-brand outline-none"
+            data-testid="inv-manager-empresa"
+          >
+            <option value="">— Selecciona una empresa —</option>
+            {empresas.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+        <div className="flex-1">
+          <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1 block">Buscar</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="N° Doc, tipo, producto…"
+              className="h-10 w-full pl-9 pr-3 border border-border rounded-md bg-white text-sm focus:border-brand focus:ring-1 focus:ring-brand outline-none"
+              data-testid="inv-manager-search"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Alertas */}
+      {empresa && !loading && alertCount > 0 && (
+        <div className="mb-4 flex items-start gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-800 font-semibold">
+            {alertCount} factura{alertCount !== 1 ? "s" : ""} requiere{alertCount === 1 ? "" : "n"} atención: monto en S/ 0.00 o sin archivos adjuntos.
+          </p>
+        </div>
+      )}
+
+      {/* Estados vacíos */}
+      {!empresa && (
+        <div className="text-center py-14 text-neutral-400">
+          <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p className="text-sm font-medium">Selecciona una empresa para ver sus facturas</p>
+        </div>
+      )}
+      {empresa && loading && (
+        <div className="text-center py-14 text-neutral-400">
+          <RefreshCw className="w-8 h-8 mx-auto mb-3 animate-spin opacity-40" />
+          <p className="text-sm">Cargando facturas…</p>
+        </div>
+      )}
+      {empresa && !loading && filtered.length === 0 && (
+        <div className="text-center py-14 text-neutral-400">
+          <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p className="text-sm font-medium">{search ? "Sin resultados para esa búsqueda" : "Esta empresa no tiene facturas registradas"}</p>
+        </div>
+      )}
+
+      {/* Tabla */}
+      {empresa && !loading && filtered.length > 0 && (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-neutral-500 font-semibold">
+              {filtered.length} factura{filtered.length !== 1 ? "s" : ""}
+              {search && ` (filtradas de ${invoices.length})`}
+            </p>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-neutral-200">
+            <table className="w-full text-sm" data-testid="inv-manager-table">
+              <thead className="bg-[#1E1B4B] text-white">
+                <tr className="text-[10px] font-bold uppercase tracking-wider">
+                  {[
+                    { label: "N° Doc",        field: "n_doc" },
+                    { label: "Tipo",          field: "tipo_doc" },
+                    { label: "F. Emisión",    field: "f_emision" },
+                    { label: "F. Vencimiento",field: "f_vencimiento" },
+                    { label: "Monto Total",   field: "monto_total" },
+                    { label: "Saldo",         field: "saldo" },
+                    { label: "Estado",        field: "estado" },
+                    { label: "Archivos",      field: null },
+                    { label: "Acciones",      field: null },
+                  ].map(({ label, field }) => (
+                    <th
+                      key={label}
+                      onClick={() => field && handleSort(field)}
+                      className={`px-3 py-3 text-left whitespace-nowrap ${field ? "cursor-pointer hover:bg-white/10 select-none" : ""}`}
+                    >
+                      {label}{field && <SortIcon field={field} />}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {filtered.map(inv => {
+                  const warn0 = montoWarn(inv);
+                  const warnNoFiles = sinArchivos(inv);
+                  const rowCls = warn0 || warnNoFiles ? "bg-amber-50/40 hover:bg-amber-50" : "hover:bg-neutral-50";
+                  const estadoCls = ESTADO_BADGE[inv.estado] || "bg-neutral-100 text-neutral-600 border-neutral-200";
+                  return (
+                    <tr key={inv.id} className={`transition-colors ${rowCls}`}>
+                      <td className="px-3 py-2.5 font-mono font-bold text-brand whitespace-nowrap">
+                        {inv.n_doc}
+                        {warn0 && <span className="ml-1.5 inline-flex items-center gap-0.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-200 rounded-full px-1.5 py-0.5"><AlertTriangle className="w-2.5 h-2.5" />S/0</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-neutral-600 text-xs whitespace-nowrap">{inv.tipo_doc || "—"}</td>
+                      <td className="px-3 py-2.5 text-neutral-600 whitespace-nowrap">{formatDate(inv.f_emision) || "—"}</td>
+                      <td className="px-3 py-2.5 text-neutral-600 whitespace-nowrap">{formatDate(inv.f_vencimiento) || "—"}</td>
+                      <td className={`px-3 py-2.5 text-right font-bold whitespace-nowrap ${warn0 ? "text-amber-600" : "text-neutral-900"}`}>
+                        {formatSoles(inv.monto_total)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-neutral-700 whitespace-nowrap">{formatSoles(inv.saldo)}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${estadoCls}`}>
+                          {ESTADO_LABEL[inv.estado] || (inv.estado || "—").toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1">
+                          {inv.pdf_filename
+                            ? <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-red-50 text-red-600 border border-red-200 rounded px-1.5 py-0.5">PDF</span>
+                            : <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-neutral-100 text-neutral-400 border border-neutral-200 rounded px-1.5 py-0.5">Sin PDF</span>
+                          }
+                          {inv.xml_filename
+                            ? <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5">XML</span>
+                            : <span className="inline-flex items-center gap-0.5 text-[10px] font-bold bg-neutral-100 text-neutral-400 border border-neutral-200 rounded px-1.5 py-0.5">Sin XML</span>
+                          }
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditInv({ ...inv })}
+                            className="p-1.5 rounded-md hover:bg-brand/10 text-brand transition-colors"
+                            title="Editar factura"
+                            data-testid={`inv-edit-${inv.n_doc}`}
+                          >
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(inv)}
+                            className="p-1.5 rounded-md hover:bg-red-50 text-red-500 transition-colors"
+                            title="Eliminar factura"
+                            data-testid={`inv-delete-${inv.n_doc}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* Modal de edición */}
+      {editInv && (
+        <InvoiceEditModal
+          inv={editInv}
+          onClose={() => setEditInv(null)}
+          onSaved={(updated) => {
+            setInvoices(prev => prev.map(x => x.id === updated.id ? updated : x));
+            setEditInv(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Modal de edición de factura ─────────────────────────────────────────────
+function InvoiceEditModal({ inv, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    n_doc:          inv.n_doc          || "",
+    tipo_doc:       inv.tipo_doc       || "Factura Ventas",
+    producto:       inv.producto       || "",
+    f_emision:      inv.f_emision      || "",
+    f_vencimiento:  inv.f_vencimiento  || "",
+    moneda:         inv.moneda         || "PEN",
+    monto_total:    inv.monto_total    ?? 0,
+    saldo:          inv.saldo          ?? 0,
+    estado:         inv.estado         || "pendiente",
+  });
+  const [pdfFile, setPdfFile]   = useState(null);
+  const [xmlFile, setXmlFile]   = useState(null);
+  const [saving, setSaving]     = useState(false);
+  const [err, setErr]           = useState("");
+  const pdfRef = useRef(null);
+  const xmlRef = useRef(null);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setErr(""); setSaving(true);
+    try {
+      // 1. Actualizar campos de texto
+      const patch = {
+        tipo_doc:      form.tipo_doc,
+        producto:      form.producto,
+        f_emision:     form.f_emision || null,
+        f_vencimiento: form.f_vencimiento || null,
+        moneda:        form.moneda,
+        monto_total:   parseFloat(form.monto_total) || 0,
+        saldo:         parseFloat(form.saldo) || 0,
+        estado:        form.estado,
+      };
+      const { data: updated } = await api.put(`/invoices/${inv.id}`, patch);
+
+      // 2. Re-subir archivos si se seleccionaron
+      let finalInv = updated;
+      if (pdfFile || xmlFile) {
+        const fd = new FormData();
+        if (pdfFile) fd.append("pdf", pdfFile);
+        if (xmlFile) fd.append("xml", xmlFile);
+        const { data: fileRes } = await api.post(
+          `/admin/invoices/${inv.id}/upload-file`, fd,
+          { headers: { "Content-Type": "multipart/form-data" } }
+        );
+        finalInv = fileRes.invoice || updated;
+      }
+
+      onSaved(finalInv);
+    } catch (ex) {
+      setErr(formatApiError(ex.response?.data?.detail) || ex.message);
+    } finally { setSaving(false); }
+  };
+
+  const TIPO_OPTS = ["Factura Ventas", "Boleta Ventas", "Nota de Crédito", "Nota de Débito"];
+  const ESTADO_OPTS = [
+    { v: "pagada",    l: "PAGADA",    cls: "bg-green-50 text-green-700 border-green-200" },
+    { v: "pendiente", l: "PENDIENTE", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    { v: "vencida",   l: "VENCIDA",   cls: "bg-red-50  text-red-700  border-red-200" },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/60 p-4 overflow-y-auto" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-4 overflow-hidden">
+        {/* Header */}
+        <div className="flex justify-between items-center px-6 py-4 border-b border-neutral-100 bg-[#1E1B4B]">
+          <div>
+            <h3 className="font-cabinet font-bold text-lg text-white">Editar Factura</h3>
+            <p className="text-xs text-white/60 mt-0.5 font-mono">{inv.n_doc} · {inv.empresa}</p>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSave} className="px-6 py-5 space-y-5">
+
+          {/* Fila 1: N° Doc (readonly) + Tipo */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">N° Documento</label>
+              <input value={form.n_doc} disabled className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm bg-neutral-50 text-neutral-400 font-mono cursor-not-allowed" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Tipo de Documento</label>
+              <select value={form.tipo_doc} onChange={e => set("tipo_doc", e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none">
+                {TIPO_OPTS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Fila 2: Producto */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Producto / Descripción</label>
+            <input
+              type="text" value={form.producto}
+              onChange={e => set("producto", e.target.value)}
+              placeholder="ej. DIESEL B5 S-50"
+              className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none"
+            />
+          </div>
+
+          {/* Fila 3: Fechas */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Fecha de Emisión</label>
+              <input type="date" value={form.f_emision} onChange={e => set("f_emision", e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Fecha de Vencimiento</label>
+              <input type="date" value={form.f_vencimiento} onChange={e => set("f_vencimiento", e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" />
+            </div>
+          </div>
+
+          {/* Fila 4: Monto + Saldo + Moneda */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Monto Total (S/)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.monto_total}
+                onChange={e => set("monto_total", e.target.value)}
+                className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Saldo Pendiente (S/)</label>
+              <input
+                type="number" step="0.01" min="0"
+                value={form.saldo}
+                onChange={e => set("saldo", e.target.value)}
+                className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Moneda</label>
+              <select value={form.moneda} onChange={e => set("moneda", e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none">
+                <option value="PEN">PEN (Soles)</option>
+                <option value="USD">USD (Dólares)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Fila 5: Estado */}
+          <div>
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-2">Estado</label>
+            <div className="flex gap-2">
+              {ESTADO_OPTS.map(o => (
+                <button
+                  key={o.v} type="button"
+                  onClick={() => set("estado", o.v)}
+                  className={`px-4 h-9 rounded-full border text-xs font-bold transition-all ${
+                    form.estado === o.v ? `${o.cls} ring-2 ring-offset-1 ring-brand` : "bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400"
+                  }`}
+                >
+                  {o.l}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Fila 6: Re-subida de archivos */}
+          <div className="rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-neutral-700">
+              <FileUp className="w-4 h-4 text-brand" />
+              Re-subir archivos (opcional)
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {/* PDF */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">PDF</span>
+                  {inv.pdf_filename
+                    ? <span className="text-[10px] text-green-600 font-semibold">✓ Archivo existente</span>
+                    : <span className="text-[10px] text-amber-600 font-semibold">⚠ Sin archivo</span>
+                  }
+                </div>
+                <div
+                  onClick={() => pdfRef.current?.click()}
+                  className={`border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors ${pdfFile ? "border-brand bg-brand/5" : "border-neutral-200 hover:border-brand/50 hover:bg-brand/5"}`}
+                >
+                  <FileText className={`w-5 h-5 mx-auto mb-1 ${pdfFile ? "text-brand" : "text-neutral-400"}`} />
+                  <div className="text-[11px] font-semibold text-neutral-600 truncate">
+                    {pdfFile ? pdfFile.name : "Click para seleccionar PDF"}
+                  </div>
+                  <input ref={pdfRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={e => setPdfFile(e.target.files[0] || null)} data-testid="inv-edit-pdf" />
+                </div>
+                {pdfFile && (
+                  <button type="button" onClick={() => { setPdfFile(null); if (pdfRef.current) pdfRef.current.value = ""; }} className="text-[10px] text-red-500 hover:underline mt-1">
+                    × Quitar PDF
+                  </button>
+                )}
+              </div>
+              {/* XML */}
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">XML</span>
+                  {inv.xml_filename
+                    ? <span className="text-[10px] text-green-600 font-semibold">✓ Archivo existente</span>
+                    : <span className="text-[10px] text-amber-600 font-semibold">⚠ Sin archivo</span>
+                  }
+                </div>
+                <div
+                  onClick={() => xmlRef.current?.click()}
+                  className={`border-2 border-dashed rounded-lg p-3 text-center cursor-pointer transition-colors ${xmlFile ? "border-blue-400 bg-blue-50/50" : "border-neutral-200 hover:border-blue-300 hover:bg-blue-50/30"}`}
+                >
+                  <FileSpreadsheet className={`w-5 h-5 mx-auto mb-1 ${xmlFile ? "text-blue-600" : "text-neutral-400"}`} />
+                  <div className="text-[11px] font-semibold text-neutral-600 truncate">
+                    {xmlFile ? xmlFile.name : "Click para seleccionar XML"}
+                  </div>
+                  <input ref={xmlRef} type="file" accept=".xml,text/xml,application/xml" className="hidden" onChange={e => setXmlFile(e.target.files[0] || null)} data-testid="inv-edit-xml" />
+                </div>
+                {xmlFile && (
+                  <button type="button" onClick={() => { setXmlFile(null); if (xmlRef.current) xmlRef.current.value = ""; }} className="text-[10px] text-red-500 hover:underline mt-1">
+                    × Quitar XML
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Error */}
+          {err && (
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+              <span>{err}</span>
+            </div>
+          )}
+
+          {/* Footer botones */}
+          <div className="flex justify-end gap-3 pt-2 border-t border-neutral-100">
+            <button type="button" onClick={onClose} className="h-10 px-5 rounded-lg border border-neutral-200 text-sm font-semibold text-neutral-600 hover:border-neutral-400 transition-colors">
+              Cancelar
+            </button>
+            <button
+              type="submit" disabled={saving}
+              className="h-10 px-6 rounded-lg bg-brand text-white text-sm font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+              data-testid="inv-edit-save"
+            >
+              {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {saving ? "Guardando…" : "Guardar cambios"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

@@ -127,7 +127,7 @@ async def validar_abono(abono_id: str, user: dict = Depends(get_current_user)):
     cursor = db.invoices.find({
         "empresa": empresa_nombre,
         "estado": {"$in": ["PENDIENTE", "pendiente", "vencida", "VENCIDA", "por_vencer"]}
-    }).sort("fecha_emision", 1)
+    }).sort("f_emision", 1)  # campo correcto es f_emision, no fecha_emision
     facturas_pendientes = await cursor.to_list(1000)
     
     facturas_pagadas = []
@@ -153,7 +153,7 @@ async def validar_abono(abono_id: str, user: dict = Depends(get_current_user)):
                 "empresa": empresa_nombre,
                 "tipo": "PAGO_FACTURA",
                 "monto": deuda,
-                "descripcion": f"Factura {fac.get('numero_documento', fac['id'])} pagada con abono {abono['numero_operacion']}",
+                "descripcion": f"Factura {fac.get('n_doc', fac.get('id', ''))} pagada con abono {abono['numero_operacion']}",
                 "abono_id": abono_id,
                 "factura_id": fac["id"],
                 "created_at": datetime.now(timezone.utc).isoformat(),
@@ -171,7 +171,7 @@ async def validar_abono(abono_id: str, user: dict = Depends(get_current_user)):
                 "empresa": empresa_nombre,
                 "tipo": "PAGO_PARCIAL_FACTURA",
                 "monto": monto_restante,
-                "descripcion": f"Abono parcial ({monto_restante}) a factura {fac.get('numero_documento', fac['id'])}",
+                "descripcion": f"Abono parcial ({monto_restante}) a factura {fac.get('n_doc', fac.get('id', ''))}",
                 "abono_id": abono_id,
                 "factura_id": fac["id"],
                 "created_at": datetime.now(timezone.utc).isoformat(),

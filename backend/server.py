@@ -1236,19 +1236,24 @@ async def dashboard_overview(
         if not p: continue
         km = _f(r.get("KILOMETRAJE"))
         gl = _f(r.get("CANTIDAD_GL"))
-        if km > 0:
-            d = by_placa_km.setdefault(p, {"kms": [], "gal": 0})
-            d["kms"].append(km)
+        if km > 0 and r.get("FECHA"):
+            d = by_placa_km.setdefault(p, {"readings": [], "gal": 0})
+            d["readings"].append((r["FECHA"], km))
             d["gal"] += gl
             
     total_dist = 0
     total_gal_km = 0
+    MAX_KM_PER_DELTA = 3000
     for p, d in by_placa_km.items():
-        if len(d["kms"]) >= 2:
-            dist = max(d["kms"]) - min(d["kms"])
-            if dist > 0:
-                total_dist += dist
-                total_gal_km += d["gal"]
+        d["readings"].sort(key=lambda x: x[0])
+        km_trav = 0
+        for i in range(1, len(d["readings"])):
+            delta = d["readings"][i][1] - d["readings"][i - 1][1]
+            if 0 < delta <= MAX_KM_PER_DELTA:
+                km_trav += delta
+        if km_trav > 0 and d["gal"] > 0:
+            total_dist += km_trav
+            total_gal_km += d["gal"]
                 
     rendimiento = total_dist / total_gal_km if total_gal_km > 0 else 0
     costo_km = total_gasto / total_dist if total_dist > 0 else 0
@@ -1826,8 +1831,9 @@ async def analytics_fleet(
     except Exception:
         dias_unicos = 1
 
-    rendimientos_validos = [r["km_por_gal"] for r in rendimiento if r["km_por_gal"]]
-    rend_prom = round(sum(rendimientos_validos) / len(rendimientos_validos), 2) if rendimientos_validos else 0
+    total_km_validos = sum(r["km_recorridos"] for r in rendimiento if r.get("km_por_gal") is not None)
+    total_gal_validos = sum(r["gal"] for r in rendimiento if r.get("km_por_gal") is not None)
+    rend_prom = round(total_km_validos / total_gal_validos, 2) if total_gal_validos > 0 else 0
 
     ahorro_pct = round((total_ahorro_all / (total_gasto_all + total_ahorro_all) * 100) if (total_gasto_all + total_ahorro_all) else 0, 2)
 
@@ -2406,6 +2412,50 @@ async def admin_invoice_reassign(inv_id: str, empresa: str = Form(...),
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
+
+@api.post("/admin/invoices/{inv_id}/upload-file")
+async def admin_invoice_upload_file(
+    inv_id: str,
+    pdf: Optional[UploadFile] = File(None),
+    xml: Optional[UploadFile] = File(None),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    """Re-sube el PDF y/o XML de una factura existente.
+    Permite corregir facturas con archivos faltantes o incorrectos sin tener
+    que hacer un nuevo bulk-upload.
+    """
+    inv = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    empresa = inv.get("empresa", "")
+    n_doc = inv.get("n_doc", inv_id)
+    patch: dict = {}
+
+    if pdf and pdf.filename:
+        pdf_bytes = await pdf.read()
+        pdf_filename = f"{_safe_doc(n_doc)}.pdf"
+        pdf_key = _inv_key(empresa, pdf_filename)
+        storage.save_object(pdf_key, pdf_bytes, "application/pdf")
+        patch["pdf_filename"] = pdf_filename
+        logger.info(f"Re-uploaded PDF for invoice {n_doc} ({empresa})")
+
+    if xml and xml.filename:
+        xml_bytes = await xml.read()
+        xml_filename = f"{_safe_doc(n_doc)}.xml"
+        xml_key = _inv_key(empresa, xml_filename)
+        storage.save_object(xml_key, xml_bytes, "application/xml")
+        patch["xml_filename"] = xml_filename
+        logger.info(f"Re-uploaded XML for invoice {n_doc} ({empresa})")
+
+    if not patch:
+        raise HTTPException(status_code=400, detail="No se adjuntó ningún archivo (pdf o xml)")
+
+    await db.invoices.update_one({"id": inv_id}, {"$set": patch})
+    updated = await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+    return {"ok": True, "invoice": updated}
+
 
 
 # ---------- Control Integral ----------
@@ -4388,23 +4438,39 @@ async def seed_demo_data():
             await db.consumptions.insert_many(rows)
             logger.info(f"Seeded {len(rows)} consumption rows")
 
-    # Invoices
+    # Invoices — usar campos correctos del schema real de facturas
     if await db.invoices.count_documents({}) == 0:
         invoices = []
         for empresa in SAMPLE_COMPANIES:
             for i in range(3):
-                fecha = (datetime.now(timezone.utc).date() - timedelta(days=30 * i)).isoformat()
-                venc = (datetime.now(timezone.utc).date() - timedelta(days=30 * i - 15)).isoformat()
+                f_emision = (datetime.now(timezone.utc).date() - timedelta(days=30 * i)).isoformat()
+                f_venc = (datetime.now(timezone.utc).date() - timedelta(days=30 * i - 15)).isoformat()
+                monto = round(random.uniform(5000, 35000), 2)
+                estado = random.choice(["pendiente", "pagada", "vencida"])
+                atraso = 0
+                if estado == "vencida":
+                    try:
+                        from datetime import date as _d
+                        atraso = max(0, (_d.today() - _d.fromisoformat(f_venc)).days)
+                    except Exception:
+                        pass
                 invoices.append({
                     "id": str(uuid.uuid4()),
                     "empresa": empresa,
-                    "numero": f"F001-{random.randint(1000,9999)}",
-                    "fecha_emision": fecha,
-                    "fecha_vencimiento": venc,
-                    "monto": round(random.uniform(5000, 35000), 2),
-                    "estado": random.choice(["pendiente", "pagada", "vencida"]),
-                    "pdf_url": None,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "n_doc": f"F001-{random.randint(1000,9999):08d}",
+                    "tipo_doc": "Factura Ventas",
+                    "producto": "DIESEL B5 S-50",
+                    "f_emision": f_emision,
+                    "f_vencimiento": f_venc,
+                    "moneda": "PEN",
+                    "monto_total": monto,
+                    "saldo": monto if estado != "pagada" else 0.0,
+                    "estado": estado,
+                    "atraso_dias": atraso,
+                    "pdf_filename": None,
+                    "xml_filename": None,
+                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                    "uploaded_by": "seed",
                 })
         if invoices:
             await db.invoices.insert_many(invoices)

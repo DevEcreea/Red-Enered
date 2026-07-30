@@ -80,9 +80,18 @@ export default function EstadoCuentaHistorial() {
         const map = { pagada: ["pagada", "pagado"], pendiente: ["pendiente", "por_vencer"], vencida: ["vencida", "vencido"] };
         if (!(map[fEstado] || []).includes(e)) return false;
       }
-      // Tipo doc
+      // Tipo doc: el backend puede guardar código ("01") o texto ("Factura Ventas").
+      // Mapeamos ambos formatos para que el filtro funcione siempre.
       if (fTipoDoc !== "todos") {
-        if ((inv.tipo_doc || "01") !== fTipoDoc) return false;
+        const TIPO_CODE_TO_TEXT = {
+          "01": ["01", "factura ventas", "factura"],
+          "03": ["03", "boleta ventas", "boleta"],
+          "07": ["07", "nota de crédito", "nota crédito", "nota credito"],
+          "08": ["08", "nota de débito", "nota débito", "nota debito"],
+        };
+        const tipoRaw = (inv.tipo_doc || "").toLowerCase();
+        const allowed = TIPO_CODE_TO_TEXT[fTipoDoc] || [fTipoDoc];
+        if (!allowed.some((v) => tipoRaw.includes(v))) return false;
       }
       // Serie + Correlativo: parsear inv.n_doc tipo "F003-00000217"
       const ndoc = (inv.n_doc || "").toUpperCase();
@@ -441,27 +450,38 @@ export default function EstadoCuentaHistorial() {
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <div className="inline-flex gap-1.5">
-                              <button
-                                onClick={() => viewDoc(inv.id, "pdf")}
-                                title="Visualizar PDF"
-                                className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => downloadDoc(inv.id, "pdf")}
-                                title="Descargar PDF"
-                                className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
-                              >
-                                <FileText className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => downloadDoc(inv.id, "xml")}
-                                title="Descargar XML"
-                                className="w-7 h-7 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center"
-                              >
-                                <FileSpreadsheet className="w-3.5 h-3.5" />
-                              </button>
+                              {/* Solo mostrar botones de descarga si existe el archivo */}
+                              {inv.pdf_filename && (
+                                <button
+                                  onClick={() => viewDoc(inv.id, "pdf")}
+                                  title="Visualizar PDF"
+                                  className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+                              {inv.pdf_filename && (
+                                <button
+                                  onClick={() => downloadDoc(inv.id, "pdf")}
+                                  title="Descargar PDF"
+                                  className="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center hover:bg-brand hover:text-white transition-colors"
+                                >
+                                  <FileText className="w-4 h-4" />
+                                </button>
+                              )}
+                              {inv.xml_filename && (
+                                <button
+                                  onClick={() => downloadDoc(inv.id, "xml")}
+                                  title="Descargar XML"
+                                  className="w-7 h-7 rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center justify-center"
+                                >
+                                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {/* Sin archivos: indicador visual */}
+                              {!inv.pdf_filename && !inv.xml_filename && (
+                                <span className="text-[10px] text-neutral-400 font-medium">Sin archivos</span>
+                              )}
                             </div>
                           </td>
                         </tr>
