@@ -2503,19 +2503,44 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_roles
     return doc
 
 
+def _build_invoice_query(inv_id: str) -> dict:
+    from urllib.parse import unquote
+    from bson import ObjectId
+    import re
+    
+    clean_id = unquote(str(inv_id)).strip()
+    regex_id = f"^{re.escape(clean_id)}$"
+    
+    or_list = [
+        {"id": clean_id},
+        {"id": {"$regex": regex_id, "$options": "i"}},
+        {"n_doc": clean_id},
+        {"n_doc": {"$regex": regex_id, "$options": "i"}},
+        {"numero_documento": clean_id},
+        {"numero_documento": {"$regex": regex_id, "$options": "i"}},
+    ]
+    try:
+        or_list.append({"_id": ObjectId(clean_id)})
+    except Exception:
+        pass
+    return {"$or": or_list}
+
+
 @api.put("/invoices/{inv_id}")
 async def update_invoice(inv_id: str, data: InvoiceUpdate,
                          user: dict = Depends(require_roles("admin_enered"))):
     patch = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
-    res = await db.invoices.update_one(q, {"$set": patch})
-    if res.matched_count == 0:
-        # Check in subsidio as fallback
-        res_sub = await db.consumos_subsidio.update_many(q, {"$set": patch})
-        if res_sub.matched_count == 0:
-            raise HTTPException(status_code=404, detail="Factura no encontrada")
-    inv = await db.invoices.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q, {"_id": 0})
+    q = _build_invoice_query(inv_id)
+    
+    res1 = await db.invoices.update_many(q, {"$set": patch})
+    res2 = await db.empresas_invoices.update_many(q, {"$set": patch})
+    res3 = await db.consumos_subsidio.update_many(q, {"$set": patch})
+    
+    if res1.matched_count == 0 and res2.matched_count == 0 and res3.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    inv = await db.invoices.find_one(q, {"_id": 0}) or await db.empresas_invoices.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q, {"_id": 0})
     return inv
 
 
@@ -2527,8 +2552,8 @@ async def admin_upload_invoice_file(
     user: dict = Depends(require_roles("admin_enered"))
 ):
     """Permite al admin volver a cargar o reemplazar el archivo PDF/XML de una factura."""
-    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
-    inv = await db.invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    q = _build_invoice_query(inv_id)
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
     
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
@@ -2554,6 +2579,7 @@ async def admin_upload_invoice_file(
         update_data["xml_filename"] = file.filename
 
     await db.invoices.update_many(q, {"$set": update_data})
+    await db.empresas_invoices.update_many(q, {"$set": update_data})
     await db.consumos_subsidio.update_many(q, {"$set": update_data})
 
     return {"ok": True, "storage_key": storage_key, "filename": file.filename}
@@ -2561,22 +2587,27 @@ async def admin_upload_invoice_file(
 
 @api.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
-    q = {"$or": [{"id": inv_id}, {"n_doc": inv_id}, {"numero_documento": inv_id}]}
-    inv = await db.invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    import re
+    q = _build_invoice_query(inv_id)
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
         
     if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
         raise HTTPException(status_code=403, detail="Sin permisos para eliminar esta factura")
         
-    n_doc = inv.get("n_doc") or inv.get("numero_documento")
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
     empresa = inv.get("empresa")
     
     await db.invoices.delete_many(q)
+    await db.empresas_invoices.delete_many(q)
+    await db.consumos_subsidio.delete_many(q)
     
     if n_doc and empresa:
-        await db.consumptions.delete_many({"NUMERO_DOCUMENTO": n_doc, "EMPRESA": empresa})
-        await db.consumos_subsidio.delete_many({"numero_documento": n_doc, "empresa": empresa})
+        norm_emp = f"^{re.escape(empresa).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        doc_pat = f"^{re.escape(str(n_doc))}$"
+        await db.consumptions.delete_many({"NUMERO_DOCUMENTO": {"$regex": doc_pat, "$options": "i"}, "EMPRESA": {"$regex": norm_emp, "$options": "i"}})
+        await db.consumos_subsidio.delete_many({"numero_documento": {"$regex": doc_pat, "$options": "i"}, "empresa": {"$regex": norm_emp, "$options": "i"}})
         
     return {"ok": True}
 

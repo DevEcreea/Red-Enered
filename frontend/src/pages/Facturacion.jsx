@@ -179,10 +179,12 @@ export default function Facturacion() {
   };
 
   const handleDelete = async (inv) => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     if (!window.confirm(`¿Seguro de que deseas eliminar la factura ${inv.n_doc}?`)) return;
     try {
-      await api.delete(`/invoices/${inv.id}`);
-      setInvoices((prev) => prev.filter((x) => x.id !== inv.id));
+      await api.delete(`/invoices/${encodeURIComponent(docId)}`);
+      setInvoices((prev) => prev.filter((x) => (x.id || x.n_doc) !== docId && x.n_doc !== inv.n_doc));
       toast.success(`Factura ${inv.n_doc} eliminada.`);
       const params = empresa ? { empresa } : {};
       api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
