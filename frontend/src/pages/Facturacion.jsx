@@ -186,11 +186,21 @@ export default function Facturacion() {
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(err.response?.data?.detail || `No se encontró el ${kind.toUpperCase()} de la factura`);
+      let msg = `No se encontró el ${kind.toUpperCase()} de la factura`;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.detail) msg = json.detail;
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        msg = err.response.data.detail;
+      }
+      toast.error(msg);
     }
   };
 
-  const viewInvoice = async (inv, kind) => {
+  const viewInvoice = async (inv, kind = "pdf") => {
     const docId = inv.id || inv.n_doc || inv.numero_documento;
     if (!docId) {
       toast.error("Identificador de factura no válido");
@@ -202,11 +212,21 @@ export default function Facturacion() {
       const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       setViewerUrl(url);
-      setViewerTitle(`${inv.n_doc || docId}.${kind}`);
+      setViewerTitle(`Factura ${inv.n_doc || docId}`);
       setViewerDoc({ inv, kind });
       setViewerOpen(true);
-    } catch {
-      toast.error(`No se encontró el ${kind.toUpperCase()} de la factura para visualizar`);
+    } catch (err) {
+      let msg = `No se encontró el ${kind.toUpperCase()} de la factura para visualizar`;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.detail) msg = json.detail;
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        msg = err.response.data.detail;
+      }
+      toast.error(msg);
     }
   };
 
@@ -578,6 +598,22 @@ export default function Facturacion() {
           }}
         />
       )}
+
+      <PdfViewerModal
+        open={viewerOpen}
+        url={viewerUrl}
+        title={viewerTitle}
+        onClose={() => {
+          setViewerOpen(false);
+          if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+          setViewerUrl("");
+        }}
+        onDownload={() => {
+          if (viewerDoc?.inv) {
+            downloadInvoice(viewerDoc.inv, viewerDoc.kind || "pdf");
+          }
+        }}
+      />
     </div>
   );
 }

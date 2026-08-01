@@ -3334,31 +3334,49 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
             }
 
     if not inv:
+        from urllib.parse import unquote
+        clean_doc = unquote(str(inv_id)).strip()
+        esc_cdoc = re.escape(clean_doc)
+        reg_q = {"$or": [{"n_doc": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}]}
+        inv = await db.invoices.find_one(reg_q, {"_id": 0}) or await db.empresas_invoices.find_one(reg_q, {"_id": 0})
+
+    if not inv:
         raise HTTPException(status_code=404, detail=f"Factura {inv_id} no encontrada")
     
     # Validar permisos flexibilizando formato de empresa (sin espacios ni puntuación)
-    import re
     def _norm_e(e):
         if not e: return ""
         return re.sub(r"[^A-Z0-9]", "", str(e).upper())
 
-    if user["role"] != "admin_enered":
+    if user.get("role") != "admin_enered":
         u_emp = _norm_e(user.get("empresa"))
         i_emp = _norm_e(inv.get("empresa"))
-        if i_emp and u_emp and i_emp != u_emp:
+        if u_emp and i_emp and u_emp not in i_emp and i_emp not in u_emp:
             raise HTTPException(status_code=403, detail="Sin acceso a esta factura")
     
     # 2. Recolectar posibles llaves del archivo en storage
     candidate_keys = []
-    if inv.get("factura_storage_key"):
-        candidate_keys.append(inv["factura_storage_key"])
-    if inv.get("pdf_key"):
-        candidate_keys.append(inv["pdf_key"])
+    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
+    if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
+    if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
     
     fname = inv.get(f"{kind}_filename") or inv.get("pdf_filename") or inv.get("factura_filename")
     emp = inv.get("empresa") or ""
-    n_doc = inv.get("n_doc") or inv.get("numero_documento") or "FACTURA"
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
     
+    if n_doc:
+        esc_nd = re.escape(str(n_doc))
+        dq = {"$or": [{"n_doc": {"$regex": f"^{esc_nd}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_nd}$", "$options": "i"}}]}
+        all_alts = await db.invoices.find(dq).to_list(10) + await db.empresas_invoices.find(dq).to_list(10) + await db.consumos_subsidio.find(dq).to_list(10)
+        for alt in all_alts:
+            if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
+            if alt.get("storage_key"): candidate_keys.append(alt["storage_key"])
+            if alt.get("pdf_key"): candidate_keys.append(alt["pdf_key"])
+            alt_fname = alt.get("factura_filename") or alt.get("pdf_filename")
+            if alt_fname:
+                candidate_keys.append(_inv_key(emp, alt_fname))
+                candidate_keys.append(f"invoices/{emp}/{alt_fname}")
+
     if fname:
         candidate_keys.append(_inv_key(emp, fname))
         candidate_keys.append(f"invoices/{emp}/{fname}")
