@@ -2546,7 +2546,8 @@ def _build_invoice_query(inv_id: str) -> dict:
     import re
     
     clean_id = unquote(str(inv_id)).strip()
-    regex_id = f"^{re.escape(clean_id)}$"
+    esc_clean = re.escape(clean_id)
+    regex_id = f"^{esc_clean}$"
     
     or_list = [
         {"id": clean_id},
@@ -2643,7 +2644,8 @@ async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
     if n_doc and empresa:
         esc_emp = re.escape(empresa).replace("\\ ", ".*").replace("\\.", ".*")
         norm_emp = f"^{esc_emp}$"
-        doc_pat = f"^{re.escape(str(n_doc))}$"
+        esc_ndoc = re.escape(str(n_doc))
+        doc_pat = f"^{esc_ndoc}$"
         await db.consumptions.delete_many({"NUMERO_DOCUMENTO": {"$regex": doc_pat, "$options": "i"}, "EMPRESA": {"$regex": norm_emp, "$options": "i"}})
         await db.consumos_subsidio.delete_many({"numero_documento": {"$regex": doc_pat, "$options": "i"}, "empresa": {"$regex": norm_emp, "$options": "i"}})
         

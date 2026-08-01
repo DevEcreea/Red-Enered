@@ -1954,7 +1954,8 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     from fastapi.responses import Response, HTMLResponse
 
     clean_id = unquote(str(invoice_id)).strip()
-    regex_id = f"^{re.escape(clean_id)}$"
+    esc_clean = re.escape(clean_id)
+    regex_id = f"^{esc_clean}$"
     
     or_list = [
         {"id": clean_id},
