@@ -2641,7 +2641,8 @@ async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
     await db.consumos_subsidio.delete_many(q)
     
     if n_doc and empresa:
-        norm_emp = f"^{re.escape(empresa).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
+        esc_emp = re.escape(empresa).replace("\\ ", ".*").replace("\\.", ".*")
+        norm_emp = f"^{esc_emp}$"
         doc_pat = f"^{re.escape(str(n_doc))}$"
         await db.consumptions.delete_many({"NUMERO_DOCUMENTO": {"$regex": doc_pat, "$options": "i"}, "EMPRESA": {"$regex": norm_emp, "$options": "i"}})
         await db.consumos_subsidio.delete_many({"numero_documento": {"$regex": doc_pat, "$options": "i"}, "empresa": {"$regex": norm_emp, "$options": "i"}})
@@ -3462,19 +3463,19 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     import re
     inv_q = {}
     if target:
-        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
-        inv_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        inv_q["empresa"] = {"$regex": f"^{esc_t}$", "$options": "i"}
 
     invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
 
     # Dynamically pull and merge confirmed subsidio invoices for the account state calculations
     sub_q = {"status": "confirmed"}
     if target:
-        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
-        sub_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        sub_q["empresa"] = {"$regex": f"^{esc_t}$", "$options": "i"}
     elif user["role"] != "admin_enered" and user.get("empresa"):
-        norm_pat = f"^{re.escape(user['empresa']).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
-        sub_q["empresa"] = {"$regex": norm_pat, "$options": "i"}
+        esc_u = re.escape(user['empresa']).replace("\\ ", ".*").replace("\\.", ".*")
+        sub_q["empresa"] = {"$regex": f"^{esc_u}$", "$options": "i"}
 
     sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(5000)
     
@@ -3539,11 +3540,11 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     # Notas de despacho = consumos NO facturados (ESTADO != "FACTURADO" en el sheet)
     cons_q = {"ESTADO": {"$ne": "FACTURADO"}}
     if target:
-        norm_pat = f"^{re.escape(target).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
-        cons_q["EMPRESA"] = {"$regex": norm_pat, "$options": "i"}
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        cons_q["EMPRESA"] = {"$regex": f"^{esc_t}$", "$options": "i"}
     elif user["role"] != "admin_enered" and user.get("empresa"):
-        norm_pat = f"^{re.escape(user['empresa']).replace(r'\\ ', '.*').replace(r'\\.', '.*')}$"
-        cons_q["EMPRESA"] = {"$regex": norm_pat, "$options": "i"}
+        esc_u = re.escape(user['empresa']).replace("\\ ", ".*").replace("\\.", ".*")
+        cons_q["EMPRESA"] = {"$regex": f"^{esc_u}$", "$options": "i"}
     cons = await db.consumptions.find(cons_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
 
     def _f(x, d=0.0):
