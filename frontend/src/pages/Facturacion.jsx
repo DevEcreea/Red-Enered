@@ -200,34 +200,18 @@ export default function Facturacion() {
     }
   };
 
-  const viewInvoice = async (inv, kind = "pdf") => {
+  const viewInvoice = (inv, kind = "pdf") => {
     const docId = inv.id || inv.n_doc || inv.numero_documento;
     if (!docId) {
       toast.error("Identificador de factura no válido");
       return;
     }
-    try {
-      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
-      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
-      const blob = new Blob([r.data], { type });
-      const url = URL.createObjectURL(blob);
-      setViewerUrl(url);
-      setViewerTitle(`Factura ${inv.n_doc || docId}`);
-      setViewerDoc({ inv, kind });
-      setViewerOpen(true);
-    } catch (err) {
-      let msg = `No se encontró el ${kind.toUpperCase()} de la factura para visualizar`;
-      if (err.response?.data instanceof Blob) {
-        try {
-          const text = await err.response.data.text();
-          const json = JSON.parse(text);
-          if (json.detail) msg = json.detail;
-        } catch (_) {}
-      } else if (err.response?.data?.detail) {
-        msg = err.response.data.detail;
-      }
-      toast.error(msg);
-    }
+    const token = localStorage.getItem("enered_token") || "";
+    const directUrl = `${API}/invoices/${encodeURIComponent(docId)}/download/${kind}?t=${encodeURIComponent(token)}`;
+    setViewerUrl(directUrl);
+    setViewerTitle(`Factura ${inv.n_doc || docId}`);
+    setViewerDoc({ inv, kind });
+    setViewerOpen(true);
   };
 
   const handleDelete = async (inv) => {

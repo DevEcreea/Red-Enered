@@ -131,7 +131,7 @@ async def get_current_user(request: Request) -> dict:
         if auth.startswith("Bearer "):
             token = auth[7:]
     if not token:
-        token = request.query_params.get("t")
+        token = request.query_params.get("t") or request.query_params.get("token")
     if not token:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
