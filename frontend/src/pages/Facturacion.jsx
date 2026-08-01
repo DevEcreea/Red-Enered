@@ -32,6 +32,38 @@ const ESTADO_LABEL = {
   vencido: "VENCIDA", por_vencer: "PENDIENTE", pagado: "PAGADA",
 };
 
+function calculateAtrasoDias(inv) {
+  const st = (inv?.estado || "").toLowerCase().trim();
+  if (st !== "vencida" && st !== "vencido") {
+    return 0;
+  }
+  const fvStr = inv?.f_vencimiento || inv?.fecha_vencimiento;
+  if (!fvStr) return 0;
+  try {
+    let str = String(fvStr).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    let fvDate = null;
+    if (str.includes("-")) {
+      const p = str.split("-");
+      fvDate = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+    } else if (str.includes("/")) {
+      const p = str.split("/");
+      fvDate = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    } else {
+      fvDate = new Date(str);
+    }
+    if (!fvDate || isNaN(fvDate.getTime())) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    fvDate.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - fvDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
+    return Math.max(0, diffDays);
+  } catch {
+    return 0;
+  }
+}
+
 export default function Facturacion() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -376,7 +408,7 @@ export default function Facturacion() {
                       <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
                       <td className="px-3 py-2.5">{formatDate(inv.f_emision) || "—"}</td>
                       <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento) || "—"}</td>
-                      <td className="px-3 py-2.5 text-right">{inv.atraso_dias || 0} días</td>
+                      <td className="px-3 py-2.5 text-right">{calculateAtrasoDias(inv)} días</td>
                       <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>

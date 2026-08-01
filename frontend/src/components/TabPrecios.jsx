@@ -224,7 +224,7 @@ export default function TabPrecios({ user, ahorroCapturado }) {
         const distritos = Array.from(new Set(precios.filter(p => (!selDepartamento || (p.departamento || p.ciudad) === selDepartamento) && (!selProvincia || p.provincia === selProvincia)).map(p => p.distrito || p.ciudad || "").filter(Boolean))).sort();
         const productos = Array.from(new Set(precios.map(p => p.combustible || "").filter(Boolean))).sort();
 
-        const filteredPrecios = precios.filter(p => {
+        const rawFiltered = precios.filter(p => {
           const deptVal = p.departamento || p.ciudad || "";
           if (selDepartamento && deptVal !== selDepartamento) return false;
           if (selProvincia && (p.provincia || "") !== selProvincia) return false;
@@ -234,6 +234,19 @@ export default function TabPrecios({ user, ahorroCapturado }) {
           if (selEstacion && !(p.estacion || p.empresa || "").toLowerCase().includes(selEstacion.toLowerCase())) return false;
           return true;
         });
+
+        // Deduplicate stations by (estacion + ciudad + combustible)
+        const dedupMap = new Map();
+        rawFiltered.forEach(p => {
+          const estName = (p.estacion || p.empresa || "").trim().toUpperCase();
+          const city = (p.ciudad || "").trim().toUpperCase();
+          const comb = (p.combustible || "").trim().toUpperCase();
+          const key = `${estName}_${city}_${comb}`;
+          if (!dedupMap.has(key)) {
+            dedupMap.set(key, p);
+          }
+        });
+        const filteredPrecios = Array.from(dedupMap.values());
 
         return (
           <>
