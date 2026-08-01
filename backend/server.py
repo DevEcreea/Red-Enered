@@ -2970,6 +2970,7 @@ async def admin_invoices_confirm_ocr(
             "empresa": empresa,
             "match_source": "ocr_admin",
             "n_doc": it.n_doc,
+            "numero_documento": it.n_doc,
             "f_emision": it.f_emision,
             "f_vencimiento": it.f_vencimiento,
             "moneda": "PEN",
@@ -2983,6 +2984,10 @@ async def admin_invoices_confirm_ocr(
             "producto": it.producto,
             "xml_filename": None,
             "pdf_filename": final_filename,
+            "factura_filename": final_filename,
+            "factura_storage_key": final_key,
+            "pdf_key": final_key,
+            "storage_key": final_key,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -5213,6 +5218,22 @@ async def startup():
         await db.subsidio_leads.create_index("ruc")
         await db.users.create_index([("role", 1), ("created_at", -1)])
         await db.calculations.create_index("id")
+
+        # Auto-heal invoice documents missing storage keys (e.g. from bulk OCR upload)
+        try:
+            invs_to_heal = await db.invoices.find({"factura_storage_key": {"$exists": False}}).to_list(1000)
+            for inv in invs_to_heal:
+                emp = inv.get("empresa") or ""
+                ndoc = inv.get("n_doc") or inv.get("numero_documento")
+                pdf_fname = inv.get("pdf_filename") or (f"{ndoc}.pdf" if ndoc else None)
+                if emp and pdf_fname:
+                    s_key = _inv_key(emp, pdf_fname)
+                    await db.invoices.update_many({"_id": inv["_id"]}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                    await db.empresas_invoices.update_many({"id": inv.get("id")}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                    if ndoc:
+                        await db.consumos_subsidio.update_many({"numero_documento": ndoc}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+        except Exception as e:
+            print("Auto-heal invoices error:", e)
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)

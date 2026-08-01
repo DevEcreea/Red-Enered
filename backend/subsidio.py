@@ -1947,48 +1947,114 @@ async def admin_update_stage(
 
 @subsidio_router.get("/admin/subsidio/invoices/{invoice_id}/download")
 async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
-    """Admin descarga el archivo PDF/imagen de una factura de consumo."""
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
-    if not inv or not inv.get("factura_storage_key"):
-        raise HTTPException(status_code=404, detail="Archivo de factura no encontrado")
-    
-    # Generate unique filename based on numero_documento to prevent OS/Browser mix-ups
-    original = inv.get("factura_filename") or "factura.pdf"
-    ext = original.split(".")[-1] if "." in original else "pdf"
-    ndoc = inv.get("numero_documento")
-    
-    if ndoc:
-        safe_ndoc = "".join(c for c in ndoc if c.isalnum() or c == "-")
-        dl_name = f"Factura_{safe_ndoc}.{ext}"
-    else:
-        dl_name = original
+    """Admin descarga o previsualiza el archivo PDF/imagen de una factura de consumo."""
+    from urllib.parse import unquote, quote
+    from bson import ObjectId
+    import re
+    from fastapi.responses import Response, HTMLResponse
 
-    import urllib.parse
-    encoded_name = urllib.parse.quote(dl_name)
+    clean_id = unquote(str(invoice_id)).strip()
+    regex_id = f"^{re.escape(clean_id)}$"
     
+    or_list = [
+        {"id": clean_id},
+        {"id": {"$regex": regex_id, "$options": "i"}},
+        {"n_doc": clean_id},
+        {"n_doc": {"$regex": regex_id, "$options": "i"}},
+        {"numero_documento": clean_id},
+        {"numero_documento": {"$regex": regex_id, "$options": "i"}},
+    ]
     try:
-        data = storage.get_object_bytes(inv["factura_storage_key"])
-    except FileNotFoundError:
-        from fastapi.responses import HTMLResponse
+        or_list.append({"_id": ObjectId(clean_id)})
+    except Exception:
+        pass
+
+    q = {"$or": or_list}
+
+    inv = await db.consumos_subsidio.find_one(q) or await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q)
+
+    def _html_not_found_msg(msg: str):
         return HTMLResponse(
-            status_code=404,
-            content="""
+            status_code=200,
+            content=f"""
             <html>
-                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;background-color:#f5f5f5;color:#666;">
-                    <div style="text-align:center;">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;color:#999;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
-                        <h3>Archivo no disponible</h3>
-                        <p style="font-size:14px;">El documento físico no se encontró en el servidor<br/>(probablemente fue ingresado manualmente).</p>
+                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;background-color:#1e1e1e;color:#aaa;">
+                    <div style="text-align:center;padding:20px;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;color:#777;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                        <h3 style="color:#eee;margin:0 0 8px 0;">Documento no adjunto</h3>
+                        <p style="font-size:13px;margin:0;">{msg}</p>
                     </div>
                 </body>
             </html>
             """
         )
 
-    from fastapi.responses import Response
+    if not inv:
+        return _html_not_found_msg(f"La factura <b>{clean_id}</b> no se encuentra en el sistema.")
+
+    # Recolectar llaves de almacenamiento candidatas
+    candidate_keys = []
+    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
+    if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
+    if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
+
+    empresa = inv.get("empresa") or ""
+    n_doc = inv.get("numero_documento") or inv.get("n_doc") or clean_id
+    fname = inv.get("factura_filename") or inv.get("pdf_filename") or inv.get("filename")
+
+    # Cross-reference db.invoices and db.empresas_invoices to pull storage keys if missing
+    if n_doc:
+        doc_q = {"$or": [{"n_doc": {"$regex": f"^{re.escape(n_doc)}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{re.escape(n_doc)}$", "$options": "i"}}]}
+        alt_docs = await db.invoices.find(doc_q).to_list(10) + await db.empresas_invoices.find(doc_q).to_list(10)
+        for alt in alt_docs:
+            if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
+            if alt.get("storage_key"): candidate_keys.append(alt["storage_key"])
+            if alt.get("pdf_key"): candidate_keys.append(alt["pdf_key"])
+            alt_fname = alt.get("factura_filename") or alt.get("pdf_filename")
+            if alt_fname:
+                candidate_keys.append(f"invoices/{empresa}/{alt_fname}")
+                candidate_keys.append(f"subsidio/{alt_fname}")
+                candidate_keys.append(alt_fname)
+
+    if fname:
+        candidate_keys.append(f"invoices/{empresa}/{fname}")
+        candidate_keys.append(f"subsidio/{fname}")
+        candidate_keys.append(f"tmp_admin/{fname}")
+        candidate_keys.append(fname)
+
+    if n_doc:
+        candidate_keys.append(f"invoices/{empresa}/{n_doc}.pdf")
+        candidate_keys.append(f"subsidio/{n_doc}.pdf")
+        candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
+        candidate_keys.append(f"{n_doc}.pdf")
+
+    valid_key = None
+    for k in candidate_keys:
+        if k and storage.object_exists(k):
+            valid_key = k
+            break
+
+    if not valid_key:
+        return _html_not_found_msg(f"No hay un PDF adjunto cargado para la factura <b>{n_doc}</b>.")
+
+    try:
+        data = storage.get_object_bytes(valid_key)
+    except Exception:
+        return _html_not_found_msg(f"Error al leer el archivo en el servidor.")
+
+    original = fname or f"{n_doc}.pdf"
+    ext = original.split(".")[-1].lower() if "." in original else "pdf"
+    safe_ndoc = "".join(c for c in str(n_doc) if c.isalnum() or c == "-")
+    dl_name = f"Factura_{safe_ndoc}.{ext}"
+    encoded_name = quote(dl_name)
+
+    content_type = inv.get("factura_content_type") or inv.get("content_type")
+    if not content_type:
+        content_type = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "application/pdf"
+
     return Response(
         content=data,
-        media_type=inv.get("factura_content_type", "application/pdf"),
+        media_type=content_type,
         headers={
             "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"
         },

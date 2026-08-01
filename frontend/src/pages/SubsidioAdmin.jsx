@@ -1367,9 +1367,11 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                   </form>
 
                   {/* Previsualización del PDF/Imagen */}
-                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename) && (() => {
+                  {(() => {
+                    const docId = editingInvoice?.id || editingInvoice?.numero_documento || editingInvoice?.n_doc;
+                    if (!docId) return null;
                     const tk = localStorage.getItem("enered_token") || "";
-                    const dlUrl = `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${tk}`;
+                    const dlUrl = `${API}/admin/subsidio/invoices/${encodeURIComponent(docId)}/download?t=${tk}`;
                     return (
                       <div className="space-y-2">
                         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
