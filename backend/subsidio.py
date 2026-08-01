@@ -2004,7 +2004,8 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
 
     # Cross-reference db.invoices and db.empresas_invoices to pull storage keys if missing
     if n_doc:
-        doc_q = {"$or": [{"n_doc": {"$regex": f"^{re.escape(n_doc)}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{re.escape(n_doc)}$", "$options": "i"}}]}
+        esc_ndoc = re.escape(n_doc)
+        doc_q = {"$or": [{"n_doc": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}]}
         alt_docs = await db.invoices.find(doc_q).to_list(10) + await db.empresas_invoices.find(doc_q).to_list(10)
         for alt in alt_docs:
             if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
