@@ -5197,11 +5197,10 @@ async def startup():
     except Exception as e:
         print("DELETE ERR", e)
 
-    await db.users.create_index("email", unique=True)
-    await db.consumptions.create_index("EMPRESA")
-    await db.consumptions.create_index("FECHA")
-    # Nuevos índices para acelerar dashboards y filtros (compuestos)
     try:
+        await db.users.create_index("email", unique=True)
+        await db.consumptions.create_index("EMPRESA")
+        await db.consumptions.create_index("FECHA")
         await db.consumptions.create_index([("EMPRESA", 1), ("FECHA", -1)])
         await db.consumptions.create_index([("EMPRESA", 1), ("PLACA", 1)])
         await db.consumptions.create_index("PLACA")
@@ -5211,7 +5210,6 @@ async def startup():
         await db.consumos_subsidio.create_index([("user_id", 1), ("status", 1)])
         await db.consumos_subsidio.create_index([("user_id", 1), ("fecha", -1)])
         await db.empresas_config.create_index("empresa", unique=True)
-        # Índices para acelerar el listado admin de expedientes de subsidio
         await db.subsidio_documents.create_index("user_id")
         await db.subsidio_vehicles.create_index("user_id")
         await db.subsidio_declaraciones.create_index("user_id")
@@ -5221,32 +5219,40 @@ async def startup():
         await db.subsidio_leads.create_index("ruc")
         await db.users.create_index([("role", 1), ("created_at", -1)])
         await db.calculations.create_index("id")
-
-        # Auto-heal invoice documents missing storage keys (e.g. from bulk OCR upload)
-        try:
-            invs_to_heal = await db.invoices.find({"factura_storage_key": {"$exists": False}}).to_list(1000)
-            for inv in invs_to_heal:
-                emp = inv.get("empresa") or ""
-                ndoc = inv.get("n_doc") or inv.get("numero_documento")
-                pdf_fname = inv.get("pdf_filename") or (f"{ndoc}.pdf" if ndoc else None)
-                if emp and pdf_fname:
-                    s_key = _inv_key(emp, pdf_fname)
-                    await db.invoices.update_many({"_id": inv["_id"]}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
-                    await db.empresas_invoices.update_many({"id": inv.get("id")}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
-                    if ndoc:
-                        await db.consumos_subsidio.update_many({"numero_documento": ndoc}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
-        except Exception as e:
-            print("Auto-heal invoices error:", e)
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
-    await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)
-    await seed_demo_data()
-    # Backfill de servicios/tipo_cliente para empresas legacy
+
+    try:
+        await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)
+    except Exception as e:
+        logger.warning(f"Token index warning: {e}")
+
+    try:
+        await seed_demo_data()
+    except Exception as e:
+        logger.warning(f"Seed demo data warning: {e}")
+
     try:
         result = await _svc.backfill_servicios(db)
         logger.info(f"Servicios backfill: {result}")
     except Exception as e:
         logger.warning(f"Servicios backfill failed: {e}")
+
+    try:
+        invs_to_heal = await db.invoices.find({"factura_storage_key": {"$exists": False}}).to_list(100)
+        for inv in invs_to_heal:
+            emp = inv.get("empresa") or ""
+            ndoc = inv.get("n_doc") or inv.get("numero_documento")
+            pdf_fname = inv.get("pdf_filename") or (f"{ndoc}.pdf" if ndoc else None)
+            if emp and pdf_fname:
+                s_key = _inv_key(emp, pdf_fname)
+                await db.invoices.update_many({"_id": inv["_id"]}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                if inv.get("id"):
+                    await db.empresas_invoices.update_many({"id": inv.get("id")}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                if ndoc:
+                    await db.consumos_subsidio.update_many({"numero_documento": ndoc}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+    except Exception as e:
+        logger.warning(f"Auto-heal invoices warning: {e}")
         
     # Auto-apply pending saldo_a_favor to invoices
     async for config in db.empresas_config.find({"saldo_a_favor": {"$gt": 0}}):
