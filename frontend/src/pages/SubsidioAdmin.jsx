@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import {
   Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText,
   Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
-  Pencil, Plus, Trash2, PlusCircle, X, ExternalLink,
+  Pencil, Plus, Trash2, PlusCircle, X, ExternalLink, Upload,
 } from "lucide-react";
 import { api, API } from "../lib/api";
 
@@ -1376,15 +1376,39 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                       <div className="space-y-2">
                         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
                           <span className="text-xs font-bold text-neutral-500 uppercase">Documento Adjunto</span>
-                          <a 
-                            href={dlUrl} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="text-xs font-bold text-brand hover:underline flex items-center gap-1"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            Si se ve en blanco, ábrelo aquí
-                          </a>
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-brand hover:bg-brand-50 border border-brand-200 px-2 py-1 rounded cursor-pointer flex items-center gap-1 transition">
+                              <Upload className="w-3.5 h-3.5" />
+                              Cargar/Reemplazar PDF
+                              <input
+                                type="file"
+                                accept=".pdf"
+                                className="hidden"
+                                onChange={async (e) => {
+                                  const file = e.target.files[0];
+                                  if (!file) return;
+                                  const fd = new FormData();
+                                  fd.append("kind", "pdf");
+                                  fd.append("file", file);
+                                  try {
+                                    await api.post(`/admin/invoices/${encodeURIComponent(docId)}/upload-file`, fd);
+                                    fetchInvoices();
+                                  } catch (err) {
+                                    alert("Error al cargar PDF: " + (err.response?.data?.detail || err.message));
+                                  }
+                                }}
+                              />
+                            </label>
+                            <a 
+                              href={dlUrl} 
+                              target="_blank" 
+                              rel="noreferrer"
+                              className="text-xs font-bold text-neutral-600 hover:underline flex items-center gap-1"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              Abrir
+                            </a>
+                          </div>
                         </div>
                         <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 h-[300px] md:h-[500px] flex items-center justify-center relative">
                           <iframe

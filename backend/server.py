@@ -2931,17 +2931,20 @@ async def admin_invoices_confirm_ocr(
         if not empresa:
             continue
         
-        try:
-            pdf_bytes = storage.get_object_bytes(it.pdf_key)
-        except Exception:
-            pdf_bytes = None
-            
-        if not pdf_bytes:
-            continue
+        pdf_bytes = None
+        for candidate_key in [it.pdf_key, f"tmp_admin/{it.pdf_key}" if it.pdf_key and not it.pdf_key.startswith("tmp_admin/") else None, it.factura_filename, f"tmp_admin/{it.factura_filename}" if it.factura_filename else None]:
+            if candidate_key:
+                try:
+                    pdf_bytes = storage.get_object_bytes(candidate_key)
+                    if pdf_bytes:
+                        break
+                except Exception:
+                    pass
             
         final_filename = _safe_doc(it.n_doc or it.factura_filename) + ".pdf"
         final_key = _inv_key(empresa, final_filename)
-        storage.save_object(final_key, pdf_bytes, "application/pdf")
+        if pdf_bytes:
+            storage.save_object(final_key, pdf_bytes, "application/pdf")
         
         estado = "pendiente"
         atraso_dias = 0
