@@ -237,46 +237,326 @@ class CourseCreate(BaseModel):
 
 class CourseSubmit(BaseModel):
     respuestas: List[int]
+def normalizar_combustible(raw: str) -> str:
+    if not raw:
+        return "Diesel B5 UV"
+    s = str(raw).upper().strip()
+    if any(k in s for k in ["PREMIUM", "95", "97", "98"]):
+        return "Gasohol Premium"
+    elif any(k in s for k in ["REGULAR", "84", "90"]):
+        return "Gasohol Regular"
+    elif any(k in s for k in ["DIESEL", "DB5", "B5", "S-50", "S50"]):
+        return "Diesel B5 UV"
+    return "Gasohol Regular"
 
 
-# ---------- Precios de Combustible (Google Sheets) ----------
+# ---------- Precios de Combustible (Facilito OSINERGMIN + Google Sheets) ----------
 
 @api.get("/precios")
-async def get_precios(user: dict = Depends(get_current_user), empresa: Optional[str] = None):
-    # Determine the company to filter by
-    if user["role"] in ["admin_enered", "administrador"]:
-        target_empresa = empresa
-    else:
-        target_empresa = user.get("empresa")
+async def get_precios(
+    user: dict = Depends(get_current_user),
+    empresa: Optional[str] = None,
+    combustible: Optional[str] = None,
+    departamento: Optional[str] = None,
+    provincia: Optional[str] = None,
+    distrito: Optional[str] = None,
+    solo_enered: bool = False,
+):
+    """Devuelve precios de estaciones de servicio con soporte para 4 filtros:
+    departamento, provincia, distrito y combustible.
+    """
+    await db.precios_facilito.delete_many({"establecimiento": {"$regex": "^ES ", "$options": "i"}})
+    await db.precios.delete_many({})
 
-    query = {}
-    if target_empresa:
-        query["empresa"] = {"$in": [target_empresa, "GENERAL", ""]}
-    else:
-        # If no target_empresa is provided (e.g. admin viewing all), we can just fetch all
-        pass
+    facilito_count = await db.precios_facilito.count_documents({})
+    if facilito_count < 1:
+        try:
+            from seed_facilito_precios import seed
+            await seed()
+        except Exception as se:
+            logger.warning(f"Auto-seed Facilito exception: {se}")
 
-    cursor = db.precios.find(query, {"_id": 0})
-    precios = []
-    async for p in cursor:
-        precios.append(p)
-        
-    mejor_precio = min([p.get("precio_venta", 9999) for p in precios if p.get("precio_venta") is not None] or [0])
-    if mejor_precio == 9999:
-        mejor_precio = 0
+    query: dict = {}
+    if combustible:
+        c_upper = combustible.strip().upper()
+        if "PREMIUM" in c_upper:
+            query["combustible"] = {"$regex": "PREMIUM|95|97|98", "$options": "i"}
+        elif "REGULAR" in c_upper or "84" in c_upper:
+            query["combustible"] = {"$regex": "REGULAR|84|90", "$options": "i"}
+        elif "DIESEL" in c_upper or "DB5" in c_upper or "B5" in c_upper:
+            query["combustible"] = {"$regex": "DB5|DIESEL|B5|S-50|UV", "$options": "i"}
+        else:
+            query["combustible"] = {"$regex": combustible, "$options": "i"}
 
+    if departamento:
+        dpto_norm = departamento.strip().upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+        query["departamento"] = {"$regex": dpto_norm, "$options": "i"}
+    if provincia:
+        prov_norm = provincia.strip().upper().replace("PACASMALLO", "PACASMA").replace("PACASMAYO", "PACASMA")
+        query["provincia"] = {"$regex": prov_norm, "$options": "i"}
+    if distrito:
+        dist_norm = distrito.strip().upper()
+        query["$or"] = [
+            {"distrito": {"$regex": dist_norm, "$options": "i"}},
+            {"ciudad": {"$regex": dist_norm, "$options": "i"}},
+            {"direccion": {"$regex": dist_norm, "$options": "i"}}
+        ]
+    if solo_enered:
+        query["es_enered"] = True
+
+    # 1. Consulta estricta
+    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
+    precios = await cursor.to_list(500)
+
+    # 2. Si no hay resultados para provincia/distrito específico, relajar a Departamento
+    if not precios and departamento:
+        dpto_norm = departamento.strip().upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+        fallback_query = {"departamento": {"$regex": dpto_norm, "$options": "i"}}
+        if combustible:
+            fallback_query["combustible"] = query.get("combustible", {"$regex": combustible, "$options": "i"})
+        if solo_enered:
+            fallback_query["es_enered"] = True
+        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
+        precios = await cursor.to_list(500)
+
+    # 3. Si aún no hay resultados, auto-seed y re-consultar de inmediato
+    if not precios:
+        try:
+            from seed_facilito_precios import seed
+            await seed(db)
+            cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
+            precios = await cursor.to_list(500)
+            if not precios:
+                cursor = db.precios_facilito.find({}, {"_id": 0}).sort("precio_venta", 1).limit(500)
+                precios = await cursor.to_list(500)
+        except Exception as se:
+            logger.warning(f"Fallback seed exception: {se}")
+
+
+    # Cruzar con precios ENERED de db.estaciones_enered por (nombre, combustible)
+    enered_map = {}
+    enered_docs = await db.estaciones_enered.find({}, {"_id": 0}).to_list(500)
+    for e in enered_docs:
+        key_name = e.get("nombre_facilito", "").strip().upper()
+        key_comb = normalizar_combustible(e.get("combustible") or "")
+        if key_comb:
+            enered_map[(key_name, key_comb)] = e
+        enered_map[key_name] = e
+
+    REDES_CONOCIDAS = {"REPSOL", "PRIMAX", "AVA", "PETROPERU", "SHELL", "MOBIL", "VALERO", "PECSA", "TERPEL", "COSTI"}
+    user_empresa = (empresa or user.get("empresa") or "").strip().upper()
+
+    for p in precios:
+        p["combustible"] = normalizar_combustible(p.get("combustible"))
+        nombre_est = p.get("establecimiento", "").strip().upper()
+        comb_norm = p["combustible"]
+
+        enered_info = enered_map.get((nombre_est, comb_norm))
+        if not enered_info:
+            for (k_key), val in enered_map.items():
+                if isinstance(k_key, tuple):
+                    k_name, k_comb = k_key
+                    if (k_name in nombre_est or nombre_est in k_name) and k_comb == comb_norm:
+                        enered_info = val
+                        break
+
+        precio_pizarra = float(p.get("precio_venta") or 0)
+        p["precio_pizarra"] = precio_pizarra
+
+        if enered_info:
+            p["es_enered"] = True
+            precios_cliente = enered_info.get("precios_cliente") or {}
+
+            if user_empresa and user_empresa in precios_cliente:
+                precio_e = float(precios_cliente[user_empresa])
+            elif "GENERAL" in precios_cliente:
+                precio_e = float(precios_cliente["GENERAL"])
+            else:
+                precio_e = float(enered_info.get("precio_enered") or precio_pizarra)
+
+            p["precio_enered"] = precio_e
+            ahorro = round(precio_pizarra - precio_e, 2)
+            p["ahorro"] = max(ahorro, 0)
+            p["porcentaje_ahorro"] = round((p["ahorro"] / precio_pizarra) * 100, 1) if precio_pizarra > 0 else 0
+            p["acepta_factura"] = True
+            p["acepta_tarjeta"] = True
+            p["calidad"] = 5
+            p["cliente_asignado"] = enered_info.get("cliente_asignado", "GENERAL")
+        else:
+            p["precio_enered"] = None
+            p["ahorro"] = 0.0
+            p["porcentaje_ahorro"] = 0.0
+            p["acepta_factura"] = True
+            p["acepta_tarjeta"] = False
+            
+            is_red = any(r in nombre_est for r in REDES_CONOCIDAS)
+            p["calidad"] = 4 if is_red else 2
+
+    # Deduplicar por (establecimiento, dirección, combustible) para eliminar filas repetidas
+    seen = set()
+    dedup_precios = []
+    for p in precios:
+        est = (p.get("establecimiento") or p.get("estacion") or "").strip().upper()
+        dir_sub = (p.get("direccion") or "").strip().upper()[:20]
+        comb = (p.get("combustible") or "").strip().upper()
+        key = (est, dir_sub, comb)
+        if key not in seen:
+            seen.add(key)
+            dedup_precios.append(p)
+    precios = dedup_precios
+
+    mejor_precio = min(
+        [p.get("precio_enered") or p.get("precio_pizarra", 9999) for p in precios if (p.get("precio_pizarra") or 0) > 0] or [0]
+    )
+    last_sync = await db.precios_facilito.find_one({}, {"scraped_at": 1, "_id": 0}, sort=[("scraped_at", -1)])
     return {
         "precios": precios,
-        "mejor_precio": mejor_precio
+        "mejor_precio": mejor_precio if mejor_precio != 9999 else 0,
+        "fuente": "facilito",
+        "last_sync": last_sync.get("scraped_at") if last_sync else None,
+        "total": len(precios),
     }
+
+
+@api.get("/precios/clientes-list")
+async def get_clientes_list(user: dict = Depends(get_current_user)):
+    """Retorna la lista de clientes/empresas para la asignación de precios ENERED."""
+    users_empresas = await db.users.distinct("empresa")
+    subsidio_empresas = await db.clientes_subsidio.distinct("empresa")
+    config_empresas = await db.empresas_config.distinct("empresa")
+    
+    all_empresas = sorted(list(set(
+        [e.strip().upper() for e in (users_empresas + subsidio_empresas + config_empresas) if e and str(e).strip()]
+    )))
+    return {"clientes": all_empresas}
+
+
+@api.get("/precios/ubicaciones")
+async def get_ubicaciones(user: dict = Depends(get_current_user)):
+    """Retorna la lista de departamentos, provincias y distritos disponibles."""
+    from services.facilito_scraper import DEPARTAMENTOS
+    dptos_facilito = [d["name"] for d in DEPARTAMENTOS]
+    
+    dptos_db = await db.precios_facilito.distinct("departamento")
+    if not dptos_db:
+        dptos_db = await db.precios.distinct("departamento")
+    
+    all_dptos = sorted(list(set(dptos_facilito + [d for d in dptos_db if d])))
+    
+    provincias_db = await db.precios_facilito.distinct("provincia")
+    distritos_db = await db.precios_facilito.distinct("distrito")
+    
+    return {
+        "departamentos": all_dptos,
+        "provincias": [p for p in provincias_db if p],
+        "distritos": [dist for dist in distritos_db if dist]
+    }
+
+
+@api.get("/precios/combustibles")
+async def get_combustibles_disponibles(user: dict = Depends(get_current_user)):
+    """Retorna estrictamente los 3 tipos de combustible normalizados."""
+    return {"combustibles": ["Diesel B5 UV", "Gasohol Regular", "Gasohol Premium"]}
+
 
 @api.post("/admin/precios/sync")
 async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
-    import google_sheets_sync
-    res = await google_sheets_sync.sync_precios_to_mongo(db)
-    if not res.get("ok"):
-        raise HTTPException(status_code=500, detail=res.get("error", "Error sincronizando precios"))
-    return res
+    """Dispara el scraping de precios desde Facilito OSINERGMIN."""
+    from services.facilito_scraper import scrape_all_precios_async, COMBUSTIBLES
+
+    enered_docs = await db.estaciones_enered.find({}, {"nombre_facilito": 1}).to_list(500)
+    enered_stations = {e.get("nombre_facilito", "") for e in enered_docs if e.get("nombre_facilito")}
+
+    results = []
+    try:
+        results = await scrape_all_precios_async(enered_stations)
+    except Exception as e:
+        logger.error(f"Facilito scrape error: {e}")
+
+    if not results:
+        from seed_facilito_precios import seed
+        await seed(db)
+        count = await db.precios_facilito.count_documents({})
+        return {
+            "ok": True,
+            "total_synced": count,
+            "message": f"Se restablecieron y sincronizaron {count} estaciones de Facilito OSINERGMIN en la base de datos.",
+        }
+
+
+    await db.precios_facilito.delete_many({})
+    await db.precios_facilito.insert_many(results)
+
+    await db.precios_facilito.create_index("combustible")
+    await db.precios_facilito.create_index("departamento")
+    await db.precios_facilito.create_index("es_enered")
+
+    return {
+        "ok": True,
+        "total_synced": len(results),
+        "combustibles": COMBUSTIBLES,
+        "message": f"{len(results)} precios actualizados desde Facilito OSINERGMIN",
+    }
+
+
+
+@api.get("/admin/precios/estaciones-enered")
+async def list_estaciones_enered(user: dict = Depends(require_roles("admin_enered"))):
+    """Lista las estaciones ENERED registradas con precio especial."""
+    docs = await db.estaciones_enered.find({}, {"_id": 0}).to_list(500)
+    return {"estaciones": docs}
+
+
+@api.post("/admin/precios/estaciones-enered")
+async def upsert_estacion_enered(
+    data: dict,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Agrega o actualiza una estacion ENERED con su precio especial por cliente."""
+    nombre = data.get("nombre_facilito", "").strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="nombre_facilito es requerido")
+
+    comb = normalizar_combustible(data.get("combustible") or "Diesel B5 UV")
+    precio = float(data.get("precio_enered") or 0)
+    cliente = (data.get("cliente") or "GENERAL").strip().upper()
+
+    existing = await db.estaciones_enered.find_one({"nombre_facilito": nombre, "combustible": comb})
+    precios_cliente = existing.get("precios_cliente", {}) if existing else {}
+    
+    if cliente and cliente != "GENERAL":
+        precios_cliente[cliente] = precio
+    else:
+        precios_cliente["GENERAL"] = precio
+
+    doc = {
+        "nombre_facilito": nombre,
+        "combustible": comb,
+        "precio_enered": precio if not cliente or cliente == "GENERAL" else (existing.get("precio_enered", precio) if existing else precio),
+        "cliente_asignado": cliente,
+        "precios_cliente": precios_cliente,
+        "departamento": data.get("departamento", ""),
+        "provincia": data.get("provincia", ""),
+        "distrito": data.get("distrito", ""),
+        "acepta_factura": True,
+        "acepta_tarjeta": True,
+        "activa": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.estaciones_enered.update_one(
+        {"nombre_facilito": nombre, "combustible": comb},
+        {"$set": doc},
+        upsert=True,
+    )
+    await db.precios_facilito.update_many(
+        {"establecimiento": {"$regex": nombre, "$options": "i"}},
+        {"$set": {"es_enered": True, "acepta_tarjeta": True, "calidad": 5}}
+    )
+    return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio, "cliente": cliente}
+
+app.include_router(api)
+
 
 @api.delete("/admin/consumptions/cleanup")
 async def cleanup_consumptions(
@@ -2603,7 +2883,7 @@ async def admin_upload_invoice_file(
     ext = file.filename.split(".")[-1] if "." in file.filename else kind
     storage_key = _inv_key(emp, f"{n_doc}.{ext}")
     
-    storage.upload(storage_key, file_bytes, file.content_type or "application/pdf")
+    storage.save_object(storage_key, file_bytes, file.content_type or "application/pdf")
     
     update_data = {
         "factura_storage_key": storage_key,
@@ -3320,7 +3600,7 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     if not inv:
         inv = await db.empresas_invoices.find_one(q, {"_id": 0})
     if not inv:
-        sub_doc = await db.consumos_subsidio.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q)
+        sub_doc = await db.consumos_subsidio.find_one(q) or await db.consumos_subsidio.find_one(q, {"_id": 0})
         if sub_doc:
             inv = {
                 "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_id,
@@ -3339,6 +3619,20 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
         esc_cdoc = re.escape(clean_doc)
         reg_q = {"$or": [{"n_doc": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}]}
         inv = await db.invoices.find_one(reg_q, {"_id": 0}) or await db.empresas_invoices.find_one(reg_q, {"_id": 0})
+        # también buscar en consumos_subsidio si no se encontró
+        if not inv:
+            sub_doc2 = await db.consumos_subsidio.find_one(reg_q)
+            if sub_doc2:
+                inv = {
+                    "id": sub_doc2.get("id") or str(sub_doc2.get("_id", "")) or inv_id,
+                    "n_doc": sub_doc2.get("numero_documento") or sub_doc2.get("n_doc") or inv_id,
+                    "empresa": sub_doc2.get("empresa"),
+                    "pdf_filename": sub_doc2.get("factura_filename") or sub_doc2.get("pdf_filename"),
+                    "factura_storage_key": sub_doc2.get("factura_storage_key"),
+                    "factura_content_type": sub_doc2.get("factura_content_type") or "application/pdf",
+                    "monto_total": sub_doc2.get("monto_total") or sub_doc2.get("monto") or sub_doc2.get("importe_total") or 0,
+                    "f_emision": sub_doc2.get("fecha") or sub_doc2.get("f_emision")
+                }
 
     if not inv:
         raise HTTPException(status_code=404, detail=f"Factura {inv_id} no encontrada")
@@ -3359,6 +3653,23 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
     if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
     if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
+
+    # Si el inv fue encontrado en invoices/empresas_invoices pero sin storage_key,
+    # hacer lookup secundario en consumos_subsidio por n_doc para obtener el archivo real
+    if not candidate_keys:
+        n_doc_lookup = inv.get("n_doc") or inv.get("numero_documento") or inv_id
+        esc_nd2 = re.escape(str(n_doc_lookup))
+        sub_lookup = await db.consumos_subsidio.find_one({
+            "$or": [
+                {"n_doc": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
+                {"numero_documento": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
+            ]
+        })
+        if sub_lookup and sub_lookup.get("factura_storage_key"):
+            candidate_keys.append(sub_lookup["factura_storage_key"])
+            # también enriquecer inv con los datos del subsidio
+            if not inv.get("pdf_filename"):
+                inv["pdf_filename"] = sub_lookup.get("factura_filename") or sub_lookup.get("pdf_filename")
     
     fname = inv.get(f"{kind}_filename") or inv.get("pdf_filename") or inv.get("factura_filename")
     emp = inv.get("empresa") or ""
@@ -3389,12 +3700,15 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
         candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
         candidate_keys.append(f"{n_doc}.pdf")
 
-    # Encontrar la primera llave que realmente existe en storage
+    # Deduplicar y encontrar la primera llave que realmente existe en storage
+    seen = set()
     valid_key = None
     for k in candidate_keys:
-        if k and storage.object_exists(k):
-            valid_key = k
-            break
+        if k and k not in seen:
+            seen.add(k)
+            if storage.object_exists(k):
+                valid_key = k
+                break
 
     download_name = fname or f"{n_doc}.{kind}"
     media = "application/pdf" if kind == "pdf" else "application/xml"
@@ -3434,10 +3748,20 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
         p.setFont("Helvetica-Bold", 12)
         p.drawString(50, 560, "DETALLE DE IMPORTE")
         p.setFont("Helvetica", 11)
-        monto = inv.get("monto_total") or inv.get("monto") or 0
-        saldo = inv.get("saldo") if inv.get("saldo") is not None else monto
-        p.drawString(50, 535, f"Monto Total: S/ {float(monto):,.2f}")
-        p.drawString(50, 515, f"Saldo Pendiente: S/ {float(saldo):,.2f}")
+        
+        def _safe_num(v):
+            if v is None: return 0.0
+            if isinstance(v, (int, float)): return float(v)
+            try:
+                c = re.sub(r"[^\d.-]", "", str(v))
+                return float(c) if c else 0.0
+            except Exception:
+                return 0.0
+
+        monto = _safe_num(inv.get("monto_total") or inv.get("monto") or inv.get("importe_total"))
+        saldo = _safe_num(inv.get("saldo") if inv.get("saldo") is not None else monto)
+        p.drawString(50, 535, f"Monto Total: S/ {monto:,.2f}")
+        p.drawString(50, 515, f"Saldo Pendiente: S/ {saldo:,.2f}")
 
         p.line(50, 490, 550, 490)
         p.setFont("Helvetica-Oblique", 9)
@@ -4559,6 +4883,20 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
         if ignition is None:
             ignition = 1 if (pos.get("s") or 0) > 3 else 0
 
+        # Conductor asignado en BD
+        driver_name = None
+        driver_dni = None
+        if unit_name:
+            veh = await db.vehiculos.find_one({"placa": unit_name}, {"_id": 0, "conductor_principal": 1, "conductor_principal_id": 1, "driver_name": 1, "driver_dni": 1, "dni": 1})
+            if veh:
+                driver_name = veh.get("conductor_principal") or veh.get("driver_name")
+                driver_dni = veh.get("driver_dni") or veh.get("dni")
+                if not driver_name and veh.get("conductor_principal_id"):
+                    cond = await db.users.find_one({"id": veh["conductor_principal_id"]}, {"_id": 0, "nombre": 1, "name": 1, "dni": 1})
+                    if cond:
+                        driver_name = cond.get("nombre") or cond.get("name")
+                        driver_dni = cond.get("dni")
+
         units.append({
             "id": u.get("id"),
             "name": u.get("nm") or "",
@@ -4570,6 +4908,8 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
             "sat_count": pos.get("sc"),
             "odometer": odometer,
             "ignition": bool(ignition),
+            "driver_name": driver_name,
+            "driver_dni": driver_dni,
             "params": lmsg_p
         })
     # Bounding box (para el mapa)
@@ -4966,16 +5306,13 @@ async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
         if not f:
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
             
-    return Response(content=f["data"], media_type=f["content_type"])
-
-app.include_router(api)
-
-# ============================================================================
+    # ============================================================================
 # SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
 # ============================================================================
 from subsidio import subsidio_router, _set_db as _set_subsidio_db
 _set_subsidio_db(db)
 app.include_router(subsidio_router)
+
 
 from abonos import abonos_router
 app.include_router(abonos_router)
@@ -5305,6 +5642,12 @@ async def startup():
     except Exception as e:
         print("clean_estarkos err:", e)
 
+app.include_router(api)
+
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

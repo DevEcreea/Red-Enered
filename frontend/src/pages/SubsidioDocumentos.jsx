@@ -81,7 +81,7 @@ const ETAPAS = [
 ];
 
 const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50"];
-const TARGET_DATE = new Date("2026-07-28T23:59:59");
+const TARGET_DATE = new Date("2026-09-28T23:59:59");
 
 export default function SubsidioDocumentos() {
   const navigate = useNavigate();
@@ -197,7 +197,7 @@ export default function SubsidioDocumentos() {
                   <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.2" />
                   <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
-                <span className="text-[11px] font-black tracking-wider uppercase">28 JUL</span>
+                <span className="text-[11px] font-black tracking-wider uppercase">28 SEP</span>
               </div>
               
               {/* Divider */}

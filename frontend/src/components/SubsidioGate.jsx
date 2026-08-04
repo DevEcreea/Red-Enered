@@ -31,7 +31,7 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
 
   // 2. Lógica de Módulos Premium (Upsell a Demo)
   // Módulos liberados por defecto si el expediente está OK:
-  const modulosLiberados = ["Dashboard", "Combustible", "Cuenta", "Vehículos", "Documentación"];
+  const modulosLiberados = ["Dashboard", "Combustible", "Gestión Gastos", "Vehículos", "Documentación"];
   
   if (!modulosLiberados.includes(titulo)) {
     // Verificamos si tiene el servicio específico

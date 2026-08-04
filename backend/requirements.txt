@@ -126,3 +126,5 @@ yarl==1.23.0
 zipp==3.23.0
 pdf2image>=1.17.0
 pdfplumber==0.11.4
+beautifulsoup4>=4.12.0
+lxml>=5.0.0

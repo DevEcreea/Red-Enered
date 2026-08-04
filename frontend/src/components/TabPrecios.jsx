@@ -1,10 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
-import { 
-  MapPin, Star, Navigation, Map, TrendingDown,
-  CheckCircle2, AlertCircle, RefreshCw, Zap, Lock, Bell, Filter, Search, X
+import {
+  MapPin, Star, Map, TrendingDown,
+  ShieldCheck, RefreshCw, Zap, Filter, Search, X, Edit3, Plus, Fuel
 } from "lucide-react";
+
+import { UBIGEO_PERU, LISTA_DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
+
+const DEPARTAMENTOS_PERU = LISTA_DEPARTAMENTOS_PERU;
+
+const COMBUSTIBLES_DEFAULT = [
+  "Diesel B5 UV",
+  "Gasohol Regular",
+  "Gasohol Premium",
+];
+
 
 export default function TabPrecios({ user, ahorroCapturado }) {
   const [precios, setPrecios] = useState([]);
@@ -12,58 +23,148 @@ export default function TabPrecios({ user, ahorroCapturado }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [fuente, setFuente] = useState("facilito");
+  const [lastSync, setLastSync] = useState(null);
+  const [totalRegistros, setTotalRegistros] = useState(0);
 
-  // Filters state
+  const [listaDepartamentos, setListaDepartamentos] = useState(DEPARTAMENTOS_PERU);
+  const [combustiblesDisponibles, setCombustiblesDisponibles] = useState(COMBUSTIBLES_DEFAULT);
+
+  // 4 Filtros requeridos
   const [selDepartamento, setSelDepartamento] = useState("");
   const [selProvincia, setSelProvincia] = useState("");
   const [selDistrito, setSelDistrito] = useState("");
-  const [selProducto, setSelProducto] = useState("");
+  const [selCombustible, setSelCombustible] = useState("Diesel B5 UV");
   const [selEstacion, setSelEstacion] = useState("");
+  const [soloEnered, setSoloEnered] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
-  const [notified, setNotified] = useState(() => {
-    return localStorage.getItem("notify_grifos_virtuales") === "true";
-  });
-
-  const handleNotifyToggle = (e) => {
-    e.stopPropagation();
-    const nextState = !notified;
-    setNotified(nextState);
-    localStorage.setItem("notify_grifos_virtuales", String(nextState));
-  };
+  // Modal Admin
+  const [editModalStation, setEditModalStation] = useState(null);
+  const [inputPrecioEnered, setInputPrecioEnered] = useState("");
+  const [selClienteModal, setSelClienteModal] = useState("GENERAL");
+  const [listaClientes, setListaClientes] = useState([]);
+  const [savingEnered, setSavingEnered] = useState(false);
 
   useEffect(() => {
-    fetchPrecios();
+    api.get("/precios/ubicaciones")
+      .then((r) => {
+        if (r.data.departamentos?.length) {
+          const merged = sortedUnique([...DEPARTAMENTOS_PERU, ...r.data.departamentos]);
+          setListaDepartamentos(merged);
+        }
+      })
+      .catch(() => {});
+
+    api.get("/precios/combustibles")
+      .then((r) => {
+        if (r.data.combustibles?.length) setCombustiblesDisponibles(r.data.combustibles);
+      })
+      .catch(() => {});
+
+    api.get("/precios/clientes-list")
+      .then((r) => {
+        if (r.data.clientes?.length) setListaClientes(r.data.clientes);
+      })
+      .catch(() => {});
   }, []);
 
-  const fetchPrecios = async () => {
+  const sortedUnique = (arr) => [...new Set(arr.map((x) => (x || "").trim().toUpperCase()).filter(Boolean))].sort();
+
+  const fetchPrecios = useCallback(async () => {
     try {
       setLoading(true);
       setErrorMsg("");
-      const res = await api.get("/precios");
+      const params = new URLSearchParams();
+      if (selDepartamento) params.append("departamento", selDepartamento);
+      if (selProvincia) params.append("provincia", selProvincia);
+      if (selDistrito) params.append("distrito", selDistrito);
+      if (selCombustible) params.append("combustible", selCombustible);
+      if (soloEnered) params.append("solo_enered", "true");
+
+      const res = await api.get(`/precios?${params.toString()}`);
       setPrecios(res.data.precios || []);
       setMejorPrecio(res.data.mejor_precio || 0);
+      setFuente(res.data.fuente || "facilito");
+      setLastSync(res.data.last_sync || null);
+      setTotalRegistros(res.data.total || 0);
     } catch (error) {
-      console.error("Error fetching precios:", error);
-      setErrorMsg(error.response?.status === 404 ? "El backend aún no se actualiza (Error 404)." : error.message);
+      setErrorMsg(error.response?.data?.detail || error.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selDepartamento, selProvincia, selDistrito, selCombustible, soloEnered]);
+
+  useEffect(() => {
+    fetchPrecios();
+  }, [fetchPrecios]);
+
+  const provinciasDisponibles = useMemo(() => {
+    let provStatic = [];
+    if (selDepartamento && UBIGEO_PERU[selDepartamento.toUpperCase()]) {
+      provStatic = Object.keys(UBIGEO_PERU[selDepartamento.toUpperCase()]);
+    }
+    let pool = precios;
+    if (selDepartamento) {
+      pool = pool.filter((p) => (p.departamento || "").toUpperCase() === selDepartamento.toUpperCase());
+    }
+    const provFromData = pool.map((p) => p.provincia);
+    return sortedUnique([...provStatic, ...provFromData]);
+  }, [precios, selDepartamento]);
+
+  const distritosDisponibles = useMemo(() => {
+    let distStatic = [];
+    if (selDepartamento && selProvincia && UBIGEO_PERU[selDepartamento.toUpperCase()]?.[selProvincia.toUpperCase()]) {
+      distStatic = UBIGEO_PERU[selDepartamento.toUpperCase()][selProvincia.toUpperCase()];
+    }
+    let pool = precios;
+    if (selDepartamento) {
+      pool = pool.filter((p) => (p.departamento || "").toUpperCase() === selDepartamento.toUpperCase());
+    }
+    if (selProvincia) {
+      pool = pool.filter((p) => (p.provincia || "").toUpperCase() === selProvincia.toUpperCase());
+    }
+    const distFromData = pool.map((p) => p.distrito || p.ciudad);
+    return sortedUnique([...distStatic, ...distFromData]);
+  }, [precios, selDepartamento, selProvincia]);
+
+  const filteredPrecios = useMemo(() => {
+    return precios.filter((p) => {
+      if (selEstacion) {
+        const query = selEstacion.toLowerCase();
+        const est = (p.establecimiento || p.estacion || p.empresa || "").toLowerCase();
+        const dir = (p.direccion || "").toLowerCase();
+        if (!est.includes(query) && !dir.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [precios, selEstacion]);
+
+  const paginatedPrecios = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredPrecios.slice(start, start + pageSize);
+  }, [filteredPrecios, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredPrecios.length / pageSize) || 1;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selDepartamento, selProvincia, selDistrito, selCombustible, selEstacion, soloEnered]);
 
   const handleSync = async () => {
     try {
       setSyncing(true);
-      await api.post("/admin/precios/sync");
-      await fetchPrecios();
+      const res = await api.post("/admin/precios/sync", {}, { timeout: 300000 });
+      if (res.data?.message) {
+        alert(`✅ ${res.data.message}`);
+      }
     } catch (err) {
-      alert("Error sincronizando: " + (err.response?.data?.detail || err.message));
+      console.log("Sync response handled:", err);
     } finally {
+      await fetchPrecios();
       setSyncing(false);
     }
-  };
-
-  const openMap = () => {
-    window.open("https://maps.app.goo.gl/u3JiKA2w1E8ZWZeX9", "_blank");
   };
 
   const openStationMap = (estacion, ciudad) => {
@@ -71,400 +172,598 @@ export default function TabPrecios({ user, ahorroCapturado }) {
     window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
   };
 
+  const openRouteMap = (estacion, ciudad) => {
+    const q = encodeURIComponent(`${estacion} ${ciudad} peru`);
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${q}`, "_blank");
+  };
+
+  const handleSavePrecioEnered = async (e) => {
+    e.preventDefault();
+    if (!editModalStation) return;
+    const precioVal = parseFloat(inputPrecioEnered);
+    if (isNaN(precioVal) || precioVal <= 0) {
+      alert("Ingresa un precio válido mayor a 0");
+      return;
+    }
+
+    try {
+      setSavingEnered(true);
+      await api.post("/admin/precios/estaciones-enered", {
+        nombre_facilito: editModalStation.establecimiento || editModalStation.estacion,
+        combustible: editModalStation.combustible || selCombustible || "Diesel B5 UV",
+        precio_enered: precioVal,
+        cliente: selClienteModal,
+        departamento: editModalStation.departamento || "",
+        provincia: editModalStation.provincia || "",
+        distrito: editModalStation.distrito || editModalStation.ciudad || "",
+        acepta_factura: true,
+        acepta_tarjeta: true,
+      });
+      alert(`✅ Estación ENERED configurada a S/ ${precioVal.toFixed(2)} (${selClienteModal === "GENERAL" ? "Todos los Clientes" : "Cliente: " + selClienteModal}) para ${editModalStation.establecimiento}`);
+      setEditModalStation(null);
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error guardando precio: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSavingEnered(false);
+    }
+  };
+
+  const formatSync = (iso) => {
+    if (!iso) return null;
+    try {
+      return new Date(iso).toLocaleString("es-PE", { dateStyle: "short", timeStyle: "short" });
+    } catch { return iso; }
+  };
+
   return (
     <div className="flex flex-col gap-6" data-testid="tab-precios">
-      {/* Top KPIs */}
+      {/* KPIs superiores */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Card 1: Ahorro */}
+        {/* Ahorro Capturado */}
         <div className="bg-[#8039F4] rounded-2xl p-5 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
           <Zap className="absolute top-4 right-4 text-white/20 w-16 h-16 -mr-4 -mt-4" />
           <div>
             <div className="text-3xl font-black tracking-tight">{formatSoles(ahorroCapturado)}</div>
-            <div className="text-sm font-semibold mt-1">Ahorro potencial capturado</div>
-            <div className="text-[10px] text-white/70 mt-1 uppercase tracking-wider">basado en el módulo de combustibles</div>
+            <div className="text-xs font-semibold text-white/80 mt-1">Ahorro capturado estimado</div>
+          </div>
+          <div className="text-[10px] text-white/60 mt-3 uppercase tracking-wider font-bold">
+            Basado en consumo real
           </div>
         </div>
 
-        {/* Card 2: Adherencia */}
+        {/* Mejor Precio */}
         <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
           <div className="flex justify-between items-start">
-            <div className="text-3xl font-black tracking-tight text-neutral-900">0%</div>
+            <div className="text-3xl font-black tracking-tight text-neutral-900">
+              {mejorPrecio > 0 ? formatSoles(mejorPrecio) : "—"}
+            </div>
+            <Fuel className="text-emerald-500 w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-neutral-600">Mejor precio detectado</div>
+            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
+              En tu zona seleccionada
+            </div>
+          </div>
+        </div>
+
+        {/* Total Estaciones */}
+        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex justify-between items-start">
+            <div className="text-3xl font-black tracking-tight text-neutral-900">
+              {totalRegistros}
+            </div>
+            <MapPin className="text-brand-500 w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-neutral-600">Estaciones registradas</div>
+            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
+              Red nacional OSINERGMIN
+            </div>
+          </div>
+        </div>
+
+        {/* Estado Sincronización */}
+        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+          <div className="flex justify-between items-start">
+            <div className="text-sm font-black tracking-tight text-neutral-900">
+              {lastSync ? formatSync(lastSync) : "Sincronizado"}
+            </div>
             <TrendingDown className="text-neutral-400 w-5 h-5" />
           </div>
           <div>
-            <div className="text-sm font-semibold text-neutral-600">Adherencia al mejor precio</div>
-            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">0 de 0 cargas en grifo recomendado</div>
-          </div>
-        </div>
-
-        {/* Card 3: Grifos (Clickable) */}
-        <div 
-          onClick={openMap}
-          className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between cursor-pointer hover:border-brand hover:shadow-md transition-all group relative overflow-hidden"
-        >
-          <div className="flex justify-between items-start relative z-10">
-            <div className="text-3xl font-black tracking-tight text-neutral-900 group-hover:text-brand transition-colors">
-              {"> 352"}
+            <div className="text-sm font-semibold text-neutral-600">Estado de precios</div>
+            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
+              Mercado nacional
             </div>
-            <Map className="text-neutral-400 group-hover:text-brand w-5 h-5 transition-colors" />
           </div>
-          <div className="relative z-10">
-            <div className="text-sm font-semibold text-neutral-600">Grifos en red ENERED</div>
-            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider group-hover:text-brand/70">Clic para ver en Google Maps</div>
+        </div>
+      </div>
+
+      {/* 4 FILTROS REQUERIDOS */}
+      <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider flex items-center gap-1.5">
+            <Filter className="w-3.5 h-3.5 text-brand-600" />
+            Filtros por Ubicación y Producto
+          </span>
+          <div className="flex items-center gap-3">
+            {fuente === "facilito" && (
+              <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                ✅ Datos de Facilito
+              </span>
+            )}
+            {user?.role === "admin_enered" && (
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Scrapeando..." : "Sincronizar Facilito"}
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Card 4: Mejor Precio */}
-        <div className="bg-[#10B981] rounded-2xl p-5 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
-          <div className="absolute top-4 right-4 w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-            <MapPin className="text-white w-6 h-6" />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+          {/* 1. Departamento */}
           <div>
-            <div className="flex items-baseline gap-1">
-              <div className="text-3xl font-black tracking-tight">{formatSoles(mejorPrecio)}</div>
-              <div className="text-sm font-medium">/gal</div>
+            <label className="block text-[11px] font-semibold text-neutral-600 mb-1">1. Departamento</label>
+            <select
+              value={selDepartamento}
+              onChange={(e) => {
+                setSelDepartamento(e.target.value);
+                setSelProvincia("");
+                setSelDistrito("");
+              }}
+              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
+            >
+              <option value="">Todos los dptos.</option>
+              {listaDepartamentos.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Provincia */}
+          <div>
+            <label className="block text-[11px] font-semibold text-neutral-600 mb-1">2. Provincia</label>
+            <select
+              value={selProvincia}
+              onChange={(e) => {
+                setSelProvincia(e.target.value);
+                setSelDistrito("");
+              }}
+              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
+            >
+              <option value="">Todas las prov.</option>
+              {provinciasDisponibles.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. Distrito */}
+          <div>
+            <label className="block text-[11px] font-semibold text-neutral-600 mb-1">3. Distrito / Ciudad</label>
+            <select
+              value={selDistrito}
+              onChange={(e) => setSelDistrito(e.target.value)}
+              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
+            >
+              <option value="">Todos los distritos</option>
+              {distritosDisponibles.map((dist) => (
+                <option key={dist} value={dist}>{dist}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Combustible */}
+          <div>
+            <label className="block text-[11px] font-semibold text-neutral-600 mb-1">4. Combustible</label>
+            <select
+              value={selCombustible}
+              onChange={(e) => setSelCombustible(e.target.value)}
+              className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
+            >
+              {combustiblesDisponibles.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Buscar por nombre */}
+          <div>
+            <label className="block text-[11px] font-semibold text-neutral-600 mb-1">Buscar estación</label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Nombre o dirección..."
+                value={selEstacion}
+                onChange={(e) => setSelEstacion(e.target.value)}
+                className="w-full bg-neutral-50 border border-neutral-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
+              />
+              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             </div>
-            <div className="text-sm font-semibold mt-1">Mejor precio hoy</div>
-            <div className="text-[10px] text-white/80 mt-1 uppercase tracking-wider">Precio garantizado en tu zona</div>
           </div>
         </div>
-      </div>      {/* Teaser Banner */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#1E1535] via-[#2A1D4A] to-[#120B24] border border-brand-500/20 p-6 md:p-8 shadow-xl">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-brand-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-16 w-48 h-48 bg-purple-500/10 rounded-full blur-2xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 mb-4">
-          <div className="inline-flex items-center gap-2 bg-brand-500/15 border border-brand-400/30 px-3 py-1 rounded-full text-brand-300 text-xs font-semibold backdrop-blur-md">
-            <Lock className="w-3.5 h-3.5 text-brand-400" />
-            <span>Acceso Privado B2B</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 rounded-full text-emerald-400 text-xs font-semibold">
-              <Zap className="w-3.5 h-3.5" /> Cobertura Nacional
+        {/* Check solo ENERED */}
+        <div className="flex items-center justify-between pt-1 border-t border-neutral-100">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={soloEnered}
+              onChange={(e) => setSoloEnered(e.target.checked)}
+              className="w-3.5 h-3.5 accent-brand-600 rounded"
+            />
+            <span className="text-xs text-neutral-600 font-medium">Ver solo estaciones ENERED</span>
+          </label>
+        </div>
+      </div>
+
+      {/* TABLA DE PRECIOS */}
+      <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[950px]">
+            <thead>
+              <tr className="bg-[#211A36] text-white text-[11px] uppercase tracking-wider">
+                <th className="px-4 py-3 font-semibold rounded-tl-xl">Estación</th>
+                <th className="px-4 py-3 font-semibold">Ciudad</th>
+                <th className="px-4 py-3 font-semibold text-center">Calidad</th>
+                <th className="px-4 py-3 font-semibold text-right">Pizarra</th>
+                <th className="px-4 py-3 font-semibold text-right text-emerald-300">ENERED</th>
+                <th className="px-4 py-3 font-semibold text-right">Diferencia</th>
+                <th className="px-3 py-3 font-semibold text-center">Factura</th>
+                <th className="px-3 py-3 font-semibold text-center">Tarjeta</th>
+                <th className="px-4 py-3 font-semibold text-center rounded-tr-xl">Acción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 text-xs">
+              {loading ? (
+                <tr>
+                  <td colSpan="9" className="p-8 text-center text-neutral-400">
+                    <RefreshCw className="w-5 h-5 animate-spin inline mr-2" />
+                    Cargando lista de estaciones y precios...
+                  </td>
+                </tr>
+              ) : errorMsg ? (
+                <tr>
+                  <td colSpan="9" className="p-8 text-center text-red-500 font-bold">{errorMsg}</td>
+                </tr>
+              ) : filteredPrecios.length === 0 ? (
+                <tr>
+                  <td colSpan="9" className="p-8 text-center text-neutral-400">
+                    No se encontraron estaciones para los filtros seleccionados.
+                  </td>
+                </tr>
+              ) : (
+                paginatedPrecios.map((p, idx) => {
+                  const esEnered = Boolean(p.es_enered);
+                  const precioPizarra = p.precio_pizarra || p.precio_venta || 0;
+                  const precioEnered = p.precio_enered;
+                  const ahorro = p.ahorro || 0;
+                  const ciudad = p.distrito || p.ciudad || p.provincia || p.departamento || "—";
+                  const nombreEst = p.establecimiento || p.estacion || p.empresa || "Estación";
+                  const subNombre = p.direccion ? (p.direccion.length > 35 ? p.direccion.slice(0, 35) + "…" : p.direccion) : "";
+
+                  return (
+                    <tr
+                      key={idx}
+                      className={`hover:bg-neutral-50/80 transition-colors ${esEnered ? "bg-emerald-50/20" : ""}`}
+                    >
+                      {/* 1. Estación */}
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-neutral-900 text-xs sm:text-sm">{nombreEst}</span>
+                            {esEnered && <span className="text-amber-400 text-xs">⭐</span>}
+                            <MapPin className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                              esEnered && precioEnered
+                                ? "bg-emerald-100 text-emerald-600"
+                                : "bg-neutral-100 text-neutral-400 border border-neutral-200"
+                            }`}>✓</span>
+                          </div>
+                          <div className="text-[11px] text-neutral-400 mt-0.5 flex items-center gap-1">
+                            {subNombre && <span>{subNombre} | </span>}
+                            {esEnered ? (
+                              <span className="text-emerald-600 font-bold">Red ENERED</span>
+                            ) : (
+                              <span className="text-rose-500 font-bold">Independiente</span>
+                            )}
+                          </div>
+                          {!esEnered && user?.role === "admin_enered" && (
+                            <button
+                              onClick={() => {
+                                setEditModalStation(p);
+                                setInputPrecioEnered("");
+                              }}
+                              className="mt-1 flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:text-violet-800 transition-colors"
+                            >
+                              <Plus className="w-3 h-3" />
+                              Convertir a ENERED
+                            </button>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 2. Ciudad */}
+                      <td className="px-4 py-3 text-emerald-600 font-bold text-xs capitalize">
+                        {ciudad}
+                      </td>
+
+                      {/* 3. Calidad */}
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-0.5">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Star
+                              key={star}
+                              className={`w-3 h-3 ${
+                                star <= (p.calidad || 2)
+                                  ? "text-amber-400 fill-amber-400"
+                                  : "text-neutral-200"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </td>
+
+                      {/* 4. Precio Pizarra */}
+                      <td className="px-4 py-3 text-right font-semibold text-neutral-900 text-xs">
+                        {precioPizarra > 0 ? formatSoles(precioPizarra) : "—"}
+                      </td>
+
+                      {/* 5. Precio ENERED */}
+                      <td className="px-4 py-3 text-right font-bold text-xs">
+                        {precioEnered ? (
+                          <div className="flex flex-col items-end">
+                            <span className="text-emerald-600 text-xs font-black">{formatSoles(precioEnered)}</span>
+                            {user?.role === "admin_enered" && (
+                              <button
+                                onClick={() => {
+                                  setEditModalStation(p);
+                                  setInputPrecioEnered(precioEnered.toString());
+                                }}
+                                className="text-[10px] text-violet-600 underline hover:text-violet-800"
+                              >
+                                Editar
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-end">
+                            <span className="text-neutral-300 font-normal italic">no aplica</span>
+                            {user?.role === "admin_enered" && (
+                              <button
+                                onClick={() => {
+                                  setEditModalStation(p);
+                                  setInputPrecioEnered("");
+                                }}
+                                className="text-[10px] text-violet-600 underline hover:text-violet-800 font-bold"
+                              >
+                                + Asignar a {selCombustible}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* 6. Diferencia */}
+                      <td className="px-4 py-3 text-right font-bold text-xs">
+                        {esEnered && ahorro > 0 ? (
+                          <span className="text-emerald-600">-S/ {ahorro.toFixed(2)}</span>
+                        ) : (
+                          <span className="text-neutral-300 font-normal">—</span>
+                        )}
+                      </td>
+
+                      {/* 7. Factura */}
+                      <td className="px-3 py-3 text-center">
+                        {esEnered || p.acepta_factura ? (
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold">
+                            ✔
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-rose-100 text-rose-500 text-xs font-bold">
+                            ✕
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 8. Tarjeta */}
+                      <td className="px-3 py-3 text-center">
+                        {esEnered || p.acepta_tarjeta ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            ✔ Acepta
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">
+                            ✕ No
+                          </span>
+                        )}
+                      </td>
+
+                      {/* 9. Acción */}
+                      <td className="px-4 py-3 text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {esEnered ? (
+                            <button
+                              onClick={() => openStationMap(nombreEst, ciudad)}
+                              className="bg-emerald-600 text-white text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-emerald-700 transition-colors shadow-xs"
+                            >
+                              Dirigir
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => openStationMap(nombreEst, ciudad)}
+                              className="bg-white border border-neutral-300 text-neutral-700 text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-neutral-50 transition-colors"
+                            >
+                              Evaluar
+                            </button>
+                          )}
+                          <button
+                            onClick={() => openRouteMap(nombreEst, ciudad)}
+                            className="bg-white border border-neutral-300 text-neutral-600 text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-neutral-50 transition-colors"
+                          >
+                            Ruta
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* PIE DE TABLA - CONTROLES DE PAGINACIÓN */}
+        <div className="px-6 py-4 border-t border-neutral-100 bg-neutral-50/50 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-neutral-600">
+          <div className="flex items-center gap-3">
+            <span>Mostrar</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              className="px-2 py-1 border border-neutral-200 rounded-md bg-white font-medium focus:ring-2 focus:ring-violet-500"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+            <span>registros por página</span>
+            <span className="text-neutral-400">|</span>
+            <span>
+              Mostrando {filteredPrecios.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} a{" "}
+              {Math.min(currentPage * pageSize, filteredPrecios.length)} de {filteredPrecios.length} registros
             </span>
           </div>
-        </div>
 
-        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          <div className="lg:col-span-7 space-y-3">
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-tight">
-              1.ª red de grifos virtuales <br className="hidden sm:inline" />
-              <span className="bg-gradient-to-r from-brand-300 via-purple-300 to-indigo-200 bg-clip-text text-transparent">
-                a nivel nacional
-              </span>
-            </h2>
-            <p className="text-sm text-neutral-300/90 leading-relaxed max-w-xl">
-              Accede a precios preferenciales en estaciones estratégicas del país con tu membresía ENERED. Precios transparentes y sincronizados en tiempo real.
-            </p>
+          <div className="flex items-center gap-1.5">
+            <button
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              className="px-3 py-1.5 border border-neutral-200 rounded-md bg-white hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition-colors"
+            >
+              Anterior
+            </button>
+
+            <span className="px-3 py-1.5 font-bold text-violet-700 bg-violet-50 rounded-md">
+              Página {currentPage} de {totalPages}
+            </span>
+
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              className="px-3 py-1.5 border border-neutral-200 rounded-md bg-white hover:bg-neutral-100 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition-colors"
+            >
+              Siguiente
+            </button>
           </div>
-
-          <div className="lg:col-span-5 flex flex-col items-center lg:items-end justify-center">
-            <div className="w-full max-w-xs bg-white/5 backdrop-blur-md border border-white/10 p-4 rounded-xl space-y-2">
-              <div className="flex items-center justify-between text-xs text-neutral-300">
-                <span>Precio Promedio Pizarra:</span>
-                <span className="font-mono text-neutral-400 line-through">S/ 26.50</span>
-              </div>
-              <div className="flex items-center justify-between text-sm font-bold text-white">
-                <span>Precio Especial ENERED:</span>
-                <span className="font-mono text-emerald-400 text-base">{formatSoles(mejorPrecio || 25.41)}</span>
-              </div>
-              <div className="pt-1 border-t border-white/10 flex items-center justify-between text-[11px] text-brand-300 font-medium">
-                <span>Ahorro Estimado:</span>
-                <span className="text-emerald-300 font-semibold">~S/ 1.09 / galón</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <button 
-          onClick={handleNotifyToggle}
-          className={`mt-6 z-10 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-lg cursor-pointer ${
-            notified 
-              ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-900/30" 
-              : "bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 text-white shadow-brand-900/40"
-          }`}
-        >
-          {notified ? (
-            <>
-              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-              Notificaciones activadas (Te avisaremos)
-            </>
-          ) : (
-            <>
-              <Bell className="w-4 h-4" />
-              Avísame cuando esté disponible
-            </>
-          )}
-        </button>
-
-        <div className="flex items-center gap-1 text-[11px] font-semibold text-neutral-400 mt-3 z-10">
-          <Star className="w-3 h-3 text-neutral-400" /> Exclusivo para flotas ENERED
         </div>
       </div>
 
-      {/* Header and Actions */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">LISTA DE PRECIOS</h3>
-        {user?.role === "admin_enered" && (
-          <button 
-            onClick={handleSync} 
-            disabled={syncing}
-            className="btn-brand text-xs px-4 py-2 flex items-center gap-2 rounded-lg"
-          >
-            <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Sincronizando..." : "Sincronizar Sheet"}
-          </button>
-        )}
-      </div>
 
-      {/* Filters Bar */}
-      {(() => {
-        const departamentos = Array.from(new Set(precios.map(p => p.departamento || p.ciudad || "").filter(Boolean))).sort();
-        const provincias = Array.from(new Set(precios.filter(p => !selDepartamento || (p.departamento || p.ciudad) === selDepartamento).map(p => p.provincia || "").filter(Boolean))).sort();
-        const distritos = Array.from(new Set(precios.filter(p => (!selDepartamento || (p.departamento || p.ciudad) === selDepartamento) && (!selProvincia || p.provincia === selProvincia)).map(p => p.distrito || p.ciudad || "").filter(Boolean))).sort();
-        const productos = Array.from(new Set(precios.map(p => p.combustible || "").filter(Boolean))).sort();
-
-        const rawFiltered = precios.filter(p => {
-          const deptVal = p.departamento || p.ciudad || "";
-          if (selDepartamento && deptVal !== selDepartamento) return false;
-          if (selProvincia && (p.provincia || "") !== selProvincia) return false;
-          const distVal = p.distrito || p.ciudad || "";
-          if (selDistrito && distVal !== selDistrito) return false;
-          if (selProducto && (p.combustible || "") !== selProducto) return false;
-          if (selEstacion && !(p.estacion || p.empresa || "").toLowerCase().includes(selEstacion.toLowerCase())) return false;
-          return true;
-        });
-
-        // Deduplicate stations by (estacion + ciudad + combustible)
-        const dedupMap = new Map();
-        rawFiltered.forEach(p => {
-          const estName = (p.estacion || p.empresa || "").trim().toUpperCase();
-          const city = (p.ciudad || "").trim().toUpperCase();
-          const comb = (p.combustible || "").trim().toUpperCase();
-          const key = `${estName}_${city}_${comb}`;
-          if (!dedupMap.has(key)) {
-            dedupMap.set(key, p);
-          }
-        });
-        const filteredPrecios = Array.from(dedupMap.values());
-
-        return (
-          <>
-            <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-neutral-600 uppercase tracking-wider flex items-center gap-1.5">
-                  <Filter className="w-3.5 h-3.5 text-brand-600" /> Filtros por Ubicación y Producto
-                </span>
-                {(selDepartamento || selProvincia || selDistrito || selProducto || selEstacion) && (
-                  <button 
-                    onClick={() => {
-                      setSelDepartamento("");
-                      setSelProvincia("");
-                      setSelDistrito("");
-                      setSelProducto("");
-                      setSelEstacion("");
-                    }}
-                    className="text-xs text-brand-600 hover:text-brand-700 font-semibold flex items-center gap-1 cursor-pointer"
-                  >
-                    <X className="w-3 h-3" /> Limpiar filtros
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-                {/* Departamento */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-500 mb-1">Departamento</label>
-                  <select
-                    value={selDepartamento}
-                    onChange={(e) => {
-                      setSelDepartamento(e.target.value);
-                      setSelProvincia("");
-                      setSelDistrito("");
-                    }}
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-                  >
-                    <option value="">Todos los dptos.</option>
-                    {departamentos.map((d) => (
-                      <option key={d} value={d}>{d}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Provincia */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-500 mb-1">Provincia</label>
-                  <select
-                    value={selProvincia}
-                    onChange={(e) => {
-                      setSelProvincia(e.target.value);
-                      setSelDistrito("");
-                    }}
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-                  >
-                    <option value="">Todas las prov.</option>
-                    {provincias.map((pr) => (
-                      <option key={pr} value={pr}>{pr}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Distrito */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-500 mb-1">Distrito / Ciudad</label>
-                  <select
-                    value={selDistrito}
-                    onChange={(e) => setSelDistrito(e.target.value)}
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-                  >
-                    <option value="">Todos los distritos</option>
-                    {distritos.map((di) => (
-                      <option key={di} value={di}>{di}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Producto */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-500 mb-1">Producto</label>
-                  <select
-                    value={selProducto}
-                    onChange={(e) => setSelProducto(e.target.value)}
-                    className="w-full bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-                  >
-                    <option value="">Todos los productos</option>
-                    {productos.map((prod) => (
-                      <option key={prod} value={prod}>{prod}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Estación */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-neutral-500 mb-1">Estación</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Buscar estación..."
-                      value={selEstacion}
-                      onChange={(e) => setSelEstacion(e.target.value)}
-                      className="w-full bg-neutral-50 border border-neutral-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-                    />
-                    <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-2" />
-                  </div>
-                </div>
-              </div>
+      {/* Modal Admin */}
+      {editModalStation && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-neutral-900 text-base flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-brand-600" />
+                Configurar Estación ENERED
+              </h3>
+              <button
+                onClick={() => setEditModalStation(null)}
+                className="text-neutral-400 hover:text-neutral-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {/* Table */}
-            <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="bg-[#2A2045] text-white text-xs uppercase tracking-wider">
-                      <th className="px-6 py-4 font-semibold rounded-tl-xl">Estación</th>
-                      <th className="px-6 py-4 font-semibold">Ciudad</th>
-                      <th className="px-6 py-4 font-semibold text-center">Calidad</th>
-                      <th className="px-6 py-4 font-semibold text-right">Pizarra</th>
-                      <th className="px-6 py-4 font-semibold text-right text-brand-300">ENERED</th>
-                      <th className="px-6 py-4 font-semibold text-right">Diferencia</th>
-                      <th className="px-6 py-4 font-semibold text-center">Factura</th>
-                      <th className="px-6 py-4 font-semibold text-center">Tarjeta</th>
-                      <th className="px-6 py-4 font-semibold text-center rounded-tr-xl">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-100">
-                    {loading ? (
-                      <tr>
-                        <td colSpan="9" className="p-8 text-center text-neutral-400">
-                          Cargando precios...
-                        </td>
-                      </tr>
-                    ) : errorMsg ? (
-                      <tr>
-                        <td colSpan="9" className="p-8 text-center text-red-500 font-bold">
-                          {errorMsg}
-                        </td>
-                      </tr>
-                    ) : filteredPrecios.length === 0 ? (
-                      <tr>
-                        <td colSpan="9" className="p-8 text-center text-neutral-400">
-                          No hay estaciones que coincidan con los filtros seleccionados.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredPrecios.map((p) => {
-                        const diff = (p.precio_pizarra || 0) - (p.precio_venta || 0);
-                        const isAhorro = diff > 0;
-                        
-                        return (
-                          <tr key={p.id} className="hover:bg-neutral-50 transition-colors">
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-neutral-900">{p.estacion || p.empresa}</span>
-                                  <Star className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                </div>
-                                <span className="text-[10px] text-neutral-400 mt-0.5">
-                                  Estación ENERED | {p.combustible}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-sm font-bold text-brand">
-                              {p.ciudad}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex items-center justify-center gap-0.5">
-                                {[1,2,3,4,5].map(i => (
-                                  <Star key={i} className="w-3 h-3 text-amber-400 fill-amber-400" />
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-right text-sm font-semibold text-neutral-500">
-                              {formatSoles(p.precio_pizarra)}
-                            </td>
-                            <td className="px-6 py-4 text-right text-sm font-bold text-emerald-600">
-                              {formatSoles(p.precio_venta)}
-                            </td>
-                            <td className="px-6 py-4 text-right text-sm font-bold">
-                              <span className={isAhorro ? "text-emerald-500" : "text-rose-500"}>
-                                {isAhorro ? "-" : "+"}{formatSoles(Math.abs(diff))}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex justify-center">
-                                <div className="w-5 h-5 rounded-full bg-emerald-50 flex items-center justify-center">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-center text-xs font-semibold text-emerald-600">
-                              <div className="flex items-center justify-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5" /> Acepta
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <div className="flex justify-center gap-2">
-                                <button 
-                                  onClick={() => openStationMap(p.estacion || p.empresa, p.ciudad)}
-                                  className="bg-brand text-white text-[10px] uppercase font-bold px-3 py-1.5 rounded-full hover:bg-brand-600 transition-colors flex items-center gap-1"
-                                >
-                                  <Navigation className="w-3 h-3" /> Dirigir
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+            <form onSubmit={handleSavePrecioEnered} className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-neutral-600">Estación</label>
+                  <span className="bg-violet-100 text-violet-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-violet-200">
+                    {editModalStation.combustible || selCombustible}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  disabled
+                  value={editModalStation.establecimiento || editModalStation.estacion}
+                  className="w-full bg-neutral-100 border border-neutral-200 rounded-lg px-3 py-2 text-xs font-bold text-neutral-800"
+                />
               </div>
-            </div>
-          </>
-        );
-      })()}
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-600 mb-1">Asignar a Cliente / Empresa</label>
+                <select
+                  value={selClienteModal}
+                  onChange={(e) => setSelClienteModal(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-xs font-medium text-neutral-800 focus:ring-2 focus:ring-brand-500 bg-white"
+                >
+                  <option value="GENERAL">-- Todos los Clientes (Precio General ENERED) --</option>
+                  {listaClientes.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-neutral-500 mt-1">
+                  💡 Si eliges una empresa específica, el precio especial aplicará <strong>solo para ese cliente</strong>.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-600 mb-1">Precio Pizarra (Mercado)</label>
+                  <input
+                    type="text"
+                    disabled
+                    value={formatSoles(editModalStation.precio_pizarra || editModalStation.precio_venta)}
+                    className="w-full bg-neutral-100 border border-neutral-200 rounded-lg px-3 py-2 text-xs font-semibold text-neutral-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-emerald-600 mb-1">Precio Especial ENERED *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    placeholder="Ej. 17.50"
+                    value={inputPrecioEnered}
+                    onChange={(e) => setInputPrecioEnered(e.target.value)}
+                    className="w-full bg-emerald-50 border-2 border-emerald-400 rounded-lg px-3 py-2 text-xs font-bold text-emerald-900 focus:outline-none focus:border-emerald-600"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditModalStation(null)}
+                  className="px-4 py-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEnered}
+                  className="btn-brand text-xs px-5 py-2 rounded-lg font-bold flex items-center gap-1.5"
+                >
+                  {savingEnered ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Guardar Precio"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

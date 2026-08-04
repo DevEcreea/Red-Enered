@@ -5,7 +5,7 @@ import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
   Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2, Edit3, Upload,
 } from "lucide-react";
-import { api } from "../lib/api";
+import { api, API } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
@@ -200,18 +200,96 @@ export default function Facturacion() {
     }
   };
 
-  const viewInvoice = (inv, kind = "pdf") => {
+  const generateFallbackPdfUrl = (inv) => {
+    try {
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("RED ENERED - COMPROBANTE DE PAGO", 14, 22);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text("Plataforma Integral de Gestión de Combustible", 14, 28);
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, 32, 196, 32);
+
+      const nDoc = inv.n_doc || inv.numero_documento || inv.id || "Factura";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Documento N°: ${nDoc}`, 14, 42);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Cliente / Empresa: ${inv.empresa || inv.cliente || "—"}`, 14, 50);
+      doc.text(`Producto / Servicio: ${inv.producto || "DIESEL / COMBUSTIBLE"}`, 14, 56);
+      doc.text(`Fecha Emisión: ${inv.f_emision || inv.fecha || "—"}`, 14, 62);
+      doc.text(`Fecha Vencimiento: ${inv.f_vencimiento || "—"}`, 14, 68);
+      doc.text(`Estado: ${(inv.estado || "pendiente").toUpperCase()}`, 14, 74);
+
+      doc.line(14, 80, 196, 80);
+
+      const rawMonto = inv.monto_total ?? inv.monto ?? inv.importe_total ?? 0;
+      const numMonto = typeof rawMonto === "number" ? rawMonto : parseFloat(String(rawMonto).replace(/[^\d.-]/g, "")) || 0;
+      const rawSaldo = inv.saldo !== undefined ? inv.saldo : numMonto;
+      const numSaldo = typeof rawSaldo === "number" ? rawSaldo : parseFloat(String(rawSaldo).replace(/[^\d.-]/g, "")) || 0;
+
+      autoTable(doc, {
+        startY: 86,
+        head: [["Concepto", "Importe Total", "Saldo Pendiente", "Moneda"]],
+        body: [[
+          inv.producto || "Facturación de Consumo de Combustible",
+          `S/ ${numMonto.toFixed(2)}`,
+          `S/ ${numSaldo.toFixed(2)}`,
+          inv.moneda || "PEN"
+        ]],
+        theme: "striped",
+        headStyles: { fillColor: [139, 61, 255] }
+      });
+
+      const finalY = (doc.lastAutoTable?.finalY || 120) + 15;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "italic");
+      doc.text("Documento electrónico generado por la Plataforma Enered.", 14, finalY);
+
+      const blob = doc.output("blob");
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error("Error al generar PDF local:", e);
+      return null;
+    }
+  };
+
+  const viewInvoice = async (inv, kind = "pdf") => {
     const docId = inv.id || inv.n_doc || inv.numero_documento;
     if (!docId) {
       toast.error("Identificador de factura no válido");
       return;
     }
-    const token = localStorage.getItem("enered_token") || "";
-    const directUrl = `${API}/invoices/${encodeURIComponent(docId)}/download/${kind}?t=${encodeURIComponent(token)}`;
-    setViewerUrl(directUrl);
-    setViewerTitle(`Factura ${inv.n_doc || docId}`);
-    setViewerDoc({ inv, kind });
-    setViewerOpen(true);
+    const toastId = toast.loading(`Cargando previsualización de ${inv.n_doc || docId}...`);
+    try {
+      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
+      toast.dismiss(toastId);
+      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
+      const blob = new Blob([r.data], { type });
+      const url = URL.createObjectURL(blob);
+      setViewerUrl(url);
+      setViewerTitle(`Factura ${inv.n_doc || docId}`);
+      setViewerDoc({ inv, kind });
+      setViewerOpen(true);
+    } catch (err) {
+      toast.dismiss(toastId);
+      if (kind === "pdf") {
+        const localUrl = generateFallbackPdfUrl(inv);
+        if (localUrl) {
+          setViewerUrl(localUrl);
+          setViewerTitle(`Factura ${inv.n_doc || docId}`);
+          setViewerDoc({ inv, kind });
+          setViewerOpen(true);
+          return;
+        }
+      }
+      toast.error(`No se pudo cargar la previsualización de la factura ${inv.n_doc || docId}`);
+    }
   };
 
   const handleDelete = async (inv) => {
