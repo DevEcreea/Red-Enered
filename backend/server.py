@@ -319,18 +319,7 @@ async def get_precios(
         cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
         precios = await cursor.to_list(500)
 
-    # 3. Si aún no hay resultados, auto-seed y re-consultar de inmediato
-    if not precios:
-        try:
-            from seed_facilito_precios import seed
-            await seed(db)
-            cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-            precios = await cursor.to_list(500)
-            if not precios:
-                cursor = db.precios_facilito.find({}, {"_id": 0}).sort("precio_venta", 1).limit(500)
-                precios = await cursor.to_list(500)
-        except Exception as se:
-            logger.warning(f"Fallback seed exception: {se}")
+
 
 
     # Cruzar con precios ENERED de db.estaciones_enered por (nombre, combustible)
@@ -3802,6 +3791,70 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
         )
 
     raise HTTPException(status_code=404, detail=f"Sin archivo {kind} registrado para la factura {n_doc}")
+
+
+class InvoiceUpdateSchema(BaseModel):
+    n_doc: Optional[str] = None
+    empresa: Optional[str] = None
+    f_emision: Optional[str] = None
+    f_vencimiento: Optional[str] = None
+    monto_total: Optional[float] = None
+    saldo: Optional[float] = None
+    estado: Optional[str] = None
+
+@api.put("/invoices/{inv_id}")
+async def update_invoice(inv_id: str, payload: InvoiceUpdateSchema, user: dict = Depends(require_roles("admin_enered"))):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    q = _build_invoice_query(clean_id)
+    
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    
+    if "estado" in data and data["estado"] == "vencida" and data.get("f_vencimiento"):
+        try:
+            from datetime import date as _date
+            fv = _date.fromisoformat(data["f_vencimiento"])
+            today = _date.today()
+            data["atraso_dias"] = max(0, (today - fv).days)
+        except Exception:
+            pass
+    elif "estado" in data and data["estado"] in ("pagada", "TERCERO"):
+        data["atraso_dias"] = 0
+
+    r1 = await db.invoices.update_many(q, {"$set": data})
+    r2 = await db.empresas_invoices.update_many(q, {"$set": data})
+    
+    sub_data = {}
+    if "n_doc" in data: sub_data["numero_documento"] = data["n_doc"]
+    if "f_emision" in data: sub_data["fecha"] = data["f_emision"]
+    if "monto_total" in data: sub_data["importe_total"] = data["monto_total"]
+    if "empresa" in data: sub_data["empresa"] = data["empresa"]
+    if "estado" in data: sub_data["estado"] = data["estado"]
+    if sub_data:
+        await db.consumos_subsidio.update_many(q, {"$set": sub_data})
+
+    if r1.matched_count == 0 and r2.matched_count == 0:
+        esc = re.escape(clean_id)
+        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+        await db.invoices.update_many(alt_q, {"$set": data})
+        await db.empresas_invoices.update_many(alt_q, {"$set": data})
+        if sub_data:
+            await db.consumos_subsidio.update_many(alt_q, {"$set": sub_data})
+
+    return {"ok": True, "updated": data}
+
+
+@api.delete("/invoices/{inv_id}")
+async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_enered"))):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    esc = re.escape(clean_id)
+    q = {"$or": [{"id": clean_id}, {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+    
+    await db.invoices.delete_many(q)
+    await db.empresas_invoices.delete_many(q)
+    await db.consumos_subsidio.delete_many(q)
+    return {"ok": True}
 
 
 @api.get("/account-state")

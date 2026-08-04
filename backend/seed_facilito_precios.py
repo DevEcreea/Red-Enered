@@ -286,6 +286,7 @@ ESTACIONES_ENERED_DEFAULTS = [
   {
     "nombre_facilito": "SERVICELIB SAC",
     "precio_enered": 22.50,
+    "combustible": "Diesel B5 UV",
     "departamento": "LA LIBERTAD",
     "provincia": "PACASMAYO",
     "distrito": "PACASMAYO",
@@ -296,9 +297,43 @@ ESTACIONES_ENERED_DEFAULTS = [
   {
     "nombre_facilito": "GRUPO AMELIA E.I.R.L.",
     "precio_enered": 22.40,
+    "combustible": "Diesel B5 UV",
     "departamento": "LA LIBERTAD",
     "provincia": "PACASMAYO",
     "distrito": "GUADALUPE",
+    "acepta_factura": True,
+    "acepta_tarjeta": True,
+    "activa": True
+  },
+  {
+    "nombre_facilito": "ULTRACOM EVITAMIENTO TRUJILLO",
+    "precio_enered": 20.97,
+    "combustible": "Diesel B5 UV",
+    "departamento": "LA LIBERTAD",
+    "provincia": "TRUJILLO",
+    "distrito": "TRUJILLO",
+    "acepta_factura": True,
+    "acepta_tarjeta": True,
+    "activa": True
+  },
+  {
+    "nombre_facilito": "ES ALTO MOCHE",
+    "precio_enered": 20.97,
+    "combustible": "Diesel B5 UV",
+    "departamento": "LA LIBERTAD",
+    "provincia": "TRUJILLO",
+    "distrito": "MOCHE",
+    "acepta_factura": True,
+    "acepta_tarjeta": True,
+    "activa": True
+  },
+  {
+    "nombre_facilito": "ES SANTA AMALIA",
+    "precio_enered": 20.97,
+    "combustible": "Diesel B5 UV",
+    "departamento": "LA LIBERTAD",
+    "provincia": "TRUJILLO",
+    "distrito": "TRUJILLO",
     "acepta_factura": True,
     "acepta_tarjeta": True,
     "activa": True
@@ -312,18 +347,21 @@ async def seed(db=None):
 
     scraped_at = datetime.now(timezone.utc).isoformat()
 
-    await db.precios.delete_many({})
-    await db.precios_facilito.delete_many({})
-
-    docs = []
+    count = 0
     for item in DATASET_FACILITO:
         doc = dict(item)
         doc["scraped_at"] = scraped_at
         doc["es_enered"] = False
-        docs.append(doc)
-
-    if docs:
-        await db.precios_facilito.insert_many(docs)
+        await db.precios_facilito.update_one(
+            {
+                "establecimiento": doc["establecimiento"],
+                "departamento": doc["departamento"],
+                "combustible": doc["combustible"]
+            },
+            {"$set": doc},
+            upsert=True
+        )
+        count += 1
 
     for e in ESTACIONES_ENERED_DEFAULTS:
         await db.estaciones_enered.update_one(
@@ -336,8 +374,8 @@ async def seed(db=None):
     await db.precios_facilito.create_index("departamento")
     await db.precios_facilito.create_index("provincia")
 
-    print(f"✅ Se han insertado {len(docs)} estaciones de Facilito OSINERGMIN en MongoDB.")
-    return len(docs)
+    print(f"✅ Se han procesado {count} estaciones en MongoDB sin borrar existentes.")
+    return count
 
 if __name__ == "__main__":
     asyncio.run(seed())

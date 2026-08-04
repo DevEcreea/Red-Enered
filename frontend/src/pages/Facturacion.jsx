@@ -889,11 +889,24 @@ export function AbonoModal({ open, onClose, onSuccess }) {
 }
 
 function EditInvoiceModal({ inv, empresas, onClose, onSaved }) {
+  const toIsoDate = (d) => {
+    if (!d) return "";
+    let str = String(d).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    if (str.includes("/")) {
+      const parts = str.split("/");
+      if (parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+    }
+    return str.slice(0, 10);
+  };
+
   const [form, setForm] = useState({
-    n_doc: inv.n_doc || "",
+    n_doc: inv.n_doc || inv.numero_documento || "",
     empresa: inv.empresa || "",
-    f_emision: inv.f_emision || "",
-    f_vencimiento: inv.f_vencimiento || "",
+    f_emision: toIsoDate(inv.f_emision || inv.fecha),
+    f_vencimiento: toIsoDate(inv.f_vencimiento || inv.fecha_vencimiento),
     monto_total: inv.monto_total || 0,
     saldo: inv.saldo || 0,
     estado: inv.estado || "pendiente",
@@ -912,7 +925,9 @@ function EditInvoiceModal({ inv, empresas, onClose, onSaved }) {
       onSaved();
       onClose();
     } catch (err) {
-      toast.error("Error actualizando factura: " + (err.response?.data?.detail || err.message));
+      const detail = err.response?.data?.detail;
+      const msg = detail ? (typeof detail === "string" ? detail : JSON.stringify(detail)) : err.message;
+      toast.error("Error actualizando factura: " + msg);
     } finally {
       setSaving(false);
     }

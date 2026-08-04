@@ -239,12 +239,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
           }
         }
         
-        // If the month is > 7 (we are in July) and day <= 12, it's definitely a swapped date from pandas
-        if (m > 7 && d <= 12) {
-           let temp = m;
-           m = d;
-           d = temp;
-        }
+
         
         let th = 0, tm = 0, ts = 0;
         let hp = h.split(":");
@@ -515,7 +510,6 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     let y = parseInt(parts[0], 10);
                     let m = parseInt(parts[1], 10);
                     let d = parseInt(parts[2], 10);
-                    if (m > 7 && d <= 12) { let temp = m; m = d; d = temp; }
                     fechaStr = `${d.toString().padStart(2,'0')}/${m.toString().padStart(2,'0')}/${y}`;
                   } else {
                     fechaStr = r.FECHA;
