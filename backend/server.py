@@ -3793,6 +3793,50 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     raise HTTPException(status_code=404, detail=f"Sin archivo {kind} registrado para la factura {n_doc}")
 
 
+@api.get("/admin/subsidio/invoices/{inv_id}/download")
+async def subsidio_admin_invoice_download(inv_id: str, user: dict = Depends(get_current_user)):
+    return await invoice_download(inv_id=inv_id, kind="pdf", user=user)
+
+
+@api.post("/admin/invoices/{inv_id}/upload-file")
+async def upload_invoice_file(
+    inv_id: str,
+    file: UploadFile = File(...),
+    kind: str = Form("pdf"),
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    q = _build_invoice_query(clean_id)
+    
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    if not inv:
+        esc = re.escape(clean_id)
+        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+        inv = await db.invoices.find_one(alt_q) or await db.empresas_invoices.find_one(alt_q) or await db.consumos_subsidio.find_one(alt_q)
+    
+    empresa = (inv.get("empresa") if inv else "GENERAL") or "GENERAL"
+    n_doc = (inv.get("n_doc") or inv.get("numero_documento") if inv else clean_id) or clean_id
+    
+    content = await file.read()
+    ext = "pdf" if file.filename.lower().endswith(".pdf") else "pdf"
+    storage_key = f"invoices/{empresa}/{_safe_doc(n_doc)}.{ext}"
+    storage.save_object(storage_key, content, file.content_type or "application/pdf")
+    
+    update_fields = {
+        "factura_storage_key": storage_key,
+        "storage_key": storage_key,
+        "pdf_filename": file.filename,
+        "factura_filename": file.filename
+    }
+    
+    await db.invoices.update_many(q, {"$set": update_fields})
+    await db.empresas_invoices.update_many(q, {"$set": update_fields})
+    await db.consumos_subsidio.update_many(q, {"$set": update_fields})
+    
+    return {"ok": True, "storage_key": storage_key}
+
+
 class InvoiceUpdateSchema(BaseModel):
     n_doc: Optional[str] = None
     empresa: Optional[str] = None

@@ -923,17 +923,30 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
     setShowInvoiceForm(true);
   };
 
+  const toIsoDate = (d) => {
+    if (!d) return "";
+    let str = String(d).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    if (str.includes("/")) {
+      const parts = str.split("/");
+      if (parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+    }
+    return str.slice(0, 10);
+  };
+
   const startEditInvoice = (inv) => {
     setEditingInvoice(inv);
-    setInvNumero(inv.numero_documento || "");
-    setInvFecha(inv.fecha || "");
+    setInvNumero(inv.numero_documento || inv.n_doc || "");
+    setInvFecha(toIsoDate(inv.fecha || inv.f_emision || ""));
     setInvEstacion(inv.estacion || "");
     setInvRuc(inv.ruc_emisor || "");
     setInvCiudad(inv.ciudad || "");
     setInvPlaca(inv.placa || "");
     setInvGalones(inv.galones || "");
     setInvPrecio(inv.precio_unitario || "");
-    setInvImporte(inv.importe_total || "");
+    setInvImporte(inv.importe_total || inv.monto_total || "");
     setInvProducto(inv.producto || "DIESEL B5");
     setShowInvoiceForm(true);
   };
