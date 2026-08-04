@@ -1240,34 +1240,53 @@ async def download_consumption_pdf(cid: str, user: dict = Depends(get_current_us
         oid = None
 
     c_doc = None
-    if user.get("role") == "cliente_subsidio":
-        q_sub = {"user_id": user["id"]}
-        if oid: q_sub["$or"] = [{"id": cid}, {"_id": oid}]
-        else: q_sub["id"] = cid
-        c_doc = await db.consumos_subsidio.find_one(q_sub)
-    else:
-        q = {"$or": [{"id": cid}, {"_id": oid}]} if oid else {"id": cid}
-        if user["role"] != "admin_enered" and user.get("empresa"):
-            q["$and"] = [
-                {"$or": [
-                    {"EMPRESA": user["empresa"]},
-                    {"_origen": "manual"},
-                    {"EMPRESA": {"$exists": False}}
-                ]}
-            ]
+    q = {"$or": [{"id": cid}, {"_id": oid}]} if oid else {"id": cid}
+    c_doc = await db.consumos_subsidio.find_one(q)
+    if not c_doc:
         c_doc = await db.consumptions.find_one(q)
+    if not c_doc:
+        n_doc_esc = re.escape(cid)
+        c_doc = await db.consumos_subsidio.find_one({"$or": [{"numero_documento": {"$regex": f"^{n_doc_esc}$", "$options": "i"}}, {"n_doc": {"$regex": f"^{n_doc_esc}$", "$options": "i"}}]})
         
     if not c_doc:
         raise HTTPException(status_code=404, detail="Consumo no encontrado")
-        
-    fname = c_doc.get("pdf_filename") or c_doc.get("factura_key")
-    if not fname:
-        DUMMY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 67 >>\nstream\nBT\n/F1 24 Tf\n100 700 Td\n(Documento Simulado - Sin Archivo Real) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000223 00000 n \n0000000341 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n429\n%%EOF\n"
-        return Response(content=DUMMY_PDF, media_type="application/pdf", headers={"Content-Disposition": 'inline; filename="simulado.pdf"'})
-        
+
+    candidate_keys = []
+    if c_doc.get("factura_storage_key"): candidate_keys.append(c_doc["factura_storage_key"])
+    if c_doc.get("pdf_key"): candidate_keys.append(c_doc["pdf_key"])
+    if c_doc.get("storage_key"): candidate_keys.append(c_doc["storage_key"])
+
+    fname = c_doc.get("pdf_filename") or c_doc.get("factura_filename") or c_doc.get("factura_key")
     empresa = c_doc.get("EMPRESA") or c_doc.get("empresa") or user.get("empresa") or ""
-    key = _inv_key(empresa, fname)
-    return storage.download_response(key, fname, "application/pdf")
+    n_doc = c_doc.get("NUMERO_DOCUMENTO") or c_doc.get("numero_documento") or c_doc.get("n_doc") or "Factura"
+
+    if fname:
+        if empresa:
+            candidate_keys.append(_inv_key(empresa, fname))
+            candidate_keys.append(f"invoices/{empresa}/{fname}")
+        candidate_keys.append(f"tmp_admin/{fname}")
+        candidate_keys.append(fname)
+
+    seen = set()
+    valid_key = None
+    for k in candidate_keys:
+        if k:
+            k_clean = str(k).lstrip("/")
+            for alt_k in (k_clean, f"uploads/{k_clean}" if not k_clean.startswith("uploads/") else k_clean):
+                if alt_k not in seen:
+                    seen.add(alt_k)
+                    if storage.object_exists(alt_k):
+                        valid_key = alt_k
+                        break
+            if valid_key:
+                break
+
+    download_name = fname or f"{n_doc}.pdf"
+    if valid_key:
+        return storage.download_response(valid_key, download_name, "application/pdf")
+
+    DUMMY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 67 >>\nstream\nBT\n/F1 24 Tf\n100 700 Td\n(Documento Simulado - Sin Archivo Real) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000223 00000 n \n0000000341 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n429\n%%EOF\n"
+    return Response(content=DUMMY_PDF, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{download_name}"'})
 
 
 @api.get("/dashboard/filter-options")
@@ -3704,10 +3723,15 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     seen = set()
     valid_key = None
     for k in candidate_keys:
-        if k and k not in seen:
-            seen.add(k)
-            if storage.object_exists(k):
-                valid_key = k
+        if k:
+            k_clean = str(k).lstrip("/")
+            for alt_k in (k_clean, f"uploads/{k_clean}" if not k_clean.startswith("uploads/") else k_clean):
+                if alt_k not in seen:
+                    seen.add(alt_k)
+                    if storage.object_exists(alt_k):
+                        valid_key = alt_k
+                        break
+            if valid_key:
                 break
 
     download_name = fname or f"{n_doc}.{kind}"
