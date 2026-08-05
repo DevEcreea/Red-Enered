@@ -2030,6 +2030,20 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
         candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
         candidate_keys.append(f"{n_doc}.pdf")
 
+    # UUID fallback keys
+    inv_id = inv.get("id") or clean_id
+    if inv_id:
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.pdf")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.png")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.jpg")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.jpeg")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.pdf")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.png")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.jpg")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.jpeg")
+        candidate_keys.append(f"subsidio/{inv_id}.pdf")
+        candidate_keys.append(f"{inv_id}.pdf")
+
     valid_key = None
     for k in candidate_keys:
         if k and storage.object_exists(k):

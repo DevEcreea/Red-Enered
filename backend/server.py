@@ -475,6 +475,7 @@ async def get_combustibles_disponibles(user: dict = Depends(get_current_user)):
 async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
     """Dispara el scraping de precios desde Facilito OSINERGMIN."""
     from services.facilito_scraper import scrape_all_precios_async, COMBUSTIBLES
+    from seed_facilito_precios import seed
 
     enered_docs = await db.estaciones_enered.find({}, {"nombre_facilito": 1}).to_list(500)
     enered_stations = {e.get("nombre_facilito", "") for e in enered_docs if e.get("nombre_facilito")}
@@ -485,23 +486,23 @@ async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
     except Exception as e:
         logger.error(f"Facilito scrape error: {e}")
 
-    if not results:
-        from seed_facilito_precios import seed
-        await seed(db)
-        count = await db.precios_facilito.count_documents({})
-        return {
-            "ok": True,
-            "total_synced": count,
-            "message": f"Se restablecieron y sincronizaron {count} estaciones de Facilito OSINERGMIN en la base de datos.",
-        }
+    # 1. Ejecutar semilla siempre como respaldo base para estaciones críticas (ej. Trujillo)
+    await seed(db)
 
-
-    await db.precios_facilito.delete_many({})
-    await db.precios_facilito.insert_many(results)
+    if results:
+        # 2. Agrupar por departamento para NO borrar zonas que hayan fallado/colgado en Facilito
+        dptos_scraped = set(r.get("departamento") for r in results if r.get("departamento"))
+        
+        for dpto in dptos_scraped:
+            await db.precios_facilito.delete_many({"departamento": dpto})
+            
+        await db.precios_facilito.insert_many(results)
 
     await db.precios_facilito.create_index("combustible")
     await db.precios_facilito.create_index("departamento")
     await db.precios_facilito.create_index("es_enered")
+    
+    count = await db.precios_facilito.count_documents({})
 
     return {
         "ok": True,
