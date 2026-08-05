@@ -3596,6 +3596,19 @@ async def admin_invoices_upload_bulk(
     return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
 
 
+def _build_invoice_query(inv_id: str) -> dict:
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    esc = re.escape(clean_id)
+    return {
+        "$or": [
+            {"id": clean_id},
+            {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}},
+            {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}},
+        ]
+    }
+
+
 @api.get("/invoices/{inv_id}/download/{kind}")
 async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_current_user)):
     if kind not in ("pdf", "xml"):
@@ -3729,73 +3742,120 @@ async def invoice_download(inv_id: str, kind: str, user: dict = Depends(get_curr
     if valid_key:
         return storage.download_response(valid_key, download_name, media)
 
+    def _generate_minimal_pdf_bytes(title: str, text_lines: list) -> bytes:
+        content_lines = [f"BT /F1 14 Tf 50 750 Td ({title}) Tj ET"]
+        y = 720
+        for line in text_lines:
+            safe = str(line).replace("(", "\\(").replace(")", "\\)")
+            content_lines.append(f"BT /F1 10 Tf 50 {y} Td ({safe}) Tj ET")
+            y -= 20
+        stream_str = "\n".join(content_lines) + "\n"
+        stream_bytes = stream_str.encode("latin-1", errors="replace")
+        stream_len = len(stream_bytes)
+        
+        header = (
+            "%PDF-1.4\n"
+            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+            f"4 0 obj\n<< /Length {stream_len} >>\nstream\n"
+        ).encode("latin-1")
+        
+        footer = (
+            "\nendstream\nendobj\n"
+            "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+            "xref\n0 6\n"
+            "0000000000 65535 f \n"
+            "0000000010 00000 n \n"
+            "0000000060 00000 n \n"
+            "00000000117 00000 n \n"
+            "00000000245 00000 n \n"
+            "00000000300 00000 n \n"
+            "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n350\n%%EOF"
+        ).encode("latin-1")
+        
+        return header + stream_bytes + footer
+
     # 3. Respaldo inteligente si es PDF y no existe en storage: genera un PDF oficial al vuelo
     if kind == "pdf":
-        from io import BytesIO
-        from reportlab.lib.pagesizes import letter
-        from reportlab.pdfgen import canvas
-        from fastapi.responses import Response
+        try:
+            from io import BytesIO
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            from fastapi.responses import Response
 
-        buffer = BytesIO()
-        p = canvas.Canvas(buffer, pagesize=letter)
-        p.setTitle(f"Factura - {n_doc}")
+            buffer = BytesIO()
+            p = canvas.Canvas(buffer, pagesize=letter)
+            p.setTitle(f"Factura - {n_doc}")
 
-        p.setFont("Helvetica-Bold", 18)
-        p.drawString(50, 750, "RED ENERED - COMPROBANTE DE PAGO")
-        p.setFont("Helvetica", 10)
-        p.drawString(50, 735, "Plataforma Integral de Gestión de Combustible")
-        
-        p.setStrokeColorRGB(0.8, 0.8, 0.8)
-        p.line(50, 720, 550, 720)
+            p.setFont("Helvetica-Bold", 18)
+            p.drawString(50, 750, "RED ENERED - COMPROBANTE DE PAGO")
+            p.setFont("Helvetica", 10)
+            p.drawString(50, 735, "Plataforma Integral de Gestión de Combustible")
+            
+            p.setStrokeColorRGB(0.8, 0.8, 0.8)
+            p.line(50, 720, 550, 720)
 
-        p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, 690, f"Documento N°: {n_doc}")
-        p.setFont("Helvetica", 10)
-        p.drawString(50, 670, f"Cliente / Empresa: {inv.get('empresa', '—')}")
-        p.drawString(50, 650, f"Fecha Emisión: {inv.get('f_emision', '—')}")
-        p.drawString(50, 630, f"Fecha Vencimiento: {inv.get('f_vencimiento', '—')}")
-        p.drawString(50, 610, f"Estado: {(inv.get('estado') or 'pendiente').upper()}")
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, 690, f"Documento N°: {n_doc}")
+            p.setFont("Helvetica", 10)
+            p.drawString(50, 670, f"Cliente / Empresa: {inv.get('empresa', '—')}")
+            p.drawString(50, 650, f"Fecha Emisión: {inv.get('f_emision', '—')}")
+            p.drawString(50, 630, f"Fecha Vencimiento: {inv.get('f_vencimiento', '—')}")
+            p.drawString(50, 610, f"Estado: {(inv.get('estado') or 'pendiente').upper()}")
 
-        p.line(50, 590, 550, 590)
+            p.line(50, 590, 550, 590)
 
-        p.setFont("Helvetica-Bold", 12)
-        p.drawString(50, 560, "DETALLE DE IMPORTE")
-        p.setFont("Helvetica", 11)
-        
-        def _safe_num(v):
-            if v is None: return 0.0
-            if isinstance(v, (int, float)): return float(v)
-            try:
-                c = re.sub(r"[^\d.-]", "", str(v))
-                return float(c) if c else 0.0
-            except Exception:
-                return 0.0
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, 560, "DETALLE DE IMPORTE")
+            p.setFont("Helvetica", 11)
+            
+            def _safe_num(v):
+                if v is None: return 0.0
+                if isinstance(v, (int, float)): return float(v)
+                try:
+                    c = re.sub(r"[^\d.-]", "", str(v))
+                    return float(c) if c else 0.0
+                except Exception:
+                    return 0.0
 
-        monto = _safe_num(inv.get("monto_total") or inv.get("monto") or inv.get("importe_total"))
-        saldo = _safe_num(inv.get("saldo") if inv.get("saldo") is not None else monto)
-        p.drawString(50, 535, f"Monto Total: S/ {monto:,.2f}")
-        p.drawString(50, 515, f"Saldo Pendiente: S/ {saldo:,.2f}")
+            monto = _safe_num(inv.get("monto_total") or inv.get("monto") or inv.get("importe_total"))
+            saldo = _safe_num(inv.get("saldo") if inv.get("saldo") is not None else monto)
+            p.drawString(50, 535, f"Monto Total: S/ {monto:,.2f}")
+            p.drawString(50, 515, f"Saldo Pendiente: S/ {saldo:,.2f}")
 
-        p.line(50, 490, 550, 490)
-        p.setFont("Helvetica-Oblique", 9)
-        p.drawString(50, 460, "Documento electrónico generado por la Plataforma Enered.")
-        
-        p.showPage()
-        p.save()
-        buffer.seek(0)
-        
-        return Response(
-            content=buffer.getvalue(),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{download_name}"'}
-        )
+            p.line(50, 490, 550, 490)
+            p.setFont("Helvetica-Oblique", 9)
+            p.drawString(50, 460, "Documento electrónico generado por la Plataforma Enered.")
+            
+            p.showPage()
+            p.save()
+            buffer.seek(0)
+            
+            return Response(
+                content=buffer.getvalue(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{download_name}"'}
+            )
+        except Exception as e:
+            logger.warning(f"Reportlab fallback exception: {e}")
+            pdf_bytes = _generate_minimal_pdf_bytes(
+                f"Factura {n_doc}",
+                [
+                    f"Cliente: {inv.get('empresa', '—')}",
+                    f"Fecha: {inv.get('f_emision', '—')}",
+                    f"Monto Total: S/ {inv.get('monto_total', 0.0)}",
+                    "Documento oficial de comprobante generado por Enered"
+                ]
+            )
+            from fastapi.responses import Response
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="{download_name}"'}
+            )
 
     raise HTTPException(status_code=404, detail=f"Sin archivo {kind} registrado para la factura {n_doc}")
-
-
-@api.get("/admin/subsidio/invoices/{inv_id}/download")
-async def subsidio_admin_invoice_download(inv_id: str, user: dict = Depends(get_current_user)):
-    return await invoice_download(inv_id=inv_id, kind="pdf", user=user)
 
 
 @api.post("/admin/invoices/{inv_id}/upload-file")
