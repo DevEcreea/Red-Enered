@@ -434,7 +434,10 @@ function TabBanco({ bank }) {
 function TabDocumentos({ docs, onDelete }) {
   if (!docs?.length) return <Empty msg="Sin documentos subidos." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
+  };
   return (
     <table className="w-full text-sm">
       <thead className="bg-neutral-50 text-[10px] uppercase tracking-widest font-bold text-neutral-500 border-b">
@@ -480,7 +483,10 @@ function TabDocumentos({ docs, onDelete }) {
 function TabFlota({ vehicles, docs = [], onDelete }) {
   if (!vehicles?.length) return <Empty msg="Sin unidades registradas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
+  };
 
   return (
     <table className="w-full text-sm">
@@ -570,7 +576,10 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
 function TabFacturas({ invoices, onDelete }) {
   if (!invoices?.length) return <Empty msg="Sin facturas cargadas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download`;
+  const downloadHref = (id) => {
+    const tk = localStorage.getItem("enered_token") || "";
+    return `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${tk}`;
+  };
 
   return (
     <div className="overflow-auto">
