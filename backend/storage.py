@@ -131,6 +131,28 @@ def object_exists(key: str) -> bool:
     else:
         return (LOCAL_BASE / key).exists()
 
+def find_by_suffix(suffix: str, prefix: str = "") -> Optional[str]:
+    """Search for the first object matching a suffix (case-insensitive)."""
+    backend = _backend()
+    if backend == "r2":
+        try:
+            paginator = _get_r2().get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=_bucket(), Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    if obj['Key'].lower().endswith(suffix.lower()):
+                        return obj['Key']
+            return None
+        except Exception:
+            return None
+    else:
+        try:
+            for p in LOCAL_BASE.rglob("*"):
+                if p.is_file() and p.name.lower().endswith(suffix.lower()):
+                    return str(p.relative_to(LOCAL_BASE)).replace("\\", "/")
+        except Exception:
+            pass
+        return None
+
 
 def presigned_url(key: str, ttl: int = 3600, filename: Optional[str] = None,
                   content_type: Optional[str] = None) -> str:

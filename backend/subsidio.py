@@ -2050,6 +2050,16 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
             valid_key = k
             break
 
+    if not valid_key and n_doc:
+        # Fallback definitivo: buscar en Cloudflare R2 por sufijo del documento
+        suffix = f"{n_doc}.pdf"
+        try:
+            valid_key = storage.find_by_suffix(suffix, prefix="subsidio/")
+            if not valid_key:
+                valid_key = storage.find_by_suffix(suffix, prefix="invoices/")
+        except Exception as e:
+            pass
+
     if not valid_key:
         # Respaldo inteligente: genera el PDF oficial al vuelo con ReportLab para que SIEMPRE se pueda previsualizar
         try:
