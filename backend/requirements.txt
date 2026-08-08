@@ -75,8 +75,8 @@ pillow==12.2.0
 platformdirs==4.9.6
 pluggy==1.6.0
 propcache==0.4.1
-proto-plus
-protobuf
+proto-plus==1.26.1
+protobuf==5.29.4
 pyasn1==0.6.3
 pyasn1_modules==0.4.2
 pycodestyle==2.14.0
@@ -96,7 +96,7 @@ python-jose==3.5.0
 python-multipart==0.0.24
 pytokens==0.4.1
 PyYAML==6.0.3
-reportlab==4.1.0
+
 referencing==0.37.0
 regex==2026.4.4
 requests==2.33.1
