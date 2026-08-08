@@ -57,3 +57,5 @@ export const UBIGEO_PERU = {
 export const LISTA_DEPARTAMENTOS_PERU = Object.keys(UBIGEO_PERU).concat([
   "APURIMAC", "AYACUCHO", "CAJAMARCA", "CALLAO", "CUSCO", "HUANCAVELICA", "HUANUCO", "ICA", "JUNIN", "LAMBAYEQUE", "LORETO", "MADRE DE DIOS", "MOQUEGUA", "PASCO", "PUNO", "SAN MARTIN", "TACNA", "TUMBES", "UCAYALI"
 ]).filter((v, i, a) => a.indexOf(v) === i).sort();
+
+export const DEPARTAMENTOS_PERU = LISTA_DEPARTAMENTOS_PERU;
