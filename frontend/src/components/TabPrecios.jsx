@@ -1,53 +1,4 @@
-<<<<<<< HEAD
 // Updated 2026-08-04 - Standardized TabPrecios table format
-=======
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
-import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { api } from "../lib/api";
-import { formatSoles } from "../lib/utils";
-import {
-  MapPin, Star, Map, TrendingDown,
-  ShieldCheck, RefreshCw, Zap, Filter, Search, X, Edit3, Plus, Fuel
-} from "lucide-react";
-
-import { UBIGEO_PERU, LISTA_DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
-
-const DEPARTAMENTOS_PERU = LISTA_DEPARTAMENTOS_PERU;
-
-const COMBUSTIBLES_DEFAULT = [
-  "Diesel B5 UV",
-  "Gasohol Regular",
-  "Gasohol Premium",
-];
-
-
-export default function TabPrecios({ user, ahorroCapturado }) {
-  const [precios, setPrecios] = useState([]);
-  const [mejorPrecio, setMejorPrecio] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [fuente, setFuente] = useState("facilito");
-  const [lastSync, setLastSync] = useState(null);
-  const [totalRegistros, setTotalRegistros] = useState(0);
-
-  const [listaDepartamentos, setListaDepartamentos] = useState(DEPARTAMENTOS_PERU);
-  const [combustiblesDisponibles, setCombustiblesDisponibles] = useState(COMBUSTIBLES_DEFAULT);
-
-  // 4 Filtros requeridos
-  const [selDepartamento, setSelDepartamento] = useState("");
-  const [selProvincia, setSelProvincia] = useState("");
-  const [selDistrito, setSelDistrito] = useState("");
-  const [selCombustible, setSelCombustible] = useState("Diesel B5 UV");
-  const [selEstacion, setSelEstacion] = useState("");
-  const [soloEnered, setSoloEnered] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-<<<<<<< HEAD
-
-=======
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
   // Modal Admin
   const [editModalStation, setEditModalStation] = useState(null);
   const [inputPrecioEnered, setInputPrecioEnered] = useState("");
@@ -160,29 +111,7 @@ export default function TabPrecios({ user, ahorroCapturado }) {
     setCurrentPage(1);
   }, [selDepartamento, selProvincia, selDistrito, selCombustible, selEstacion, soloEnered]);
 
-<<<<<<< HEAD
 
-=======
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
-  const handleSync = async () => {
-    try {
-      setSyncing(true);
-      const res = await api.post("/admin/precios/sync", {}, { timeout: 300000 });
-      if (res.data?.message) {
-        alert(`✅ ${res.data.message}`);
-      }
-    } catch (err) {
-      console.log("Sync response handled:", err);
-    } finally {
-      await fetchPrecios();
-      setSyncing(false);
-    }
-  };
-
-<<<<<<< HEAD
-
-=======
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
   const openStationMap = (estacion, ciudad) => {
     const q = encodeURIComponent(`${estacion} ${ciudad} peru`);
     window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
@@ -241,15 +170,8 @@ export default function TabPrecios({ user, ahorroCapturado }) {
           <Zap className="absolute top-4 right-4 text-white/20 w-16 h-16 -mr-4 -mt-4" />
           <div>
             <div className="text-3xl font-black tracking-tight">{formatSoles(ahorroCapturado)}</div>
-<<<<<<< HEAD
             <div className="text-sm font-semibold mt-1">Ahorro potencial capturado</div>
             <div className="text-[10px] text-white/70 mt-1 uppercase tracking-wider">Módulo de combustibles</div>
-=======
-            <div className="text-xs font-semibold text-white/80 mt-1">Ahorro capturado estimado</div>
-          </div>
-          <div className="text-[10px] text-white/60 mt-3 uppercase tracking-wider font-bold">
-            Basado en consumo real
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
           </div>
         </div>
 
@@ -262,20 +184,13 @@ export default function TabPrecios({ user, ahorroCapturado }) {
             <Fuel className="text-emerald-500 w-6 h-6" />
           </div>
           <div>
-<<<<<<< HEAD
             <div className="text-sm font-semibold text-neutral-600">Estaciones disponibles</div>
             <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
               {fuente === "facilito" ? "Fuente: Facilito OSINERGMIN" : "Fuente: Base local"}
-=======
-            <div className="text-sm font-semibold text-neutral-600">Mejor precio detectado</div>
-            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
-              En tu zona seleccionada
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
             </div>
           </div>
         </div>
 
-<<<<<<< HEAD
         {/* Mejor Precio Hoy */}
         <div className="bg-[#10B981] rounded-2xl p-5 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
           <div className="absolute top-4 right-4 w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
@@ -289,29 +204,11 @@ export default function TabPrecios({ user, ahorroCapturado }) {
             <div className="text-sm font-semibold mt-1">Mejor precio hoy</div>
             <div className="text-[10px] text-white/80 mt-1 uppercase tracking-wider">
               {selCombustible || "Mercado general"}
-=======
-        {/* Total Estaciones */}
-        <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <div className="text-3xl font-black tracking-tight text-neutral-900">
-              {totalRegistros}
-            </div>
-            <MapPin className="text-brand-500 w-6 h-6" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-neutral-600">Estaciones registradas</div>
-            <div className="text-[10px] text-neutral-400 mt-1 uppercase tracking-wider">
-              Red nacional OSINERGMIN
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
             </div>
           </div>
         </div>
 
-<<<<<<< HEAD
         {/* Sincronización */}
-=======
-        {/* Estado Sincronización */}
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <div className="text-sm font-black tracking-tight text-neutral-900">
@@ -430,20 +327,13 @@ export default function TabPrecios({ user, ahorroCapturado }) {
                 placeholder="Nombre o dirección..."
                 value={selEstacion}
                 onChange={(e) => setSelEstacion(e.target.value)}
-<<<<<<< HEAD
                 className="w-full bg-neutral-50 border border-neutral-200 rounded-lg pl-7 pr-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
               />
               <Search className="w-3 h-3 text-neutral-400 absolute left-2 top-2.5" />
-=======
-                className="w-full bg-neutral-50 border border-neutral-200 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-neutral-700 font-medium focus:outline-none focus:border-brand-500 focus:bg-white"
-              />
-              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
             </div>
           </div>
         </div>
 
-<<<<<<< HEAD
         {(selDepartamento || selProvincia || selDistrito || selCombustible || selEstacion || soloEnered) && (
           <div className="flex items-center justify-between pt-1">
             <button
@@ -470,20 +360,6 @@ export default function TabPrecios({ user, ahorroCapturado }) {
             </label>
           </div>
         )}
-=======
-        {/* Check solo ENERED */}
-        <div className="flex items-center justify-between pt-1 border-t border-neutral-100">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={soloEnered}
-              onChange={(e) => setSoloEnered(e.target.checked)}
-              className="w-3.5 h-3.5 accent-brand-600 rounded"
-            />
-            <span className="text-xs text-neutral-600 font-medium">Ver solo estaciones ENERED</span>
-          </label>
-        </div>
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
       </div>
 
       {/* TABLA DE PRECIOS */}

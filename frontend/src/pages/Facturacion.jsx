@@ -503,7 +503,6 @@ export default function Facturacion() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
-<<<<<<< HEAD
                           {(inv.pdf_filename || inv.factura_storage_key || inv.factura_filename) && (<>
                             <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
                               <Eye className="w-4 h-4" />
@@ -512,37 +511,15 @@ export default function Facturacion() {
                               <FileText className="w-4 h-4" />
                             </button>
                           </>)}
-=======
-                          <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
-                            <FileText className="w-4 h-4" />
-                          </button>
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                           {inv.xml_filename && (
                             <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="Descargar XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
                           )}
                           {user?.role === "admin_enered" && (
-<<<<<<< HEAD
                             <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
                               <Trash2 className="w-4 h-4" />
                             </button>
-=======
-                            <>
-                              <button onClick={() => setEditingInv(inv)} className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-md" title="Editar Factura" data-testid={`ec-edit-invoice-${inv.n_doc}`}>
-                                <Edit3 className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => setUploadingInv(inv)} className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-md" title="Volver a Cargar Documento (PDF/XML)" data-testid={`ec-upload-doc-${inv.n_doc}`}>
-                                <Upload className="w-4 h-4" />
-                              </button>
-                              <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                           )}
                         </div>
                       </td>

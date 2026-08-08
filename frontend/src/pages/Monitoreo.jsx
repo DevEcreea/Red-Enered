@@ -168,11 +168,7 @@ export default function Monitoreo() {
   useEffect(() => {
     if (unitsWithPos.length === 0) return;
     unitsWithPos.forEach((u, i) => {
-<<<<<<< HEAD
       if (!addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
-=======
-      if (u.id && !addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         requestedGeocodes.current.add(u.id);
         setTimeout(() => {
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${u.lat}&lon=${u.lon}&zoom=18&addressdetails=1`)

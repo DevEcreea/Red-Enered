@@ -1388,7 +1388,6 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                     </div>
                   </form>
 
-<<<<<<< HEAD
                   {/* Previsualización del PDF */}
                   {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
                     <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
@@ -1399,66 +1398,6 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                       />
                     </div>
                   )}
-=======
-                  {/* Previsualización del PDF/Imagen */}
-                  {(() => {
-                    const docId = editingInvoice?.id || editingInvoice?.numero_documento || editingInvoice?.n_doc;
-                    if (!docId) return null;
-                    const tk = localStorage.getItem("enered_token") || "";
-                    const dlUrl = `${API}/admin/subsidio/invoices/${encodeURIComponent(docId)}/download?t=${tk}`;
-                    return (
-                      <div className="space-y-2">
-                        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-2">
-                          <span className="text-xs font-bold text-neutral-500 uppercase">Documento Adjunto</span>
-                          <div className="flex items-center gap-2">
-                            <label className="text-xs font-bold text-brand hover:bg-brand-50 border border-brand-200 px-2 py-1 rounded cursor-pointer flex items-center gap-1 transition">
-                              <Upload className="w-3.5 h-3.5" />
-                              Cargar/Reemplazar PDF
-                              <input
-                                type="file"
-                                accept=".pdf"
-                                className="hidden"
-                                onChange={async (e) => {
-                                  const file = e.target.files[0];
-                                  if (!file) return;
-                                  const fd = new FormData();
-                                  fd.append("kind", "pdf");
-                                  fd.append("file", file);
-                                  try {
-                                    await api.post(`/admin/invoices/${encodeURIComponent(docId)}/upload-file`, fd);
-                                    fetchInvoices();
-                                  } catch (err) {
-                                    alert("Error al cargar PDF: " + (err.response?.data?.detail || err.message));
-                                  }
-                                }}
-                              />
-                            </label>
-                            <a 
-                              href={dlUrl} 
-                              target="_blank" 
-                              rel="noreferrer"
-                              className="text-xs font-bold text-neutral-600 hover:underline flex items-center gap-1"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5" />
-                              Abrir
-                            </a>
-                          </div>
-                        </div>
-                        <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 h-[300px] md:h-[500px] flex items-center justify-center relative">
-                          <iframe
-                            src={dlUrl}
-                            className="w-full h-full bg-white absolute inset-0 z-10"
-                            title="Previsualización de factura"
-                          />
-                          <div className="absolute inset-0 z-0 flex flex-col items-center justify-center p-4 text-center text-neutral-400">
-                            <FileText className="w-8 h-8 mb-2 opacity-50" />
-                            <p className="text-xs">Cargando documento...</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                 </div>
               </div>
             )}

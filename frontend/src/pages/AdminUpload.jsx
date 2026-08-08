@@ -3,12 +3,8 @@ import { api } from "../lib/api";
 import { formatApiError, formatDate, formatSoles } from "../lib/utils";
 import {
   Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
-<<<<<<< HEAD
-  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode,
-  Search, Edit3, Save, X, AlertTriangle, Eye, FileUp, ChevronDown, ChevronUp,
-=======
-  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode, ScanLine, Loader2, AlertTriangle
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
+  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode, ScanLine, Loader2, AlertTriangle,
+  Search, Edit3, Save, X, Eye, FileUp, ChevronDown, ChevronUp
 } from "lucide-react";
 
 

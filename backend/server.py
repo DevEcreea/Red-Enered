@@ -2749,11 +2749,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     elif user["role"] != "admin_enered":
         sub_q["empresa"] = user.get("empresa")
     
-<<<<<<< HEAD
     sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0}).to_list(1000)
-=======
-    sub_raw = await db.consumos_subsidio.find(sub_q, {"raw_ocr_response": 0}).to_list(1000)
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     
     # Group subsidio invoices by numero_documento to avoid duplicates
     grouped_sub = {}
@@ -2790,15 +2786,10 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "saldo": 0.0,
                 "estado": "TERCERO",
                 "atraso_dias": 0,
-<<<<<<< HEAD
                 "pdf_filename": d.get("factura_filename") or d.get("pdf_filename"),
                 "factura_storage_key": d.get("factura_storage_key"),
                 "factura_filename": d.get("factura_filename"),
                 "factura_content_type": d.get("factura_content_type"),
-=======
-                "pdf_filename": d.get("factura_filename") or f"{n_doc}.pdf",
-                "factura_storage_key": d.get("factura_storage_key"),
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                 "xml_filename": None,
                 "uploaded_at": d.get("created_at"),
                 "uploaded_by": "subsidio_system",
@@ -3675,412 +3666,7 @@ async def admin_invoices_upload_bulk(
     return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
 
 
-<<<<<<< HEAD
 
-=======
-def _build_invoice_query(inv_id: str) -> dict:
-    from urllib.parse import unquote
-    from bson import ObjectId
-    clean_id = unquote(str(inv_id)).strip()
-    esc = re.escape(clean_id)
-    or_list = [
-        {"id": clean_id},
-        {"_id": clean_id},
-        {"n_doc": clean_id},
-        {"numero_documento": clean_id},
-        {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}},
-        {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}},
-        {"factura_filename": {"$regex": f"^{esc}$", "$options": "i"}},
-        {"pdf_filename": {"$regex": f"^{esc}$", "$options": "i"}},
-    ]
-    if len(clean_id) == 24:
-        try:
-            or_list.append({"_id": ObjectId(clean_id)})
-        except Exception:
-            pass
-    return {"$or": or_list}
-
-
-def _generate_minimal_pdf_bytes(title: str, text_lines: list) -> bytes:
-    def _clean_str(s: str) -> str:
-        if not s:
-            return ""
-        s = str(s).replace("—", "-").replace("–", "-").replace("“", '"').replace("”", '"')
-        return s.encode("latin-1", errors="replace").decode("latin-1")
-
-    safe_title = _clean_str(title).replace("(", "\\(").replace(")", "\\)")
-    content_lines = [f"BT /F1 14 Tf 50 750 Td ({safe_title}) Tj ET"]
-    y = 720
-    for line in text_lines:
-        safe_line = _clean_str(line).replace("(", "\\(").replace(")", "\\)")
-        content_lines.append(f"BT /F1 10 Tf 50 {y} Td ({safe_line}) Tj ET")
-        y -= 20
-    stream_str = "\n".join(content_lines) + "\n"
-    stream_bytes = stream_str.encode("latin-1", errors="replace")
-    stream_len = len(stream_bytes)
-    
-    header = (
-        "%PDF-1.4\n"
-        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
-        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
-        f"4 0 obj\n<< /Length {stream_len} >>\nstream\n"
-    ).encode("latin-1")
-    
-    footer = (
-        "\nendstream\nendobj\n"
-        "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
-        "xref\n0 6\n"
-        "0000000000 65535 f \n"
-        "0000000010 00000 n \n"
-        "0000000060 00000 n \n"
-        "00000000117 00000 n \n"
-        "00000000245 00000 n \n"
-        "00000000300 00000 n \n"
-        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n350\n%%EOF"
-    ).encode("latin-1")
-    
-    return header + stream_bytes + footer
-
-
-def _safe_doc(name: str) -> str:
-    if not name:
-        return "GENERAL"
-    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(name).strip())
-
-
-def _inv_key(empresa: str, filename: str) -> str:
-    emp = _safe_doc(empresa or "GENERAL")
-    fn = _safe_doc(filename or "document.pdf")
-    return f"invoices/{emp}/{fn}"
-
-
-@api.get("/invoices/{inv_id}/download/{kind}")
-async def invoice_download(inv_id: str, kind: str, request: Request):
-    user = await get_current_user_optional(request)
-    if kind not in ("pdf", "xml"):
-        kind = "pdf"
-    
-    q = _build_invoice_query(inv_id)
-
-    # 1. Buscar factura por ID, n_doc o numero_documento
-    inv = await db.invoices.find_one(q, {"_id": 0})
-    if not inv:
-        inv = await db.empresas_invoices.find_one(q, {"_id": 0})
-    if not inv:
-        sub_doc = await db.consumos_subsidio.find_one(q) or await db.consumos_subsidio.find_one(q, {"_id": 0})
-        if sub_doc:
-            inv = {
-                "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_id,
-                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or inv_id,
-                "empresa": sub_doc.get("empresa"),
-                "pdf_filename": sub_doc.get("factura_filename") or sub_doc.get("pdf_filename"),
-                "factura_storage_key": sub_doc.get("factura_storage_key"),
-                "factura_content_type": sub_doc.get("factura_content_type") or "application/pdf",
-                "monto_total": sub_doc.get("monto_total") or sub_doc.get("monto") or sub_doc.get("importe_total") or 0,
-                "f_emision": sub_doc.get("fecha") or sub_doc.get("f_emision")
-            }
-
-    if not inv:
-        from urllib.parse import unquote
-        clean_doc = unquote(str(inv_id)).strip()
-        esc_cdoc = re.escape(clean_doc)
-        reg_q = {"$or": [{"n_doc": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}]}
-        inv = await db.invoices.find_one(reg_q, {"_id": 0}) or await db.empresas_invoices.find_one(reg_q, {"_id": 0})
-        if not inv:
-            sub_doc2 = await db.consumos_subsidio.find_one(reg_q)
-            if sub_doc2:
-                inv = {
-                    "id": sub_doc2.get("id") or str(sub_doc2.get("_id", "")) or inv_id,
-                    "n_doc": sub_doc2.get("numero_documento") or sub_doc2.get("n_doc") or inv_id,
-                    "empresa": sub_doc2.get("empresa"),
-                    "pdf_filename": sub_doc2.get("factura_filename") or sub_doc2.get("pdf_filename"),
-                    "factura_storage_key": sub_doc2.get("factura_storage_key"),
-                    "factura_content_type": sub_doc2.get("factura_content_type") or "application/pdf",
-                    "monto_total": sub_doc2.get("monto_total") or sub_doc2.get("monto") or sub_doc2.get("importe_total") or 0,
-                    "f_emision": sub_doc2.get("fecha") or sub_doc2.get("f_emision")
-                }
-
-    if not inv:
-        inv = {
-            "id": inv_id,
-            "n_doc": inv_id,
-            "empresa": "EMPRESA REGISTRADA",
-            "monto_total": 0.0,
-            "f_emision": str(datetime.now().strftime("%Y-%m-%d"))
-        }
-
-    # 2. Recolectar posibles llaves del archivo en storage
-    candidate_keys = []
-    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
-    if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
-    if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
-
-    if not candidate_keys:
-        n_doc_lookup = inv.get("n_doc") or inv.get("numero_documento") or inv_id
-        esc_nd2 = re.escape(str(n_doc_lookup))
-        sub_lookup = await db.consumos_subsidio.find_one({
-            "$or": [
-                {"n_doc": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
-                {"numero_documento": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
-            ]
-        })
-        if sub_lookup and sub_lookup.get("factura_storage_key"):
-            candidate_keys.append(sub_lookup["factura_storage_key"])
-            if not inv.get("pdf_filename"):
-                inv["pdf_filename"] = sub_lookup.get("factura_filename") or sub_lookup.get("pdf_filename")
-
-    fname = inv.get(f"{kind}_filename") or inv.get("pdf_filename") or inv.get("factura_filename")
-    emp = inv.get("empresa") or ""
-    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
-
-    if n_doc:
-        esc_nd = re.escape(str(n_doc))
-        dq = {"$or": [{"n_doc": {"$regex": f"^{esc_nd}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_nd}$", "$options": "i"}}]}
-        all_alts = await db.invoices.find(dq).to_list(10) + await db.empresas_invoices.find(dq).to_list(10) + await db.consumos_subsidio.find(dq).to_list(10)
-        for alt in all_alts:
-            if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
-            if alt.get("storage_key"): candidate_keys.append(alt["storage_key"])
-            if alt.get("pdf_key"): candidate_keys.append(alt["pdf_key"])
-            alt_fname = alt.get("factura_filename") or alt.get("pdf_filename")
-            if alt_fname:
-                candidate_keys.append(_inv_key(emp, alt_fname))
-                candidate_keys.append(f"invoices/{emp}/{alt_fname}")
-
-    if fname:
-        candidate_keys.append(_inv_key(emp, fname))
-        candidate_keys.append(f"invoices/{emp}/{fname}")
-        candidate_keys.append(f"tmp_admin/{fname}")
-        candidate_keys.append(fname)
-
-    if n_doc:
-        candidate_keys.append(_inv_key(emp, f"{n_doc}.pdf"))
-        candidate_keys.append(f"invoices/{emp}/{n_doc}.pdf")
-        candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
-        candidate_keys.append(f"{n_doc}.pdf")
-
-    seen = set()
-    valid_key = None
-    for k in candidate_keys:
-        if k:
-            k_clean = str(k).lstrip("/")
-            for alt_k in (k_clean, f"uploads/{k_clean}" if not k_clean.startswith("uploads/") else k_clean):
-                if alt_k not in seen:
-                    seen.add(alt_k)
-                    if storage.object_exists(alt_k):
-                        valid_key = alt_k
-                        break
-            if valid_key:
-                break
-
-    download_name = fname or f"{n_doc}.{kind}"
-    media = "application/pdf" if kind == "pdf" else "application/xml"
-
-    if valid_key:
-        try:
-            return storage.download_response(valid_key, download_name, media)
-        except Exception as err_s:
-            logger.warning(f"Storage download error for {valid_key}: {err_s}")
-
-    pdf_bytes = _generate_minimal_pdf_bytes(
-        f"Factura {n_doc}",
-        [
-            f"Cliente / Empresa: {inv.get('empresa', '—')}",
-            f"Documento N°: {n_doc}",
-            f"Fecha Emision: {inv.get('f_emision', '—')}",
-            f"Monto Total: S/ {inv.get('monto_total', 0.0)}",
-            "Comprobante de Pago Oficial Registrado en Plataforma Enered"
-        ]
-    )
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{download_name if download_name.endswith(".pdf") else download_name + ".pdf"}"'}
-    )
-
-@api.get("/admin/subsidio/documents/{doc_id}/download")
-async def subsidio_admin_document_download(doc_id: str, request: Request):
-    user = None
-    try:
-        user = await get_current_user(request)
-    except Exception:
-        user = {"role": "admin_enered", "email": "admin@enered.com"}
-
-    try:
-        from urllib.parse import unquote
-        clean_id = unquote(str(doc_id)).strip()
-        doc = await db.subsidio_documentos.find_one({"$or": [{"id": clean_id}, {"_id": clean_id}]}) or await db.subsidio_documentos.find_one({"filename": clean_id})
-        
-        storage_key = None
-        filename = "documento.pdf"
-        if doc:
-            storage_key = doc.get("storage_key") or doc.get("factura_storage_key") or doc.get("file_key")
-            filename = doc.get("filename") or doc.get("nombre_archivo") or "documento.pdf"
-        
-        if not storage_key:
-            storage_key = f"subsidio/documentos/{clean_id}"
-            
-        if storage.object_exists(storage_key):
-            return storage.download_response(storage_key, filename, "application/pdf")
-            
-        pdf_bytes = _generate_minimal_pdf_bytes(
-            f"Documento Subsidio {clean_id}",
-            [
-                f"Documento ID: {clean_id}",
-                f"Tipo: {doc.get('categoria', 'Documento Subsidio') if doc else 'Documento Subsidio'}",
-                "Documento oficialmente registrado en la plataforma Enered"
-            ]
-        )
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{filename}"'}
-        )
-    except Exception as err:
-        logger.error(f"Error in subsidio_admin_document_download: {err}", exc_info=True)
-        pdf_bytes = _generate_minimal_pdf_bytes(
-            f"Documento {doc_id}",
-            [
-                f"ID: {doc_id}",
-                "Documento registrado en la plataforma Enered"
-            ]
-        )
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{doc_id}.pdf"'}
-        )
-
-
-@api.get("/admin/subsidio/invoices/{inv_id}/download")
-async def subsidio_admin_invoice_download(inv_id: str, request: Request):
-    user = None
-    try:
-        user = await get_current_user(request)
-    except Exception:
-        user = {"role": "admin_enered", "email": "admin@enered.com"}
-
-    try:
-        return await invoice_download(inv_id=inv_id, kind="pdf", user=user)
-    except (HTTPException, Exception) as err:
-        logger.error(f"Error in subsidio_admin_invoice_download: {err}", exc_info=True)
-        pdf_bytes = _generate_minimal_pdf_bytes(
-            f"Factura {inv_id}",
-            [
-                f"Documento N: {inv_id}",
-                "Estado: COMPROBANTE REGISTRADO EN ENERED",
-                "Documento oficial de comprobante generado por Enered"
-            ]
-        )
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{inv_id}.pdf"'}
-        )
-
-
-@api.post("/admin/invoices/{inv_id}/upload-file")
-async def upload_invoice_file(
-    inv_id: str,
-    file: UploadFile = File(...),
-    kind: str = Form("pdf"),
-    user: dict = Depends(require_roles("admin_enered"))
-):
-    from urllib.parse import unquote
-    clean_id = unquote(str(inv_id)).strip()
-    q = _build_invoice_query(clean_id)
-    
-    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
-    if not inv:
-        esc = re.escape(clean_id)
-        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
-        inv = await db.invoices.find_one(alt_q) or await db.empresas_invoices.find_one(alt_q) or await db.consumos_subsidio.find_one(alt_q)
-    
-    empresa = (inv.get("empresa") if inv else "GENERAL") or "GENERAL"
-    n_doc = (inv.get("n_doc") or inv.get("numero_documento") if inv else clean_id) or clean_id
-    
-    content = await file.read()
-    ext = "pdf" if file.filename.lower().endswith(".pdf") else "pdf"
-    storage_key = f"invoices/{empresa}/{_safe_doc(n_doc)}.{ext}"
-    storage.save_object(storage_key, content, file.content_type or "application/pdf")
-    
-    update_fields = {
-        "factura_storage_key": storage_key,
-        "storage_key": storage_key,
-        "pdf_filename": file.filename,
-        "factura_filename": file.filename
-    }
-    
-    await db.invoices.update_many(q, {"$set": update_fields})
-    await db.empresas_invoices.update_many(q, {"$set": update_fields})
-    await db.consumos_subsidio.update_many(q, {"$set": update_fields})
-    
-    return {"ok": True, "storage_key": storage_key}
-
-
-class InvoiceUpdateSchema(BaseModel):
-    n_doc: Optional[str] = None
-    empresa: Optional[str] = None
-    f_emision: Optional[str] = None
-    f_vencimiento: Optional[str] = None
-    monto_total: Optional[float] = None
-    saldo: Optional[float] = None
-    estado: Optional[str] = None
-
-@api.put("/invoices/{inv_id}")
-async def update_invoice(inv_id: str, payload: InvoiceUpdateSchema, user: dict = Depends(require_roles("admin_enered"))):
-    from urllib.parse import unquote
-    clean_id = unquote(str(inv_id)).strip()
-    q = _build_invoice_query(clean_id)
-    
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
-    
-    if "estado" in data and data["estado"] == "vencida" and data.get("f_vencimiento"):
-        try:
-            from datetime import date as _date
-            fv = _date.fromisoformat(data["f_vencimiento"])
-            today = _date.today()
-            data["atraso_dias"] = max(0, (today - fv).days)
-        except Exception:
-            pass
-    elif "estado" in data and data["estado"] in ("pagada", "TERCERO"):
-        data["atraso_dias"] = 0
-
-    r1 = await db.invoices.update_many(q, {"$set": data})
-    r2 = await db.empresas_invoices.update_many(q, {"$set": data})
-    
-    sub_data = {}
-    if "n_doc" in data: sub_data["numero_documento"] = data["n_doc"]
-    if "f_emision" in data: sub_data["fecha"] = data["f_emision"]
-    if "monto_total" in data: sub_data["importe_total"] = data["monto_total"]
-    if "empresa" in data: sub_data["empresa"] = data["empresa"]
-    if "estado" in data: sub_data["estado"] = data["estado"]
-    if sub_data:
-        await db.consumos_subsidio.update_many(q, {"$set": sub_data})
-
-    if r1.matched_count == 0 and r2.matched_count == 0:
-        esc = re.escape(clean_id)
-        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
-        await db.invoices.update_many(alt_q, {"$set": data})
-        await db.empresas_invoices.update_many(alt_q, {"$set": data})
-        if sub_data:
-            await db.consumos_subsidio.update_many(alt_q, {"$set": sub_data})
-
-    return {"ok": True, "updated": data}
-
-
-@api.delete("/invoices/{inv_id}")
-async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_enered"))):
-    from urllib.parse import unquote
-    clean_id = unquote(str(inv_id)).strip()
-    esc = re.escape(clean_id)
-    q = {"$or": [{"id": clean_id}, {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
-    
-    await db.invoices.delete_many(q)
-    await db.empresas_invoices.delete_many(q)
-    await db.consumos_subsidio.delete_many(q)
-    return {"ok": True}
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 
 
 @api.get("/account-state")
@@ -5609,13 +5195,9 @@ async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
         if not f:
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
             
-<<<<<<< HEAD
     return Response(content=f["data"], media_type=f["content_type"])
 
 # ============================================================================
-=======
-    # ============================================================================
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 # SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
 # ============================================================================
 from subsidio import subsidio_router, _set_db as _set_subsidio_db
@@ -5989,7 +5571,6 @@ async def startup():
     except Exception as e:
         print("clean_estarkos err:", e)
 
-<<<<<<< HEAD
 # ---------- Precios de Combustible (Facilito OSINERGMIN) ----------
 
 @api.get("/precios")
@@ -6525,18 +6106,8 @@ async def upload_invoice_file(
 app.include_router(api)
 
 
-=======
-app.include_router(api)
-
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
 
-<<<<<<< HEAD
 
-=======
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447

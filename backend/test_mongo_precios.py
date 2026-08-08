@@ -1,9 +1,5 @@
 """
-<<<<<<< HEAD
 Clean and seed MongoDB directly with exact Facilito OSINERGMIN records across Peru.
-=======
-Clean and seed MongoDB directly with exact Facilito OSINERGMIN records.
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 """
 import asyncio
 import os
@@ -14,11 +10,7 @@ MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("MONGO_DB_NAME", "red_enered")
 
 DATASET_FACILITO = [
-<<<<<<< HEAD
   # LA LIBERTAD - PACASMAYO
-=======
-  # LA LIBERTAD - PACASMAYO (Exact Facilito OSINERGMIN Records from Screenshot)
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
   {
     "establecimiento": "MULTISERVICIOS G & M S.R.L.",
     "direccion": "CARRETERA A CAJAMARCA KM 1.5 SECTOR PAMPAS DE JESÚS",
@@ -45,11 +37,7 @@ DATASET_FACILITO = [
   },
   {
     "establecimiento": "ESTACION DE SERVICIOS SANTO TOMAS DE LIMA S.A.C.",
-<<<<<<< HEAD
     "direccion": "CARRETERA PANAMERICANA SUR - VIA EVITAMIENTO 122",
-=======
-    "direccion": "CARRETERA PANAMERICANA SUR - VIA EVITAMIENTO 122 (PANAMERICANA NORTE KM 658)",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     "telefono": "",
     "precio_venta": 23.29,
     "combustible": "DB5 S-50 UV",
@@ -85,11 +73,7 @@ DATASET_FACILITO = [
   },
   {
     "establecimiento": "GRIFO CONTINENTAL S.A.C.",
-<<<<<<< HEAD
     "direccion": "CARRETERA CIUDAD DE DIOS-CAJAMARCA KM. 5",
-=======
-    "direccion": "CARRETERA CIUDAD DE DIOS-CAJAMARCA KM. 5 VALLE JEQUETEPEQUE PREDIO LIMONCARRO SECTOR TAMARINDO",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     "telefono": "976362869",
     "precio_venta": 23.79,
     "combustible": "DB5 S-50 UV",
@@ -101,11 +85,7 @@ DATASET_FACILITO = [
   },
   {
     "establecimiento": "ESTACION DE SERVICIOS SAN MIGUEL SP S.A.C.",
-<<<<<<< HEAD
     "direccion": "PREDIO EL CHUNCHO SECTOR EL ROJAS",
-=======
-    "direccion": "PREDIO EL CHUNCHO SECTOR EL ROJAS CARRETERA A SAN JOSE C.P.M SAN MARTIN DE PORRES",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     "telefono": "",
     "precio_venta": 23.90,
     "combustible": "DB5 S-50 UV",
@@ -117,11 +97,7 @@ DATASET_FACILITO = [
   },
   {
     "establecimiento": "ESTACION DE SERVICIOS HUAYOBAMBA E.I.R.L.",
-<<<<<<< HEAD
     "direccion": "CARRETERA CIUDAD DE DIOS - CAJAMARCA KM 3",
-=======
-    "direccion": "CARRETERA CIUDAD DE DIOS - CAJAMARCA KM 3 U.C. N° 09861",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     "telefono": "934889437",
     "precio_venta": 23.95,
     "combustible": "DB5 S-50 UV",
@@ -131,7 +107,6 @@ DATASET_FACILITO = [
     "ciudad": "Guadalupe",
     "fuente": "facilito.gob.pe"
   },
-<<<<<<< HEAD
   # LA LIBERTAD - TRUJILLO
   {
     "establecimiento": "ULTRACOM EVITAMIENTO TRUJILLO",
@@ -335,30 +310,6 @@ DATASET_FACILITO = [
     "provincia": "CHICLAYO",
     "distrito": "CHICLAYO",
     "ciudad": "Chiclayo",
-=======
-  {
-    "establecimiento": "AERO GAS DEL NORTE SOCIEDAD ANONIMA CERRADA",
-    "direccion": "CARRETERA A SAN JOSE LIMITE VERDUM",
-    "telefono": "974686620/981545128",
-    "precio_venta": 23.95,
-    "combustible": "DB5 S-50 UV",
-    "departamento": "LA LIBERTAD",
-    "provincia": "PACASMAYO",
-    "distrito": "SAN JOSE",
-    "ciudad": "San José",
-    "fuente": "facilito.gob.pe"
-  },
-  {
-    "establecimiento": "AERO GAS DEL NORTE SOCIEDAD ANONIMA CERRADA (PANAMERICANA)",
-    "direccion": "CARRETERA PANAMERICANA NORTE KM. 690",
-    "telefono": "974686620/981545128",
-    "precio_venta": 23.95,
-    "combustible": "DB5 S-50 UV",
-    "departamento": "LA LIBERTAD",
-    "provincia": "PACASMAYO",
-    "distrito": "SAN JOSE",
-    "ciudad": "San José",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     "fuente": "facilito.gob.pe"
   }
 ]
@@ -413,11 +364,7 @@ async def run_clean():
             upsert=True
         )
 
-<<<<<<< HEAD
     print(f"✅ ¡Éxito! Se cargaron {len(docs)} estaciones de Facilito a nivel nacional en MongoDB.")
-=======
-    print(f"✅ ¡Éxito! Se cargaron las {len(docs)} estaciones exactas de Facilito Pacasmayo en MongoDB.")
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 
 if __name__ == "__main__":
     asyncio.run(run_clean())
