@@ -1,4 +1,11 @@
-// Updated 2026-08-04 - Standardized TabPrecios table format
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { api } from "../lib/api";
+import { formatSoles } from "../lib/utils";
+import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw } from "lucide-react";
+import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
+
+export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, syncing, isMobile = false }) {
+  // Updated 2026-08-04 - Standardized TabPrecios table format
   // Modal Admin
   const [editModalStation, setEditModalStation] = useState(null);
   const [inputPrecioEnered, setInputPrecioEnered] = useState("");

@@ -257,12 +257,12 @@ def _scrape_one(
     return records
 
 
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
+
 def scrape_all_precios(enered_stations: set = None) -> list[dict]:
     """Scrape ALL fuel stations from Facilito OSINERGMIN across Peru."""
     if enered_stations is None:
         enered_stations = set()
-<<<<<<< HEAD
+
     
     all_results = []
     seen = set()  # dedup by (establecimiento, departamento, combustible)

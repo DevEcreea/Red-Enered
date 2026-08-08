@@ -662,8 +662,7 @@ Ubicación/Dirección: ${formData.direccion}`;
                   {/* Trick to fly to center when focused unit changes */}
                   <MapUpdater center={center} zoom={zoom} />
                   
-<<<<<<< HEAD
-=======
+
                   {/* Route Polyline Trace */}
                   {routePolyline.length > 0 && (
                     <Polyline 
@@ -672,7 +671,6 @@ Ubicación/Dirección: ${formData.direccion}`;
                     />
                   )}
                   
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                   {unitsWithPos.map(u => (
                     <Marker 
                       key={u.id} 

@@ -33,15 +33,11 @@ USERS_DEFAULTS = [
     {
         "id": "usr_admin_default_2",
         "email": "admin@enered.pe",
-=======
-        "name": "Administrador ENERED",
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         "nombre": "Administrador ENERED",
         "role": "admin_enered",
         "empresa": "ENERED S.A.C.",
         "password_hash": hash_password("admin123"),
         "servicios": {"plataforma": True, "combustible": True, "gps": True, "subsidio": True}
-<<<<<<< HEAD
     }
 ]
 

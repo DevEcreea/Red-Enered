@@ -772,8 +772,7 @@ function EstadoEditor({ inv, onUpdated }) {
     </div>
   );
 }
-<<<<<<< HEAD
-=======
+
 
 /* ---------------- Modal de Registro de Abono ---------------- */
 export function AbonoModal({ open, onClose, onSuccess }) {
@@ -1019,4 +1018,4 @@ function ReuploadDocumentModal({ inv, onClose, onSaved }) {
     </div>
   );
 }
->>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
+
