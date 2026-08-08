@@ -187,7 +187,8 @@ function DeleteModal({ empresa, onClose, onDeleted }) {
       toast.success(`Empresa eliminada · ${total} registros borrados en cascada`);
       onDeleted();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Error al eliminar");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join(', ') : "Error al eliminar"));
     } finally {
       setDeleting(false);
     }
@@ -271,7 +272,8 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
       toast.success("Servicios actualizados");
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Error al guardar");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join(', ') : "Error al guardar"));
     } finally {
       setSaving(false);
     }
@@ -379,7 +381,8 @@ function WialonModal({ empresa, onClose, onSaved }) {
       const { data } = await api.post(`/admin/empresas/${encodeURIComponent(empresa.empresa)}/wialon/test`, { token, host });
       setTestResult(data);
     } catch (e) {
-      setTestResult({ ok: false, error: e.response?.data?.detail || "Error de prueba" });
+      const d = e.response?.data?.detail;
+      setTestResult({ ok: false, error: typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join(', ') : "Error de prueba") });
     } finally {
       setTesting(false);
     }
@@ -393,7 +396,8 @@ function WialonModal({ empresa, onClose, onSaved }) {
       toast.success("Token Wialon guardado (encriptado)");
       onSaved();
     } catch (e) {
-      toast.error(e.response?.data?.detail || "Error al guardar");
+      const d = e.response?.data?.detail;
+      toast.error(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => x.msg).join(', ') : "Error al guardar"));
     } finally {
       setSaving(false);
     }
@@ -518,7 +522,8 @@ function FinanzasModal({ empresa, onClose, onSaved }) {
       toast.success("Configuración financiera guardada");
       onSaved();
     } catch (e) {
-      setErr(e.response?.data?.detail || "Error al guardar");
+      const d = e.response?.data?.detail;
+      setErr(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => `${x.loc?.join('.')} ${x.msg}`).join(', ') : "Error al guardar"));
     } finally {
       setSaving(false);
     }
@@ -671,7 +676,8 @@ function CrearEmpresaModal({ onClose, onSaved }) {
       toast.success("Empresa creada con éxito");
       onSaved();
     } catch (e) {
-      setErr(e.response?.data?.detail || "Error al crear la empresa");
+      const d = e.response?.data?.detail;
+      setErr(typeof d === 'string' ? d : (Array.isArray(d) ? d.map(x => `${x.loc?.join('.')} ${x.msg}`).join(', ') : "Error al crear la empresa"));
     } finally {
       setSaving(false);
     }

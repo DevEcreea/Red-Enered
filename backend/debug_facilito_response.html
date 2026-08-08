@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="es">
+
+
+<head>
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-KLJ7X4F');</script>
+  <meta content="width=device-width, initial-scale=1.0" name="viewport">
+ <title>::: Osinergmin - FACILITO :::</title>
+  <meta name="keywords" content="facilito, precio combustible, combustible, GNV, gas licuado, gas, GLP Automotor, GLP Envasado, diesel, gasolina, gas natural, vehicular, Locales de Venta GLP, Estaciones de Servicio GLP, Planta Envasadoras GLP, Distribuidores en Cilindros GLP, grifos, estaciones de servicios">
+	<meta name="description" content="Obtén el combustible al mejor precio. Facilito de Osinergmin te permite ubicar los grifos que están a tu alrededor o en el destino que elijas, con sus respectivos precios actualizados.">
+  <meta name="theme-color" content="#000090">
+  <link href="/facilito/assets/img/favicon.png" rel="icon">
+  <link href="/facilito/assets/img/apple-touch-icon.png" rel="apple-touch-icon">
+
+  <meta property="og:url" content="https://www.facilito.gob.pe/facilito/pages/facilito/menuPrecios.jsp" />
+	<meta property="og:type" content="article" />
+	<meta property="og:title" content="Facilito" />
+	<meta property="og:description" content="Obt&eacute;n el combustible al mejor precio." />
+  <meta property="og:image" content="http://assets.osinergmin.gob.pe/ImagenesInstitucional/Logos/Logo-facilito-200.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+
+  <link href="/facilito/assets/vendor/aos/aos.css" rel="stylesheet">
+  <link href="/facilito/assets/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+  <link href="/facilito/assets/vendor/boxicons/css/boxicons.min.css" rel="stylesheet">
+  <link href="/facilito/assets/css/jquery.mapify.css" rel="stylesheet">
+  <link href="/facilito/assets/vendor/datatables/datatables.min.css" rel="stylesheet" type="text/css"/>
+  <link href="/facilito/assets/css/style.css" rel="stylesheet">
+  <script src="https://www.google.com/recaptcha/api.js?render=6Le5C4cfAAAAABbO98BHMzZKAUVimVJSzcKrbK03"></script>
+  
+</head>
+
+<body>
+	
+
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-KLJ7X4F" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+  <header id="header" class="fixed-top d-flex align-items-center ">
+    <div class="container d-flex align-items-center justify-content-between">
+      <a href="/facilito/pages/facilito/menuPrecios.jsp"class="logo"><img src="/facilito/assets/img/logo-facilito.png" alt="" class="img-fluid"></a>
+      <nav id="navbar" class="navbar">
+        <ul>
+          <li><a class="nav-link scrollto active" href="/facilito/pages/facilito/buscadorEESS.jsp">Diesel y Gasolina</a></li>
+          <li><a class="nav-link scrollto " href="/facilito/pages/facilito/buscadorGNV.jsp">Gas Natural Vehicular</a></li>
+          <li><a class="nav-link scrollto " href="/facilito/pages/facilito/buscadorAGranelGLP.jsp">GLP Automotor</a></li>
+          <li class="dropdown"><a href="#" class="nav-link scrollto "><span>GLP Envasado</span> <i class="bx bx-chevron-down"></i></a>
+            <ul>
+              <li><a href="/facilito/pages/facilito/buscadorEnvasadoGLP.jsp?tipoEnvasado=LV">Locales de Venta</a></li>
+              <li><a href="/facilito/pages/facilito/buscadorEnvasadoGLP.jsp?tipoEnvasado=ES">Estaciones de Servicio</a></li>
+              <li><a href="/facilito/pages/facilito/buscadorEnvasadoGLP.jsp?tipoEnvasado=PE">Plantas Envasadoras</a></li>
+              <li><a href="/facilito/actions/PreciosMinoristaAction.do?method=inicioGLP&GLPproducto=EN">Distribuidores en Cilindros</a></li>
+            </ul>
+          </li>
+        </ul>
+        <i class="bx bx-menu mobile-nav-toggle" ></i>
+      </nav>
+      <a href="https://www.osinergmin.gob.pe/" target="_blank" class="logo2"><img src="/facilito/assets/img/logo.png" alt="" class="img-fluid"></a>
+    </div>
+  </header>
+	<form name="form" method="post">
+  	<input type = "hidden" name='departamento_elegido'>
+  	<input type = "hidden" name='nameRedirectfile' value="buscadorEESS"/>  	
+  	<input type = "hidden" name="g-recaptcha-response" id="g-recaptcha-response">
+  </form>
+
+  <main id="main">
+    <section id="breadcrumbs" class="breadcrumbs">
+      <div class="container d-flex justify-content-between align-items-center">
+        <h2>Gasolina y Diesel</h2>
+        <ol>
+          <li><a href="menuPrecios.jsp">Inicio</a></li>
+        </ol>
+      </div>
+    </section>
+    <div class="container">
+      <div class="col-lg-12 mt-3">
+        <h5>Elige el departamento:</h5>
+      </div>
+    </div>
+    <section>
+      <div class="col-md-12 text-center mapaperu">
+        <img src="../../assets/img/peru.png" width="416px" height="600px" class="img-responsive" alt="titulo" usemap="#Map" border="0"/>
+        <map name="Map" id="Map">
+          <area shape="poly" href="javaScript:makeAction(10000)" title="Amazonas" alt="Amazonas" coords="116,92,117,110,119,114,122,117,123,118,121,121,121,122,124,125,124,145,118,155,117,158,119,162,119,169,122,174,121,176,120,180,120,187,124,195,127,198,132,198,137,204,137,207,132,211,130,216,124,216,123,215,121,214,119,214,116,221,116,225,119,228,111,228,108,224,106,213,106,213,105,212,101,210,94,203,92,197,89,196,88,196,86,191,86,188,90,183,90,174,88,166,88,156,87,151,83,145,86,135,88,126,91,123,92,115,95,110,98,108,100,108,103,102,109,95,114,93" />
+          <area shape="poly" href="javaScript:makeAction(20000)" title="&Aacute;ncash" alt="&Aacute;ncash" coords="90,298,90,288,98,283,102,283,102,277,105,273,105,270,108,269,112,266,113,262,120,262,128,270,133,278,139,291,146,295,152,299,146,308,145,312,144,315,141,318,143,321,144,323,144,328,147,330,146,336,142,335,138,338,138,340,138,342,129,349,126,349,125,344,122,343,122,338,121,337,118,336,118,343,113,344,102,319,96,306,94,300,93,299" />
+          <area shape="poly" href="javaScript:makeAction(30000)"title="Apur&iacute;mac" alt="Apur&iacute;mac" coords="256,476,258,479,259,482,261,482,264,480,267,481,268,478,275,478,280,480,281,481,284,480,286,479,286,474,293,466,295,466,299,464,301,460,301,457,300,454,298,450,289,443,280,441,278,439,269,439,261,438,252,432,247,431,248,438,249,440,249,446,252,447,253,454,254,459,256,462,257,465,257,467,255,470,255,471,257,473,257,474" />
+          <area shape="poly" href="javaScript:makeAction(40000)" title="Arequipa" alt="Arequipa" coords="207,501,211,496,220,492,225,495,228,499,232,503,237,504,240,507,244,505,246,503,257,502,262,501,266,500,272,496,272,496,274,491,274,491,273,487,274,484,278,482,284,480,290,479,294,483,300,483,303,484,305,484,305,478,311,483,312,491,317,492,320,492,323,490,325,490,331,493,333,494,336,498,338,500,339,509,341,512,341,517,345,522,344,523,342,523,339,522,337,523,336,529,333,531,332,536,326,537,322,542,317,546,318,551,318,551,320,553,321,557,316,564,306,559,300,558,290,547,283,544,269,537,264,536,255,529,245,523,208,502" />
+          <area shape="poly" href="javaScript:makeAction(50000)" title="Ayacucho" alt="Ayacucho" coords="218,454,217,452,217,443,214,440,213,438,213,436,216,433,219,434,220,434,221,432,223,429,228,428,231,422,231,410,226,405,225,404,225,400,230,396,232,398,235,399,236,401,240,400,253,422,255,427,260,432,263,435,266,438,261,438,252,432,247,431,248,438,249,440,249,446,252,447,253,454,254,459,256,462,257,465,257,467,255,470,255,471,257,473,257,474,256,476,258,479,259,482,261,482,264,480,267,481,268,478,274,478,280,480,281,481,274,484,273,487,274,491,272,496,266,500,262,501,257,502,246,503,244,505,240,507,237,504,232,503,228,499,225,495,220,492,220,485,216,480,214,476,212,475,209,476,208,474,207,468,206,459,212,457,216,456,218,455" />
+          <area shape="poly" href="javaScript:makeAction(60000)" title="Cajamarca" alt="Cajamarca" coords="83,145,87,151,88,156,88,166,89,171,90,174,90,183,86,188,86,191,88,196,89,196,92,197,94,203,101,210,105,212,106,213,108,224,111,228,117,238,116,242,113,245,111,250,106,251,101,251,98,249,89,247,87,248,79,247,76,250,74,244,70,241,65,239,65,232,70,225,69,222,61,208,63,206,64,204,64,196,62,193,64,192,63,181,65,177,64,172,64,166,66,159,70,160,75,159,79,151" />
+          <area shape="poly" href="javaScript:makeAction(80000)" title="Cusco" alt="Cusco" coords="338,500,340,496,339,491,339,484,337,481,335,479,336,476,343,467,345,464,345,461,343,459,343,456,346,450,350,449,354,441,359,436,360,432,358,430,358,425,355,423,351,424,350,426,347,427,330,423,312,416,309,415,308,409,300,399,300,395,293,389,292,381,295,376,297,372,297,368,293,368,288,372,286,373,284,372,282,370,275,370,275,367,271,364,269,366,267,368,263,368,260,369,253,377,249,378,249,380,254,383,254,386,250,394,248,399,240,400,253,422,255,427,266,438,269,439,278,439,280,441,289,443,296,448,299,452,301,457,301,460,299,464,295,466,293,466,290,470,287,473,286,474,286,479,290,479,294,483,300,483,303,484,305,484,305,478,311,483,312,491,317,492,320,492,323,490,325,490,333,494,336,498" />
+          <area shape="poly" href="javaScript:makeAction(90000)" title="Huancavelica" alt="Huancavelica" coords="206,391,206,398,204,403,198,407,192,413,187,426,187,430,186,432,183,434,183,435,184,436,188,435,192,437,192,446,193,452,202,458,206,459,216,456,218,455,218,454,217,452,217,443,214,440,213,438,213,436,216,433,219,434,220,434,223,429,228,428,231,422,231,410,225,404,225,400,230,396,229,393,226,390,220,391,219,392,211,392,210,391" />
+          <area shape="poly" href="javaScript:makeAction(100000)" title="Hu&aacute;nuco" alt="Hu&aacute;nuco" coords="189,305,193,302,197,301,203,293,211,284,217,280,223,280,225,282,225,285,223,287,222,292,221,298,219,306,213,312,203,320,199,322,198,324,196,324,193,323,189,321,186,321,184,323,183,326,183,333,184,334,184,336,183,338,181,339,179,339,177,338,176,337,171,337,163,333,161,333,156,335,153,340,153,341,149,337,146,335,147,330,144,328,144,323,141,318,144,315,146,308,152,299,139,291,133,278,137,276,147,279,151,279,155,278,158,280,163,280,164,278,165,274,166,273,168,275,170,280,171,284,173,284,176,280,178,280,179,286,181,290,184,300,187,305" />
+          <area shape="poly" href="javaScript:makeAction(110000)" title="Ica" alt="Ica" coords="207,501,202,498,201,494,192,486,187,482,183,480,182,477,173,468,171,463,168,461,167,461,166,451,168,449,170,442,170,435,169,432,179,423,187,426,187,430,186,432,183,434,183,435,184,436,188,435,192,437,192,446,193,452,202,458,206,459,207,469,208,474,209,476,212,475,214,476,216,480,220,485,220,492,215,494,211,496" />
+          <area shape="poly" href="javaScript:makeAction(120000)" title="Jun&iacute;n" alt="Jun&iacute;n" coords="227,353,227,358,229,359,232,359,236,357,245,357,249,352,251,351,255,352,259,358,259,363,258,365,259,370,253,377,249,378,249,380,254,383,254,386,248,399,239,400,236,401,235,399,232,398,230,396,229,393,226,390,220,391,219,392,211,392,210,391,206,391,206,397,204,403,198,407,192,413,191,411,191,402,189,399,189,396,186,393,177,390,173,386,169,377,164,376,164,370,161,368,160,360,166,360,168,357,171,354,175,353,180,353,184,356,186,357,188,356,190,353,194,352,199,348,202,348,204,351,207,347,209,347,218,352,221,353" />
+          <area shape="poly" href="javaScript:makeAction(130000)" title="La Libertad" alt="La Libertad" coords="90,289,83,273,75,263,69,256,62,246,56,230,61,225,65,232,65,239,70,241,74,244,75,248,76,250,79,247,87,248,89,247,93,248,98,249,101,251,106,251,111,250,113,245,116,242,117,238,111,228,119,228,121,232,123,241,126,246,127,254,129,261,131,263,137,263,142,265,145,267,146,270,147,279,146,279,141,277,137,276,133,278,128,270,122,263,121,262,114,262,112,266,108,269,105,270,105,273,102,277,102,283,97,283" />
+          <area shape="poly" href="javaScript:makeAction(140000)" title="Lambayeque" alt="Lambayeque" coords="55,229,47,219,40,216,36,212,30,209,26,206,24,204,28,195,33,192,41,190,43,188,44,187,43,179,47,180,51,185,51,189,54,193,53,193,62,193,64,196,64,200,64,204,63,206,61,208,69,222,70,225,65,232,61,225,56,230" />
+          <area shape="poly" href="javaScript:makeAction(150000)" title="Lima" alt="Lima" coords="114,344,118,343,118,336,121,337,122,338,122,342,122,343,125,344,126,349,129,349,138,342,138,338,142,335,146,336,146,335,153,341,153,346,156,351,156,356,160,360,161,368,164,370,164,376,169,377,173,386,177,390,186,393,189,396,189,399,191,402,191,407,191,411,192,413,187,426,184,425,179,423,176,426,173,428,169,432,160,423,149,404,147,398,144,394,138,390,137,382,124,367,123,360,117,350,112,344" />
+          <area shape="poly" href="javaScript:makeAction(160000)" title="Loreto" alt="Loreto" coords="235,32,241,32,241,34,244,35,245,38,253,38,257,45,259,52,260,54,263,55,267,52,269,54,270,57,271,62,270,65,270,68,272,71,276,73,279,75,302,74,314,67,320,67,324,70,325,72,327,73,335,73,339,68,346,67,351,72,353,74,358,75,363,78,364,80,370,80,372,82,373,83,369,89,350,122,364,122,376,136,375,138,372,136,367,136,364,131,356,131,354,133,347,133,345,136,342,139,339,142,334,143,329,143,327,144,312,145,306,148,304,152,298,154,290,159,285,164,282,164,279,167,278,171,278,179,278,182,270,192,269,196,270,201,273,205,273,208,272,212,263,212,260,215,257,216,253,220,251,224,251,234,249,235,245,236,245,245,237,245,233,248,231,254,229,256,225,257,220,258,216,262,204,263,199,265,192,268,192,271,193,273,192,274,189,273,181,279,178,280,177,280,178,278,179,273,182,269,183,265,183,262,180,256,175,245,173,227,179,221,180,221,181,221,187,227,189,227,193,216,193,203,187,199,172,198,166,193,164,193,161,194,157,196,153,195,148,188,143,183,133,183,122,174,119,169,119,162,117,158,118,155,124,145,124,125,121,122,121,121,123,118,119,114,117,110,116,92,136,87,153,78,167,67,181,54,190,42,193,29,194,26,196,25,198,22,197,15,190,7,188,4,189,2,194,3,198,3,201,1,205,2,206,4,215,7,221,13,225,15,233,27" />
+          <area shape="poly" href="javaScript:makeAction(170000)" title="Madre de Dios" alt="Madre de Dios" coords="353,356,353,356,360,356,362,359,365,359,368,357,372,357,386,357,389,360,412,405,413,408,412,413,408,417,407,421,406,423,380,435,358,425,355,423,351,424,350,426,347,427,330,423,309,415,308,409,300,399,300,395,293,389,292,381,297,372,297,368,296,368,299,363,298,360,299,357,301,357,304,358,315,357,321,353,323,351,331,348,339,343,341,340,343,337,345,333,345,329,353,320" />
+          <area shape="poly" href="javaScript:makeAction(180000)" title="Moquegua" alt="Moquegua" coords="322,569,316,564,321,557,320,553,318,551,317,546,322,542,322,542,326,537,332,536,333,531,336,529,336,529,337,523,339,522,342,523,344,523,351,523,355,529,356,536,361,541,363,543,362,546,360,549,359,552,357,551,354,549,352,548,350,549,349,551,349,555,347,560,340,571,337,573,334,574,330,577,327,578" />
+          <area shape="poly" href="javaScript:makeAction(190000)" title="Pasco" alt="Pasco" coords="231,330,231,328,228,327,228,321,227,317,223,311,219,306,213,312,203,320,199,322,198,324,196,324,193,323,191,322,189,321,186,321,184,323,183,326,183,333,184,334,184,336,183,338,181,339,179,339,177,338,176,337,171,337,165,334,163,333,161,333,157,335,154,338,153,340,153,345,153,346,156,351,156,355,156,356,160,360,165,360,166,360,168,357,171,354,175,353,180,353,186,357,188,356,190,353,194,352,199,348,201,348,202,348,204,351,207,347,208,347,209,347,218,352,221,353,227,353,236,345,237,343,235,342,232,340,231,336,229,334,229,331" />
+          <area shape="poly" href="javaScript:makeAction(200000)" title="Piura" alt="Piura" coords="9,160,3,156,1,152,1,142,3,138,8,135,12,138,20,138,27,133,29,133,29,141,34,139,39,139,41,141,47,142,55,144,59,147,63,155,66,159,64,166,64,173,65,177,63,181,64,192,60,193,54,193,51,189,51,185,47,180,43,179,44,187,41,190,33,192,31,193,28,195,26,199,25,202,24,204,12,199,6,198,5,190,9,192,13,190,14,184,12,177,9,171,4,169,5,166,6,163" />
+          <area shape="poly" href="javaScript:makeAction(210000)" title="Puno" alt="Puno" coords="381,571,380,569,380,567,378,564,373,563,366,560,361,556,359,552,360,549,362,546,363,543,356,536,355,529,351,523,344,523,345,522,341,517,341,512,339,509,338,500,340,496,339,491,339,484,337,481,335,479,336,476,343,467,345,464,345,461,343,459,343,456,344,454,346,450,350,449,354,441,359,436,360,432,358,430,358,425,380,435,406,423,406,457,409,462,408,465,394,483,394,493,395,495,396,502,395,505,394,510,400,525,402,533,401,543,397,551,393,555,393,557,389,559,387,560,386,563,385,566,386,572,383,577,381,577,381,573" />
+          <area shape="poly" href="javaScript:makeAction(220000)" title="San Mart&iacute;n" alt="San Mart&iacute;n" coords="172,198,187,199,191,202,193,204,193,216,189,227,187,227,181,221,179,221,173,227,175,245,180,256,183,262,183,265,182,269,179,273,178,278,177,280,176,280,173,284,171,284,170,280,168,275,166,273,165,274,163,280,158,280,155,278,151,279,147,279,146,268,142,265,137,263,131,263,129,261,127,253,126,246,123,241,121,232,119,228,116,225,116,221,119,214,121,214,123,215,124,216,130,216,132,211,137,207,137,204,134,200,132,198,127,198,124,195,121,189,120,187,120,181,121,176,122,174,133,183,143,183,148,188,151,192,153,195,157,196,161,194,164,193,166,193" />
+          <area shape="poly" href="javaScript:makeAction(230000)" title="Tacna" alt="Tacna" coords="327,578,330,577,334,574,337,573,340,571,347,560,349,555,349,551,350,549,352,548,354,549,359,552,361,556,366,560,372,563,378,564,380,567,381,572,381,575,381,577,378,579,377,579,377,588,374,593,370,596,364,597,359,598,356,599,350,597,338,590,330,581" />
+          <area shape="poly" href="javaScript:makeAction(240000)" title="Tumbes" alt="Tumbes" coords="3,138,9,135,12,138,20,138,27,133,29,127,34,124,36,123,37,119,34,116,33,110,30,109,22,116,11,126,5,134">
+          <area shape="poly" href="javaScript:makeAction(250000)" title="Ucayali" alt="Ucayali" coords="270,304,275,298,278,292,268,280,264,273,262,268,257,264,255,258,252,250,246,245,237,245,233,248,231,254,229,256,225,257,220,258,216,262,204,263,192,268,192,271,193,273,192,274,189,273,185,276,181,279,178,280,179,286,181,290,184,300,187,305,189,305,193,302,197,301,203,293,211,284,217,280,222,280,223,280,224,281,225,282,225,285,223,287,221,296,219,306,223,311,227,317,228,321,228,327,231,328,231,330,229,331,229,334,231,336,232,340,237,343,236,345,227,353,227,358,229,359,232,359,236,357,245,357,249,352,251,351,255,352,259,358,259,363,258,365,259,370,260,369,263,368,267,368,271,364,275,367,275,370,282,370,284,372,286,373,288,372,293,368,296,368,298,365,299,363,298,360,299,357,301,357,304,358,315,357,321,353,323,351,331,348,339,343,343,337,345,333,345,329,355,318,356,316,354,314,354,310,358,306,355,306,327,325,302,325,300,315,297,310,292,307,284,305,281,304" />
+        </map>
+      </div>
+      <div class="mobile-nav-toggle">
+        <div class="container">
+        <div class="col-lg-12 mt-12 mt-lg-0">
+          <div class="row">
+            <div class="form-group cien">
+              <select name="Departamento" id="departmento" class="form-select" onChange="javaScript:makeAction(this.options[this.selectedIndex].value)">
+                <option value="#">Elige el Departamento</option>
+                <option value="10000">AMAZONAS</option>
+                <option value="20000">ANCASH</option>
+                <option value="30000">APURIMAC</option>
+                <option value="40000">AREQUIPA</option>
+                <option value="50000">AYACUCHO</option>
+                <option value="60000">CAJAMARCA</option>
+                <option value="80000">CUSCO</option>
+                <option value="90000">HUANCAVELICA</option>
+                <option value="100000">HUANUCO</option>
+                <option value="110000">ICA</option>
+                <option value="120000">JUNIN</option>
+                <option value="130000">LA LIBERTAD</option>
+                <option value="140000">LAMBAYEQUE</option>
+                <option value="150000">LIMA</option>
+                <option value="160000">LORETO</option>
+                <option value="170000">MADRE DE DIOS</option>
+                <option value="180000">MOQUEGUA</option>
+                <option value="190000">PASCO</option>
+                <option value="200000">PIURA</option>
+                <option value="70000">PROV. CONST. DEL CALLAO</option>                
+                <option value="210000">PUNO</option>
+                <option value="220000">SAN MARTIN</option>
+                <option value="230000">TACNA</option>
+                <option value="240000">TUMBES</option>
+                <option value="250000">UCAYALI</opt>             
+              </select>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer id="footer">
+  <div class="footer-top">
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-9 col-md-6 footer-info">
+          <h3>ORGANISMO SUPERVISOR DE LA INVERSI&Oacute;N EN ENERG&Iacute;A Y MINER&Iacute;A </h3>
+          <p>Calle Bernardo Monteagudo 222 - Magdalena del Mar</p>
+          <div class="social-links">
+            <a href="mailto:atencionalcliente@osinergmin.gob.pe" class="twitter"><i class='bx bx-envelope'></i> atencionalcliente@osinergmin.gob.pe</a>
+          </div>
+        </div>
+        <div class="col-lg-3 col-md-6 footer-links">
+          <h4>Datos Abiertos</h4>
+          <ul>
+            <li><i class="bx bx-chevron-right"></i> <a href="https://www.osinergmin.gob.pe/empresas/hidrocarburos/Paginas/SCOP-DOCS/scop_docs.htm" target="_blank">Acceso a la Base de Datos del Registro de informaci&oacute;n de precios (PRICE)</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+  <div id="preloader"></div>
+  <a href="#" class="back-to-top d-flex align-items-center justify-content-center"><i class='bx bx-up-arrow-alt'></i></a>
+
+  <script src="../../assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+  <script src="../../assets/js/jquery-3.2.1.slim.min.js"></script> 
+  <script src="../../assets/js/jquery.mapify.js"></script> 
+  <script type="text/javascript">
+  $(function(){
+    $("img[usemap]:first").mapify({
+      popOver: {
+        content: function(zone){
+          return "<strong>"+zone.attr("data-title")+"</strong>";
+        },
+        delay: 0.2,
+        margin: "0px",
+        height: "60px",
+        width: "190px"
+      }
+    });
+  });
+  
+  function makeAction(departamento) {
+		document.form.departamento_elegido.value = departamento;
+		document.form.action = '/facilito/actions/PreciosCombustibleAutomotorAction.do?method=inicio';
+		document.form.submit();
+	}
+  
+  grecaptcha.ready(function() {
+		grecaptcha.execute('6Le5C4cfAAAAABbO98BHMzZKAUVimVJSzcKrbK03', {action: 'PreciosCombustibleAutomotorAction'})
+		.then(function(token) {
+			document.getElementById("g-recaptcha-response").value=token;
+		});
+	});
+  
+  </script>
+  <script src="../../assets/js/main.js"></script>
+</body>
+</html>

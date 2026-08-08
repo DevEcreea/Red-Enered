@@ -2,7 +2,11 @@
 Facilito OSINERGMIN Scraper - FIXED VERSION
 Scrapes ALL fuel stations from https://www.facilito.gob.pe per department + fuel type.
 
+<<<<<<< HEAD
 Table columns from Facilito:
+=======
+Table columns from Facilito (confirmed from official site screenshot):
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
   col[0] = Distrito
   col[1] = Establecimiento
   col[2] = Dirección
@@ -67,9 +71,15 @@ DEPARTAMENTOS = [
 ]
 
 COMBUSTIBLES = [
+<<<<<<< HEAD
     {"label": "DB5 S-50 UV",      "value": "DB5 S-50 UV"},
     {"label": "Gasohol Regular",   "value": "Gasohol Regular"},
     {"label": "Gasohol Premium",   "value": "Gasohol Premium"},
+=======
+    "DB5 S-50 UV",
+    "Gasohol Regular",
+    "Gasohol Premium",
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 ]
 
 REQUEST_DELAY_SECONDS = 1.2
@@ -95,6 +105,7 @@ def _parse_precio(raw: str) -> Optional[float]:
         return None
 
 
+<<<<<<< HEAD
 def _get_provinces(session: httpx.Client, dpto_code: str) -> list[dict]:
     """Fetch the list of provinces for a department via AJAX."""
     try:
@@ -161,11 +172,20 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
     Facilito table columns (confirmed from screenshot):
       col[0] = Distrito
       col[1] = Establecimiento  
+=======
+def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations: set) -> list[dict]:
+    """Parse the HTML table from Facilito response.
+
+    Facilito table columns (confirmed from official site screenshot):
+      col[0] = Distrito
+      col[1] = Establecimiento
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
       col[2] = Dirección
       col[3] = Teléfono
       col[4] = Precio de Venta (Soles por galón)
     """
     soup = BeautifulSoup(html, "lxml")
+<<<<<<< HEAD
     
     # Find the data table - Facilito uses DataTables
     table = None
@@ -185,6 +205,24 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
     if not table:
         # Last resort: any table with enough rows
         all_tables = soup.find_all("table")
+=======
+
+    # Find the data table - Facilito uses DataTables
+    table = None
+    all_tables = soup.find_all("table")
+    for t in all_tables:
+        rows = t.find_all("tr")
+        if len(rows) < 2:
+            continue
+        header_cells = rows[0].find_all(["th", "td"])
+        header_text = " ".join(c.get_text(strip=True).lower() for c in header_cells)
+        if any(k in header_text for k in ["establecimiento", "distrito", "precio", "dirección", "telefono"]):
+            table = t
+            break
+
+    if not table:
+        # Fallback: pick largest table
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         for t in sorted(all_tables, key=lambda x: len(x.find_all("tr")), reverse=True):
             if len(t.find_all("tr")) > 2:
                 table = t
@@ -197,13 +235,21 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
     rows = table.find_all("tr")
     scraped_at = datetime.now(timezone.utc).isoformat()
 
+<<<<<<< HEAD
     for row in rows[1:]:  # skip header row
+=======
+    for row in rows[1:]:  # skip header
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         cols = [td.get_text(strip=True) for td in row.find_all("td")]
         if len(cols) < 3:
             continue
 
+<<<<<<< HEAD
         # CORRECT column mapping for Facilito:
         # col[0]=Distrito, col[1]=Establecimiento, col[2]=Dirección, col[3]=Teléfono, col[4]=Precio
+=======
+        # CORRECT column order for Facilito:
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         if len(cols) >= 5:
             distrito        = cols[0].strip()
             establecimiento = cols[1].strip()
@@ -211,7 +257,10 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
             telefono        = cols[3].strip()
             precio_raw      = cols[4].strip()
         elif len(cols) == 4:
+<<<<<<< HEAD
             # Some tables may not have distrito column separately
+=======
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
             distrito        = ""
             establecimiento = cols[0].strip()
             direccion       = cols[1].strip()
@@ -238,7 +287,11 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
             "precio_pizarra": precio,
             "combustible": combustible_label,
             "departamento": dpto["name"],
+<<<<<<< HEAD
             "provincia": "",  # populated later if we iterate provinces
+=======
+            "provincia": "",
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
             "distrito": distrito,
             "ciudad": distrito or dpto["name"],
             "fuente": "facilito.gob.pe",
@@ -252,16 +305,58 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
     return results
 
 
+<<<<<<< HEAD
+=======
+def _scrape_one(
+    session: httpx.Client,
+    dpto: dict,
+    combustible: str,
+    enered_stations: set,
+) -> list[dict]:
+    payload = {
+        "departamento_elegido": dpto["code"],
+        "provincia": "",
+        "distrito": "",
+        "combustible": combustible,
+        "nameRedirectfile": "buscadorEESS",
+        "g-recaptcha-response": "",
+    }
+
+    try:
+        response = session.post(
+            f"{ACTION_URL}?method=inicio",
+            data=payload,
+            timeout=TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except Exception as e:
+        logger.warning(f"[Facilito] Error fetching {dpto['name']} / {combustible}: {e}")
+        return []
+
+    records = _parse_table(response.text, dpto, combustible, enered_stations)
+    logger.info(f"[Facilito] {dpto['name']} / {combustible}: {len(records)} registros")
+    return records
+
+
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 def scrape_all_precios(enered_stations: set = None) -> list[dict]:
     """Scrape ALL fuel stations from Facilito OSINERGMIN across Peru."""
     if enered_stations is None:
         enered_stations = set()
+<<<<<<< HEAD
     
     all_results = []
     seen = set()  # dedup by (establecimiento, departamento, combustible)
 
     with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=TIMEOUT_SECONDS) as session:
         # Warm up session / get cookies
+=======
+
+    all_results = []
+    seen = set()
+
+    with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=TIMEOUT_SECONDS) as session:
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         try:
             session.get(MAIN_PAGE_URL, timeout=TIMEOUT_SECONDS)
             time.sleep(1)
@@ -274,10 +369,16 @@ def scrape_all_precios(enered_stations: set = None) -> list[dict]:
         for dpto in DEPARTAMENTOS:
             for combustible in COMBUSTIBLES:
                 current += 1
+<<<<<<< HEAD
                 logger.info(f"[Facilito] Scraping {current}/{total}: {dpto['name']} / {combustible['value']}")
                 
                 records = _scrape_department(session, dpto, combustible, enered_stations)
                 
+=======
+                logger.info(f"[Facilito] Scraping {current}/{total}: {dpto['name']} / {combustible}")
+                records = _scrape_one(session, dpto, combustible, enered_stations)
+
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                 for r in records:
                     key = (r["establecimiento"].upper(), r["departamento"], r["combustible"])
                     if key not in seen:
@@ -287,7 +388,11 @@ def scrape_all_precios(enered_stations: set = None) -> list[dict]:
                 if current < total:
                     time.sleep(REQUEST_DELAY_SECONDS)
 
+<<<<<<< HEAD
     logger.info(f"[Facilito] Scraping completo: {len(all_results)} estaciones únicas encontradas")
+=======
+    logger.info(f"[Facilito] Total: {len(all_results)} estaciones únicas")
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     return all_results
 
 

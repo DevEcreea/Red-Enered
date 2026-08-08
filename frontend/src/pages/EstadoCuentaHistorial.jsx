@@ -192,7 +192,12 @@ export default function EstadoCuentaHistorial() {
   const viewDoc = async (id, kind) => {
     try {
       const res = await api.get(`/invoices/${id}/download/${kind}`, { responseType: "blob" });
-      const url = URL.createObjectURL(res.data);
+      let type = res.headers && res.headers["content-type"];
+      if (!type || type.includes("json") || type.includes("octet-stream")) {
+        type = kind === "xml" ? "text/xml" : "application/pdf";
+      }
+      const blob = new Blob([res.data], { type });
+      const url = URL.createObjectURL(blob);
       setViewerUrl(url);
       setViewerTitle(`${id}.${kind}`);
       setViewerDoc({ id, kind });

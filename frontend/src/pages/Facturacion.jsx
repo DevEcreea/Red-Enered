@@ -3,9 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import {
   Download, FileText, Mail, Search, BookOpen, MessageCircle,
-  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2,
+  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2, Edit3, Upload,
 } from "lucide-react";
-import { api } from "../lib/api";
+import { api, API } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ const ESTADO_BADGE = {
   vencida: "bg-red-100 text-red-700 border-red-200",
   pendiente: "bg-amber-50 text-amber-700 border-amber-200",
   pagada: "bg-green-50 text-green-700 border-green-200",
+  TERCERO: "bg-blue-50 text-blue-700 border-blue-200",
   // Legacy (datos antiguos)
   vencido: "bg-red-100 text-red-700 border-red-200",
   por_vencer: "bg-amber-50 text-amber-700 border-amber-200",
@@ -28,9 +29,41 @@ const ESTADO_BADGE = {
 };
 
 const ESTADO_LABEL = {
-  vencida: "VENCIDA", pendiente: "PENDIENTE", pagada: "PAGADA",
+  vencida: "VENCIDA", pendiente: "PENDIENTE", pagada: "PAGADA", TERCERO: "TERCERO",
   vencido: "VENCIDA", por_vencer: "PENDIENTE", pagado: "PAGADA",
 };
+
+function calculateAtrasoDias(inv) {
+  const st = (inv?.estado || "").toLowerCase().trim();
+  if (st !== "vencida" && st !== "vencido") {
+    return 0;
+  }
+  const fvStr = inv?.f_vencimiento || inv?.fecha_vencimiento;
+  if (!fvStr) return 0;
+  try {
+    let str = String(fvStr).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    let fvDate = null;
+    if (str.includes("-")) {
+      const p = str.split("-");
+      fvDate = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
+    } else if (str.includes("/")) {
+      const p = str.split("/");
+      fvDate = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    } else {
+      fvDate = new Date(str);
+    }
+    if (!fvDate || isNaN(fvDate.getTime())) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    fvDate.setHours(0, 0, 0, 0);
+    const diffTime = today.getTime() - fvDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 3600 * 24));
+    return Math.max(0, diffDays);
+  } catch {
+    return 0;
+  }
+}
 
 export default function Facturacion() {
   const { user } = useAuth();
@@ -50,6 +83,8 @@ export default function Facturacion() {
   const [viewerTitle, setViewerTitle] = useState("");
   const [viewerDoc, setViewerDoc] = useState(null);
   const [abonoModalOpen, setAbonoModalOpen] = useState(false);
+  const [editingInv, setEditingInv] = useState(null);
+  const [uploadingInv, setUploadingInv] = useState(null);
   const PAGE_SIZE = 10;
 
   useEffect(() => {
@@ -135,39 +170,135 @@ export default function Facturacion() {
   };
 
   const downloadInvoice = async (inv, kind) => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) {
+      toast.error("Identificador de factura no válido");
+      return;
+    }
     try {
-      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
-      const blob = new Blob([r.data]);
+      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
+      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
+      const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${inv.n_doc}.${kind}`;
+      a.download = `${inv.n_doc || docId}.${kind}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      toast.error(err.response?.data?.detail || `No se encontró el ${kind.toUpperCase()} de la factura`);
+      let msg = `No se encontró el ${kind.toUpperCase()} de la factura`;
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.detail) msg = json.detail;
+        } catch (_) {}
+      } else if (err.response?.data?.detail) {
+        msg = err.response.data.detail;
+      }
+      toast.error(msg);
     }
   };
 
-  const viewInvoice = async (inv, kind) => {
+  const generateFallbackPdfUrl = (inv) => {
     try {
-      const r = await api.get(`/invoices/${inv.id}/download/${kind}`, { responseType: "blob" });
-      const blob = new Blob([r.data]);
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("RED ENERED - COMPROBANTE DE PAGO", 14, 22);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text("Plataforma Integral de Gestión de Combustible", 14, 28);
+      doc.setDrawColor(200, 200, 200);
+      doc.line(14, 32, 196, 32);
+
+      const nDoc = inv.n_doc || inv.numero_documento || inv.id || "Factura";
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(`Documento N°: ${nDoc}`, 14, 42);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Cliente / Empresa: ${inv.empresa || inv.cliente || "—"}`, 14, 50);
+      doc.text(`Producto / Servicio: ${inv.producto || "DIESEL / COMBUSTIBLE"}`, 14, 56);
+      doc.text(`Fecha Emisión: ${inv.f_emision || inv.fecha || "—"}`, 14, 62);
+      doc.text(`Fecha Vencimiento: ${inv.f_vencimiento || "—"}`, 14, 68);
+      doc.text(`Estado: ${(inv.estado || "pendiente").toUpperCase()}`, 14, 74);
+
+      doc.line(14, 80, 196, 80);
+
+      const rawMonto = inv.monto_total ?? inv.monto ?? inv.importe_total ?? 0;
+      const numMonto = typeof rawMonto === "number" ? rawMonto : parseFloat(String(rawMonto).replace(/[^\d.-]/g, "")) || 0;
+      const rawSaldo = inv.saldo !== undefined ? inv.saldo : numMonto;
+      const numSaldo = typeof rawSaldo === "number" ? rawSaldo : parseFloat(String(rawSaldo).replace(/[^\d.-]/g, "")) || 0;
+
+      autoTable(doc, {
+        startY: 86,
+        head: [["Concepto", "Importe Total", "Saldo Pendiente", "Moneda"]],
+        body: [[
+          inv.producto || "Facturación de Consumo de Combustible",
+          `S/ ${numMonto.toFixed(2)}`,
+          `S/ ${numSaldo.toFixed(2)}`,
+          inv.moneda || "PEN"
+        ]],
+        theme: "striped",
+        headStyles: { fillColor: [139, 61, 255] }
+      });
+
+      const finalY = (doc.lastAutoTable?.finalY || 120) + 15;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "italic");
+      doc.text("Documento electrónico generado por la Plataforma Enered.", 14, finalY);
+
+      const blob = doc.output("blob");
+      return URL.createObjectURL(blob);
+    } catch (e) {
+      console.error("Error al generar PDF local:", e);
+      return null;
+    }
+  };
+
+  const viewInvoice = async (inv, kind = "pdf") => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) {
+      toast.error("Identificador de factura no válido");
+      return;
+    }
+    const toastId = toast.loading(`Cargando previsualización de ${inv.n_doc || docId}...`);
+    try {
+      const r = await api.get(`/invoices/${encodeURIComponent(docId)}/download/${kind}`, { responseType: "blob" });
+      toast.dismiss(toastId);
+      const type = r.headers["content-type"] || (kind === "xml" ? "text/xml" : "application/pdf");
+      const blob = new Blob([r.data], { type });
       const url = URL.createObjectURL(blob);
       setViewerUrl(url);
-      setViewerTitle(`${inv.n_doc}.${kind}`);
+      setViewerTitle(`Factura ${inv.n_doc || docId}`);
       setViewerDoc({ inv, kind });
       setViewerOpen(true);
-    } catch {
-      toast.error(`No se encontró el ${kind.toUpperCase()} de la factura para visualizar`);
+    } catch (err) {
+      toast.dismiss(toastId);
+      if (kind === "pdf") {
+        const localUrl = generateFallbackPdfUrl(inv);
+        if (localUrl) {
+          setViewerUrl(localUrl);
+          setViewerTitle(`Factura ${inv.n_doc || docId}`);
+          setViewerDoc({ inv, kind });
+          setViewerOpen(true);
+          return;
+        }
+      }
+      toast.error(`No se pudo cargar la previsualización de la factura ${inv.n_doc || docId}`);
     }
   };
 
   const handleDelete = async (inv) => {
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     if (!window.confirm(`¿Seguro de que deseas eliminar la factura ${inv.n_doc}?`)) return;
     try {
-      await api.delete(`/invoices/${inv.id}`);
-      setInvoices((prev) => prev.filter((x) => x.id !== inv.id));
+      await api.delete(`/invoices/${encodeURIComponent(docId)}`);
+      setInvoices((prev) => prev.filter((x) => (x.id || x.n_doc) !== docId && x.n_doc !== inv.n_doc));
       toast.success(`Factura ${inv.n_doc} eliminada.`);
       const params = empresa ? { empresa } : {};
       api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
@@ -216,11 +347,7 @@ export default function Facturacion() {
               </div>
               <div className="border-t border-neutral-200" />
               <div className="grid grid-cols-2 gap-x-10">
-                <KpiRow label="Saldo a Favor (Prepago)" value={formatSoles(state.saldo_a_favor)} testid="ec-saldo-favor" highlight />
                 <KpiRow label="Línea de Crédito Utilizada" value={formatSoles(state.linea_credito_utilizada)} testid="ec-utilizada" />
-              </div>
-              <div className="border-t border-neutral-200" />
-              <div className="grid grid-cols-2 gap-x-10">
                 <KpiRow label="Notas de Despacho" value={formatSoles(state.notas_despacho)} testid="ec-notas-despacho" />
               </div>
               <div className="border-t border-neutral-200" />
@@ -321,6 +448,7 @@ export default function Facturacion() {
             <table className="w-full text-sm" data-testid="ec-table">
               <thead className="bg-[#1E1B4B] text-white">
                 <tr className="text-[11px] font-bold uppercase tracking-wider">
+                  {user?.role === "admin_enered" && <th className="px-3 py-3 text-left">Cliente / Empresa</th>}
                   <th className="px-3 py-3 text-left">Producto</th>
                   <th className="px-3 py-3 text-left">Tipo Doc</th>
                   <th className="px-3 py-3 text-left">N° Doc</th>
@@ -331,24 +459,29 @@ export default function Facturacion() {
                   <th className="px-3 py-3 text-right">Monto Total</th>
                   <th className="px-3 py-3 text-right">Saldo</th>
                   <th className="px-3 py-3 text-center">Estado</th>
-                  <th className="px-3 py-3 text-center">Descargar</th>
+                  <th className="px-3 py-3 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {pageRows.length === 0 ? (
-                  <tr><td colSpan={11} className="text-center py-12 text-neutral-400">
+                  <tr><td colSpan={user?.role === "admin_enered" ? 12 : 11} className="text-center py-12 text-neutral-400">
                     <FileText className="w-10 h-10 mx-auto mb-2 text-neutral-300" />
                     Sin documentos pendientes
                   </td></tr>
                 ) : (
                   pageRows.map((inv) => (
                     <tr key={inv.id || inv.n_doc} className="hover:bg-neutral-50">
+                      {user?.role === "admin_enered" && (
+                        <td className="px-3 py-2.5 font-semibold text-neutral-800 truncate max-w-[160px]" title={inv.empresa}>
+                          {inv.empresa || "—"}
+                        </td>
+                      )}
                       <td className="px-3 py-2.5 truncate max-w-[150px]">{inv.producto || "—"}</td>
                       <td className="px-3 py-2.5">{inv.tipo_doc || "—"}</td>
                       <td className="px-3 py-2.5 font-mono font-bold text-brand">{inv.n_doc}</td>
                       <td className="px-3 py-2.5">{formatDate(inv.f_emision) || "—"}</td>
                       <td className="px-3 py-2.5">{formatDate(inv.f_vencimiento) || "—"}</td>
-                      <td className="px-3 py-2.5 text-right">{inv.atraso_dias || 0} días</td>
+                      <td className="px-3 py-2.5 text-right">{calculateAtrasoDias(inv)} días</td>
                       <td className="px-3 py-2.5 text-center text-xs font-bold">{inv.moneda || "PEN"}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
@@ -357,7 +490,7 @@ export default function Facturacion() {
                           <EstadoEditor
                             inv={inv}
                             onUpdated={(newEstado) => {
-                              setInvoices((prev) => prev.map((x) => x.id === inv.id ? { ...x, estado: newEstado } : x));
+                              setInvoices((prev) => prev.map((x) => x.n_doc === inv.n_doc ? { ...x, estado: newEstado } : x));
                               const params = empresa ? { empresa } : {};
                               api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
                             }}
@@ -370,6 +503,7 @@ export default function Facturacion() {
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center justify-center gap-1.5">
+<<<<<<< HEAD
                           {(inv.pdf_filename || inv.factura_storage_key || inv.factura_filename) && (<>
                             <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
                               <Eye className="w-4 h-4" />
@@ -378,15 +512,37 @@ export default function Facturacion() {
                               <FileText className="w-4 h-4" />
                             </button>
                           </>)}
+=======
+                          <button onClick={() => viewInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Visualizar PDF" data-testid={`ec-view-pdf-${inv.n_doc}`}>
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => downloadInvoice(inv, "pdf")} className="p-1.5 hover:bg-brand-50 text-brand rounded-md" title="Descargar PDF" data-testid={`ec-download-pdf-${inv.n_doc}`}>
+                            <FileText className="w-4 h-4" />
+                          </button>
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                           {inv.xml_filename && (
-                            <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
+                            <button onClick={() => downloadInvoice(inv, "xml")} className="p-1.5 hover:bg-cyan-50 text-cyan-600 rounded-md" title="Descargar XML" data-testid={`ec-download-xml-${inv.n_doc}`}>
                               <FileSpreadsheet className="w-4 h-4" />
                             </button>
                           )}
                           {user?.role === "admin_enered" && (
+<<<<<<< HEAD
                             <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md animate-fade-in" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
                               <Trash2 className="w-4 h-4" />
                             </button>
+=======
+                            <>
+                              <button onClick={() => setEditingInv(inv)} className="p-1.5 hover:bg-amber-50 text-amber-600 rounded-md" title="Editar Factura" data-testid={`ec-edit-invoice-${inv.n_doc}`}>
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => setUploadingInv(inv)} className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-md" title="Volver a Cargar Documento (PDF/XML)" data-testid={`ec-upload-doc-${inv.n_doc}`}>
+                                <Upload className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDelete(inv)} className="p-1.5 hover:bg-red-50 text-red-600 rounded-md" title="Eliminar Factura" data-testid={`ec-delete-invoice-${inv.n_doc}`}>
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                           )}
                         </div>
                       </td>
@@ -488,11 +644,45 @@ export default function Facturacion() {
         }} 
       />
 
-      {viewerOpen && viewerDoc && (
-        <PdfViewerModal
-          open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} onDownload={() => downloadInvoice(viewerDoc?.inv, viewerDoc?.kind)} 
+      {editingInv && (
+        <EditInvoiceModal
+          inv={editingInv}
+          empresas={empresas}
+          onClose={() => setEditingInv(null)}
+          onSaved={() => {
+            const params = empresa ? { empresa } : {};
+            api.get("/account-state", { params }).then((r) => setState(r.data)).catch(() => {});
+            api.get("/invoices", { params }).then((r) => setInvoices(r.data)).catch(() => {});
+          }}
         />
       )}
+
+      {uploadingInv && (
+        <ReuploadDocumentModal
+          inv={uploadingInv}
+          onClose={() => setUploadingInv(null)}
+          onSaved={() => {
+            const params = empresa ? { empresa } : {};
+            api.get("/invoices", { params }).then((r) => setInvoices(r.data)).catch(() => {});
+          }}
+        />
+      )}
+
+      <PdfViewerModal
+        open={viewerOpen}
+        url={viewerUrl}
+        title={viewerTitle}
+        onClose={() => {
+          setViewerOpen(false);
+          if (viewerUrl) URL.revokeObjectURL(viewerUrl);
+          setViewerUrl("");
+        }}
+        onDownload={() => {
+          if (viewerDoc?.inv) {
+            downloadInvoice(viewerDoc.inv, viewerDoc.kind || "pdf");
+          }
+        }}
+      />
     </div>
   );
 }
@@ -554,13 +744,15 @@ function EstadoEditor({ inv, onUpdated }) {
 
   const change = async (nuevo) => {
     if (nuevo === inv.estado) { setOpen(false); return; }
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
     setSaving(true);
     try {
-      await api.put(`/invoices/${inv.id}`, { estado: nuevo });
+      await api.put(`/invoices/${encodeURIComponent(docId)}`, { estado: nuevo });
       onUpdated && onUpdated(nuevo);
       toast.success(`Estado cambiado a ${nuevo.toUpperCase()}`);
     } catch (e) {
-      toast.error("Error al cambiar estado");
+      toast.error("Error al cambiar estado: " + (e.response?.data?.detail || e.message));
     } finally {
       setSaving(false);
       setOpen(false);
@@ -603,3 +795,251 @@ function EstadoEditor({ inv, onUpdated }) {
     </div>
   );
 }
+<<<<<<< HEAD
+=======
+
+/* ---------------- Modal de Registro de Abono ---------------- */
+export function AbonoModal({ open, onClose, onSuccess }) {
+  const [monto, setMonto] = useState("");
+  const [fecha, setFecha] = useState("");
+  const [nroOp, setNroOp] = useState("");
+  const [file, setFile] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) return null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!monto || !fecha || !nroOp || !file) {
+      toast.error("Por favor completa todos los campos y sube el voucher.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("monto", monto);
+      fd.append("fecha_deposito", fecha);
+      fd.append("numero_operacion", nroOp);
+      fd.append("file", file);
+
+      await api.post("/abonos", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Abono registrado correctamente. En breve será validado.");
+      onSuccess && onSuccess();
+      onClose();
+    } catch (err) {
+      toast.error("Error al registrar el abono: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Registrar un Abono</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-1">Monto depositado (S/)</label>
+            <input type="number" step="0.01" min="0" required value={monto} onChange={e => setMonto(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand focus:border-transparent outline-none" placeholder="0.00" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">Fecha de pago</label>
+              <input type="date" required value={fecha} onChange={e => setFecha(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-neutral-700 mb-1">Nro. de Operación</label>
+              <input type="text" required value={nroOp} onChange={e => setNroOp(e.target.value)} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm focus:ring-2 focus:ring-brand outline-none" placeholder="Ej. 1234567" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-neutral-700 mb-1">Voucher de Pago (PDF, JPG, PNG)</label>
+            <input type="file" required accept=".pdf,image/*" onChange={e => setFile(e.target.files[0])} className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 outline-none" />
+          </div>
+          <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Registrar Abono"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function EditInvoiceModal({ inv, empresas, onClose, onSaved }) {
+  const toIsoDate = (d) => {
+    if (!d) return "";
+    let str = String(d).trim();
+    if (str.length > 10 && str.includes("T")) str = str.split("T")[0];
+    if (str.includes("/")) {
+      const parts = str.split("/");
+      if (parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+    }
+    return str.slice(0, 10);
+  };
+
+  const [form, setForm] = useState({
+    n_doc: inv.n_doc || inv.numero_documento || "",
+    empresa: inv.empresa || "",
+    f_emision: toIsoDate(inv.f_emision || inv.fecha),
+    f_vencimiento: toIsoDate(inv.f_vencimiento || inv.fecha_vencimiento),
+    monto_total: inv.monto_total || 0,
+    saldo: inv.saldo || 0,
+    estado: inv.estado || "pendiente",
+    producto: inv.producto || "DIESEL B5 S-50",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
+    setSaving(true);
+    try {
+      await api.put(`/invoices/${encodeURIComponent(docId)}`, form);
+      toast.success("Factura actualizada correctamente.");
+      onSaved();
+      onClose();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      const msg = detail ? (typeof detail === "string" ? detail : JSON.stringify(detail)) : err.message;
+      toast.error("Error actualizando factura: " + msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Editar Factura {inv.n_doc}</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">N° Documento</label>
+              <input type="text" value={form.n_doc} onChange={e => setForm({ ...form, n_doc: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Empresa / Cliente</label>
+              <select value={form.empresa} onChange={e => setForm({ ...form, empresa: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm bg-white font-medium outline-none" required>
+                <option value="">Seleccionar empresa...</option>
+                {empresas.map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">F. Emisión</label>
+              <input type="date" value={form.f_emision} onChange={e => setForm({ ...form, f_emision: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">F. Vencimiento</label>
+              <input type="date" value={form.f_vencimiento} onChange={e => setForm({ ...form, f_vencimiento: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Monto Total (S/)</label>
+              <input type="number" step="0.01" value={form.monto_total} onChange={e => setForm({ ...form, monto_total: parseFloat(e.target.value) || 0 })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">Saldo (S/)</label>
+              <input type="number" step="0.01" value={form.saldo} onChange={e => setForm({ ...form, saldo: parseFloat(e.target.value) || 0 })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm outline-none" required />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">Estado</label>
+            <select value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })} className="w-full h-10 px-3 border border-neutral-200 rounded-lg text-sm bg-white font-medium outline-none">
+              <option value="pendiente">PENDIENTE</option>
+              <option value="pagada">PAGADA</option>
+              <option value="vencida">VENCIDA</option>
+              <option value="TERCERO">TERCERO</option>
+            </select>
+          </div>
+          <button type="submit" disabled={saving} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center">
+            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : "Guardar Cambios"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ReuploadDocumentModal({ inv, onClose, onSaved }) {
+  const [kind, setKind] = useState("pdf");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!file) return toast.error("Por favor selecciona un archivo");
+    const docId = inv.id || inv.n_doc || inv.numero_documento;
+    if (!docId) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("kind", kind);
+    fd.append("file", file);
+
+    try {
+      await api.post(`/admin/invoices/${encodeURIComponent(docId)}/upload-file`, fd);
+      toast.success(`Archivo ${kind.toUpperCase()} cargado y asociado a la factura ${inv.n_doc}.`);
+      onSaved();
+      onClose();
+    } catch (err) {
+      toast.error("Error al cargar documento: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+        <div className="flex justify-between items-center p-5 border-b border-neutral-100">
+          <h3 className="font-cabinet font-bold text-lg text-brand">Reemplazar / Cargar Documento</h3>
+          <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded-full text-neutral-400">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <div className="text-xs font-bold text-neutral-500 mb-1">FACTURA</div>
+            <div className="text-base font-bold text-neutral-800">{inv.n_doc} ({inv.empresa || "—"})</div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-2">Tipo de Archivo</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-neutral-700">
+                <input type="radio" name="kind" value="pdf" checked={kind === "pdf"} onChange={() => setKind("pdf")} />
+                Archivo PDF (.pdf)
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-neutral-700">
+                <input type="radio" name="kind" value="xml" checked={kind === "xml"} onChange={() => setKind("xml")} />
+                Archivo XML (.xml)
+              </label>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-neutral-700 mb-1">Seleccionar Documento ({kind.toUpperCase()})</label>
+            <input type="file" required accept={kind === "pdf" ? ".pdf" : ".xml"} onChange={e => setFile(e.target.files[0])} className="w-full text-sm text-neutral-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand/10 file:text-brand hover:file:bg-brand/20 outline-none" />
+          </div>
+          <button type="submit" disabled={uploading} className="w-full mt-2 h-11 bg-brand text-white rounded-xl font-bold hover:bg-brand/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
+            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Upload className="w-4 h-4" /> Subir y Reemplazar Documento</>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
 
-const TARGET_DATE = new Date("2026-07-28T23:59:59");
+const TARGET_DATE = new Date("2026-09-28T23:59:59");
 
 const badges = {
   doc: <svg viewBox="0 0 24 24" fill="none"><path d="M7 3h7l4 4v14H7a2 2 0 01-2-2V5a2 2 0 012-2zM14 3v4h4M8 13h8M8 17h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>,
@@ -217,7 +217,7 @@ export default function TrackerSubsidio() {
                   <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.2" />
                   <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
-                <span className="text-[11px] font-black tracking-wider uppercase">28 JUL</span>
+                <span className="text-[11px] font-black tracking-wider uppercase">28 SEP</span>
               </div>
               
               {/* Divider */}
@@ -257,7 +257,7 @@ export default function TrackerSubsidio() {
                 <span>{s.dlLabel}</span>
               </div>
               <div className="font-cabinet text-[17px] font-bold text-white mt-[3px] tracking-[0.02em]">{s.dlClock}</div>
-              <div className="text-[9px] font-bold tracking-[0.16em] text-white/50 mt-[1px]">28 JUL</div>
+              <div className="text-[9px] font-bold tracking-[0.16em] text-white/50 mt-[1px]">28 SEP</div>
             </div>
           )}
         </div>

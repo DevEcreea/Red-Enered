@@ -3,12 +3,34 @@ import { api } from "../lib/api";
 import { formatApiError, formatDate, formatSoles } from "../lib/utils";
 import {
   Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
+<<<<<<< HEAD
   Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode,
   Search, Edit3, Save, X, AlertTriangle, Eye, FileUp, ChevronDown, ChevronUp,
+=======
+  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode, ScanLine, Loader2, AlertTriangle
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 } from "lucide-react";
 
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];
+
+function toIsoDateString(val) {
+  if (!val) return "";
+  let s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    const p = s.split("/");
+    const d = p[0].padStart(2, "0");
+    const m = p[1].padStart(2, "0");
+    const y = p[2];
+    return `${y}-${m}-${d}`;
+  }
+  try {
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) return dt.toISOString().split("T")[0];
+  } catch {}
+  return "";
+}
 
 export default function AdminUpload() {
   const [file, setFile] = useState(null);
@@ -374,14 +396,15 @@ function QRManager() {
 
 function InvoicesBulkUpload() {
   const [files, setFiles] = useState([]);
+  const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [empresas, setEmpresas] = useState([]);
+  const [estadoOverride, setEstadoOverride] = useState("auto");
+  const [items, setItems] = useState([]);
+  const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
-  const [empresas, setEmpresas] = useState([]);
-  const [overrideEmpresa, setOverrideEmpresa] = useState("");
-  const [estadoOverride, setEstadoOverride] = useState("auto");
 
-  const [dragActive, setDragActive] = useState(false);
   const fileInputRef = React.useRef(null);
 
   useEffect(() => {
@@ -414,26 +437,40 @@ function InvoicesBulkUpload() {
     }
   };
 
-  const submit = async () => {
+  const uploadForPreview = async () => {
     if (files.length === 0) return;
-    setUploading(true); setResult(null); setErr("");
+    setUploading(true); setResult(null); setErr(""); setItems([]);
     try {
       const fd = new FormData();
       files.forEach((f) => fd.append("files", f));
-      if (overrideEmpresa) fd.append("empresa_override", overrideEmpresa);
-      if (estadoOverride && estadoOverride !== "auto") fd.append("estado_override", estadoOverride);
-      const { data } = await api.post("/admin/invoices/upload-bulk", fd, {
+      const { data } = await api.post("/admin/invoices/ocr-preview", fd, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setResult(data);
-      setFiles([]);
+      setItems(data.items || []);
     } catch (e) { setErr(formatApiError(e.response?.data?.detail)); }
     finally { setUploading(false); }
   };
 
-  const pdfCount = files.filter((f) => f.name.toLowerCase().endsWith(".pdf")).length;
-  const xmlCount = files.filter((f) => f.name.toLowerCase().endsWith(".xml")).length;
-  const zipCount = files.filter((f) => f.name.toLowerCase().endsWith(".zip")).length;
+  const setItemField = (id, field, val) => {
+    setItems((prev) => prev.map((it) => it.id === id ? { ...it, [field]: val } : it));
+  };
+
+  const deleteItem = (id) => {
+    setItems((prev) => prev.filter((it) => it.id !== id));
+  };
+
+  const confirmAll = async () => {
+    if (items.length === 0) return;
+    setConfirming(true); setErr(""); setResult(null);
+    try {
+      const payload = { items, estado_override: estadoOverride === "auto" ? "" : estadoOverride };
+      const { data } = await api.post("/admin/invoices/confirm-ocr", payload);
+      setResult({ saved: data.saved });
+      setItems([]);
+      setFiles([]);
+    } catch (e) { setErr(formatApiError(e.response?.data?.detail)); }
+    finally { setConfirming(false); }
+  };
 
   const ESTADO_OPTS = [
     { v: "auto", label: "Auto (por fecha de vencimiento)", color: "bg-neutral-100 text-neutral-700 border-neutral-300" },
@@ -449,124 +486,155 @@ function InvoicesBulkUpload() {
           <Receipt className="w-5 h-5 text-cyan-600" strokeWidth={2.5} />
         </div>
         <div>
-          <h3 className="font-cabinet font-bold text-lg text-neutral-900">Carga masiva de facturas</h3>
-          <p className="text-xs text-neutral-500 mt-1">Adjunta los pares <b>PDF + XML</b> o el <b>.ZIP</b> generado por tu ERP (Odoo). Se parsea el XML SUNAT y se asigna la empresa por <b>RUC</b>.</p>
+          <h3 className="font-cabinet font-bold text-lg text-neutral-900">Carga masiva de facturas (OCR)</h3>
+          <p className="text-xs text-neutral-500 mt-1">Sube los <b>PDFs</b> de las facturas que emites. La IA extraerá los datos y te permitirá confirmarlos antes de guardarlos en el Estado de Cuenta.</p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
-            Asignar a empresa <span className="text-neutral-400 font-medium normal-case tracking-normal">(opcional — si no, por RUC)</span>
-          </label>
-          <select
-            value={overrideEmpresa}
-            onChange={(e) => setOverrideEmpresa(e.target.value)}
-            className="h-10 px-3 border border-border rounded-md bg-white text-sm font-semibold w-full"
-            data-testid="invoices-empresa-override"
+      {items.length === 0 ? (
+        <>
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={onDragOver}
+            onDragEnter={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
+              dragActive ? "border-brand bg-brand-50/50" : "border-cyan-200 bg-cyan-50/40 hover:bg-cyan-50"
+            }`}
           >
-            <option value="">— Auto (por RUC) —</option>
-            {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
-            Estado de la factura
-          </label>
-          <div className="flex flex-wrap gap-1.5" data-testid="invoices-estado-override">
-            {ESTADO_OPTS.map((o) => (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => setEstadoOverride(o.v)}
-                className={`px-2.5 h-9 rounded-md border text-xs font-bold transition ${
-                  estadoOverride === o.v ? `${o.color} ring-2 ring-offset-1 ring-brand` : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"
-                }`}
-                data-testid={`invoices-estado-${o.v}`}
-              >
-                {o.label}
-              </button>
+            <Upload className={`w-8 h-8 mx-auto mb-2 ${dragActive ? "text-brand" : "text-cyan-600"}`} />
+            <div className="font-bold text-sm text-neutral-700">
+              {files.length > 0
+                ? `${files.length} archivo(s) PDF seleccionados`
+                : dragActive ? "Suelta los archivos aquí…" : "Selecciona o arrastra facturas PDF"}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,application/pdf"
+              onChange={(e) => handleFiles(e.target.files)}
+              className="hidden"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 mt-4">
+            <button onClick={uploadForPreview} disabled={uploading || files.length === 0} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50">
+              {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4" />}
+              {uploading ? "Procesando con IA…" : `Leer ${files.length || ""} factura(s)`}
+            </button>
+            {files.length > 0 && (
+              <button onClick={() => setFiles([])} className="btn-ghost text-sm">Limpiar selección</button>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div>
+              <strong>Revisa los datos extraídos por la IA.</strong> Si la empresa no se auto-detectó, puedes elegirla manualmente.
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold uppercase tracking-widest text-neutral-500 mb-2 block">
+              Forzar estado de todas las facturas
+            </label>
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {ESTADO_OPTS.map((o) => (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={() => setEstadoOverride(o.v)}
+                  className={`px-2.5 h-9 rounded-md border text-xs font-bold transition ${
+                    estadoOverride === o.v ? `${o.color} ring-2 ring-offset-1 ring-brand` : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {items.map((it) => (
+              <div key={it.id} className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm relative">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 truncate">
+                    <FileText className="w-4 h-4 text-neutral-400" />
+                    <span className="font-medium text-sm text-neutral-800 truncate" title={it.factura_filename}>{it.factura_filename}</span>
+                    {it.error && <span className="text-xs text-red-500 font-bold ml-2">Error: {it.error}</span>}
+                  </div>
+                  <button onClick={() => deleteItem(it.id)} className="text-neutral-400 hover:text-red-500" title="Descartar">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+                {!it.error && (
+                  <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 text-sm">
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Empresa Destino</label>
+                      <select
+                        className={`w-full border rounded p-1.5 focus:border-brand focus:outline-none ${!it.empresa && !it.override_empresa ? "border-red-300 bg-red-50" : "border-neutral-300"}`}
+                        value={it.override_empresa || it.empresa || ""}
+                        onChange={(e) => setItemField(it.id, "override_empresa", e.target.value)}
+                      >
+                        <option value="">— Seleccionar —</option>
+                        {empresas.map((e) => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">N° Documento</label>
+                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.n_doc || ""} onChange={(e) => setItemField(it.id, "n_doc", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Placa</label>
+                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.placa || ""} onChange={(e) => setItemField(it.id, "placa", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Producto</label>
+                      <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.producto || ""} onChange={(e) => setItemField(it.id, "producto", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Emisión 📅</label>
+                      <input type="date" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none text-xs" value={toIsoDateString(it.f_emision)} onChange={(e) => setItemField(it.id, "f_emision", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">F. Vencimiento 📅</label>
+                      <input type="date" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none text-xs" value={toIsoDateString(it.f_vencimiento)} onChange={(e) => setItemField(it.id, "f_vencimiento", e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Importe Total</label>
+                      <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={it.importe_total ?? ""} onChange={(e) => setItemField(it.id, "importe_total", e.target.value)} />
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
-        </div>
-      </div>
 
-      <div
-        onClick={() => fileInputRef.current?.click()}
-        onDragOver={onDragOver}
-        onDragEnter={onDragOver}
-        onDragLeave={onDragLeave}
-        onDrop={onDrop}
-        className={`block border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-          dragActive ? "border-brand bg-brand-50/50" : "border-cyan-200 bg-cyan-50/40 hover:bg-cyan-50"
-        }`}
-        data-testid="invoices-dropzone"
-      >
-        <Upload className={`w-8 h-8 mx-auto mb-2 ${dragActive ? "text-brand" : "text-cyan-600"}`} />
-        <div className="font-bold text-sm text-neutral-700">
-          {files.length > 0
-            ? `${files.length} archivo(s): ${pdfCount} PDF · ${xmlCount} XML${zipCount ? ` · ${zipCount} ZIP` : ""}`
-            : dragActive ? "Suelta los archivos aquí…" : "Selecciona o arrastra archivos PDF, XML o ZIP (Odoo)"}
+          <div className="flex items-center gap-2 mt-4">
+            <button onClick={confirmAll} disabled={confirming} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50">
+              {confirming ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+              {confirming ? "Guardando…" : "Confirmar Facturas"}
+            </button>
+            <button onClick={() => { setItems([]); setFiles([]); }} disabled={confirming} className="btn-ghost text-sm">
+              Cancelar
+            </button>
+          </div>
         </div>
-        <div className="text-xs text-neutral-500 mt-1">
-          ZIP: el sistema extrae automáticamente los XML (ignora CDR-*.xml). PDF/XML: misma base — ej. <code>F003-217.pdf</code> + <code>F003-217.xml</code>
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept=".pdf,.xml,.zip,application/pdf,text/xml,application/xml,application/zip,application/x-zip-compressed,*/*"
-          onChange={(e) => handleFiles(e.target.files)}
-          className="hidden"
-          data-testid="invoices-file-input"
-        />
-      </div>
-
-      <div className="flex items-center gap-2 mt-4">
-        <button onClick={submit} disabled={uploading || files.length === 0} className="btn-brand text-sm flex items-center gap-2 disabled:opacity-50" data-testid="invoices-upload-btn">
-          {uploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-          {uploading ? "Procesando…" : `Cargar ${files.length || ""} archivo(s)`}
-        </button>
-        {files.length > 0 && (
-          <button onClick={() => setFiles([])} className="btn-ghost text-sm">Limpiar selección</button>
-        )}
-      </div>
+      )}
 
       {err && (
         <div className="mt-4 text-sm text-red-600 bg-red-50 border border-red-100 rounded-md px-3 py-2 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 mt-0.5" /> {err}
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /> <div>{err}</div>
         </div>
       )}
       {result && (
-        <div className="mt-4 bg-neutral-50 border border-neutral-200 rounded-xl p-4 space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle2 className="w-4 h-4 text-green-600" />
-            <span className="font-bold text-green-700">{result.uploaded} factura(s) procesadas</span>
-          </div>
-          {result.saved?.length > 0 && (
-            <div className="text-xs text-neutral-600 space-y-0.5 max-h-40 overflow-y-auto">
-              {result.saved.map((s, i) => (
-                <div key={i} className="font-mono">
-                  • <b>{s.n_doc}</b> → {s.empresa}
-                  <span className="ml-2 text-[10px] text-neutral-400">[match: {s.match || "?"}]</span>
-                  <span className={`ml-2 ${["vencida","vencido"].includes(s.estado) ? "text-red-600" : s.estado === "pagada" ? "text-green-600" : "text-amber-600"}`}>[{s.estado}]</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {result.skipped?.length > 0 && (
-            <div>
-              <div className="flex items-center gap-2 text-sm">
-                <AlertCircle className="w-4 h-4 text-amber-600" />
-                <span className="font-bold text-amber-700">{result.skipped.length} omitido(s)</span>
-              </div>
-              <div className="mt-1 text-xs text-neutral-600 space-y-0.5">
-                {result.skipped.map((s, i) => (
-                  <div key={i}>• <b>{s.base}</b>: {s.reason}</div>
-                ))}
-              </div>
-            </div>
-          )}
+        <div className="mt-4 bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-2">
+          <CheckCircle2 className="w-5 h-5 text-green-600" />
+          <span className="font-bold text-green-700">{result.saved} factura(s) confirmadas y guardadas en el Estado de Cuenta.</span>
         </div>
       )}
     </div>

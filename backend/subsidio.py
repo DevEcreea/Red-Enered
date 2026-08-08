@@ -84,6 +84,8 @@ async def _get_current_user(request: Request) -> dict:
         if auth.startswith("Bearer "):
             token = auth[7:]
     if not token:
+        token = request.query_params.get("t") or request.query_params.get("token")
+    if not token:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
@@ -97,6 +99,14 @@ async def _get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Sesión expirada")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token inválido")
+
+
+async def _get_company_uids(user_id: str) -> list[str]:
+    u = await db.users.find_one({"id": user_id})
+    if u and u.get("empresa"):
+        users = await db.users.find({"empresa": u["empresa"]}).to_list(100)
+        return [usr["id"] for usr in users]
+    return [user_id]
 
 
 async def _require_subsidio(request: Request) -> dict:
@@ -256,7 +266,7 @@ async def lookup_ruc(ruc: str):
     # Leer token desde variable de entorno con fallback
     token = os.getenv("DECOLECTA_TOKEN", "").strip()
     if not token:
-        token = "sk_16580.IMOLc0SewJrvEsXBlAWFnYEKB1YQdsPz"
+        token = "sk_17602.EtG1u5naGp52wXGBfMWGY5QjvZFEYmJH"
 
     url = f"https://api.decolecta.com/v1/sunat/ruc?numero={ruc}"
     headers = {
@@ -444,20 +454,43 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     # Cálculo
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
 
+    uids = await _get_company_uids(user["id"])
+    
     # Vehículos
-    vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0}
-    ).to_list(200)
+    vehicles_dict = {}
+    
+    # Traer primero los de la flota principal si hay empresa
+    if user.get("empresa"):
+        main_veh = await db.vehiculos.find({"empresa": user.get("empresa")}, {"_id": 0}).to_list(1000)
+        for mv in main_veh:
+            placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
+            if not placa: continue
+            vehicles_dict[placa] = {
+                "id": mv.get("id", str(uuid.uuid4())),
+                "placa": placa,
+                "categoria": mv.get("categoria") or "N1",
+                "user_id": mv.get("created_by") or user["id"],
+                "from_main_fleet": True
+            }
+            
+    # Traer los del modulo subsidio (sobreescriben si hay duplicados por placa)
+    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(500)
+    for sv in sub_veh:
+        placa = (sv.get("placa") or "").strip().upper()
+        if not placa: continue
+        vehicles_dict[placa] = sv
+        
+    vehicles = list(vehicles_dict.values())
 
     # Documentos
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"]}, {"_id": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0}
     ).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
 
     # Cuenta bancaria
     bank = await db.subsidio_bank_accounts.find_one(
-        {"user_id": user["id"]}, {"_id": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)]
     )
 
     # Construir checklist
@@ -500,14 +533,24 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     )
 
     # Conteos de facturas (drafts y confirmadas)
-    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "draft"})
-    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": user["id"], "status": "confirmed"})
+    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "draft"})
+    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
+    
+    # Calcular ahorro_reconocido real (galones confirmados * 4)
+    ahorro_reconocido_real = 0
+    if invoices_confirmed > 0:
+        agg = await db.consumos_subsidio.aggregate([
+            {"$match": {"user_id": {"$in": uids}, "status": "confirmed"}},
+            {"$group": {"_id": None, "total_gal": {"$sum": "$galones"}}}
+        ]).to_list(1)
+        if agg and agg[0].get("total_gal"):
+            ahorro_reconocido_real = round(float(agg[0]["total_gal"]) * 4.0, 2)
 
     return {
         "user": {k: v for k, v in user.items() if k not in ("password_hash", "_id")},
         "calculation": calc,
         "ahorro_estimado": calc.get("subsidio_estimado", 0),
-        "ahorro_reconocido": calc.get("subsidio_estimado", 0),  # MOCKED hasta validación
+        "ahorro_reconocido": ahorro_reconocido_real,
         "vehicles": vehicles,
         "bank_account": bank,
         "checklist": checklist,
@@ -538,17 +581,19 @@ async def aceptar_declaracion(
     if not payload.accepted:
         raise HTTPException(status_code=400, detail="Debes marcar la casilla de aceptación")
 
-    # Idempotente: si ya aceptó, devolver el registro existente
-    existing = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    
+    # Idempotente: si ya aceptó alguien de la empresa, devolver el registro existente
+    existing = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0})
     if existing:
         return {"ok": True, "declaracion": existing, "already": True}
 
     # Validar que hayan terminado etapas 1, 2 y 3
     drafts_pendientes = await db.consumos_subsidio.count_documents(
-        {"user_id": user["id"], "status": "draft"}
+        {"user_id": {"$in": uids}, "status": "draft"}
     )
     confirmadas = await db.consumos_subsidio.count_documents(
-        {"user_id": user["id"], "status": "confirmed"}
+        {"user_id": {"$in": uids}, "status": "confirmed"}
     )
     if drafts_pendientes > 0:
         raise HTTPException(status_code=400, detail="Aún tienes facturas en borrador. Confírmalas antes de firmar la declaración.")
@@ -556,9 +601,9 @@ async def aceptar_declaracion(
         raise HTTPException(status_code=400, detail="Debes subir y confirmar al menos una factura de combustible.")
 
     # Verificar docs empresa + flota subidos
-    docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
     missing = []
     for cat in EMPRESA_CATEGORIES:
@@ -594,9 +639,9 @@ async def aceptar_declaracion(
         ),
     }
     await db.subsidio_declaraciones.insert_one(record)
-    # Marcar expediente como enviado a la ATU + iniciar etapa "solicitud enviada"
-    await db.users.update_one(
-        {"id": user["id"]},
+    # Marcar expediente como enviado a la ATU para toda la empresa
+    await db.users.update_many(
+        {"id": {"$in": uids}},
         {"$set": {"expediente_status": "submitted", "documentos_completos": True,
                   "expediente_submitted_at": record["accepted_at"],
                   "expediente_stage": "solicitud_enviada",
@@ -608,7 +653,8 @@ async def aceptar_declaracion(
 
 @subsidio_router.get("/subsidio/declaracion")
 async def get_declaracion(user: dict = Depends(_require_subsidio)):
-    rec = await db.subsidio_declaraciones.find_one({"user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    rec = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
     return {"declaracion": rec}
 
 
@@ -668,7 +714,8 @@ async def upload_document(
 
 @subsidio_router.delete("/subsidio/documents/{doc_id}")
 async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": user["id"]})
+    uids = await _get_company_uids(user["id"])
+    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     try:
@@ -681,7 +728,8 @@ async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
 
 @subsidio_router.get("/subsidio/documents/{doc_id}/download")
 async def download_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": user["id"]}, {"_id": 0})
+    uids = await _get_company_uids(user["id"])
+    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
@@ -696,8 +744,9 @@ async def my_docs_summary(user: dict = Depends(_require_subsidio)):
       - por_placa: { "ABC-123": [{...docs de esa placa...}], ... }
       - combustible: [{...docs comprobantes...}]
     """
+    uids = await _get_company_uids(user["id"])
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"]}, {"_id": 0, "storage_key": 0}
+        {"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}
     ).sort("uploaded_at", -1).to_list(2000)
 
     empresa = []
@@ -739,20 +788,25 @@ async def update_bank_account(payload: BankAccountIn, user: dict = Depends(_requ
     if not payload.es_banco_nacion and not payload.cci:
         raise HTTPException(status_code=400, detail="CCI obligatorio si no es Banco de la Nación")
     doc = payload.model_dump()
+    uids = await _get_company_uids(user["id"])
     doc["user_id"] = user["id"]
     doc["empresa"] = user.get("empresa")
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.subsidio_bank_accounts.update_one(
-        {"user_id": user["id"]}, {"$set": doc}, upsert=True
-    )
+    # Find existing bank account for company or insert new
+    existing = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}})
+    if existing:
+        await db.subsidio_bank_accounts.update_one({"user_id": existing["user_id"]}, {"$set": doc})
+    else:
+        await db.subsidio_bank_accounts.insert_one(doc)
     return {"ok": True, "bank_account": doc}
 
 
 @subsidio_router.post("/subsidio/vehicles")
 async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio)):
     placa = payload.placa.upper().strip()
-    if await db.subsidio_vehicles.find_one({"user_id": user["id"], "placa": placa}):
-        raise HTTPException(status_code=409, detail="La placa ya está registrada")
+    uids = await _get_company_uids(user["id"])
+    if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa}):
+        raise HTTPException(status_code=409, detail="La placa ya está registrada en la empresa")
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -848,17 +902,18 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
 @subsidio_router.delete("/subsidio/vehicles/{placa}")
 async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
     placa_norm = placa.upper().strip()
-    await db.subsidio_vehicles.delete_one({"user_id": user["id"], "placa": placa_norm})
+    uids = await _get_company_uids(user["id"])
+    await db.subsidio_vehicles.delete_one({"user_id": {"$in": uids}, "placa": placa_norm})
     # Borra docs de esa placa
     docs = await db.subsidio_documents.find(
-        {"user_id": user["id"], "placa": placa_norm}, {"_id": 0}
+        {"user_id": {"$in": uids}, "placa": placa_norm}, {"_id": 0}
     ).to_list(100)
     for d in docs:
         try:
             storage.delete_object(d["storage_key"])
         except Exception:
             pass
-    await db.subsidio_documents.delete_many({"user_id": user["id"], "placa": placa_norm})
+    await db.subsidio_documents.delete_many({"user_id": {"$in": uids}, "placa": placa_norm})
     return {"ok": True}
 
 
@@ -866,10 +921,11 @@ async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
 async def finalize(user: dict = Depends(_require_subsidio)):
     """Marca el expediente como completado. Valida que todo esté presente."""
     # Re-construir el dashboard para verificar can_finalize
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
-    docs = await db.subsidio_documents.find({"user_id": user["id"]}, {"_id": 0}).to_list(1000)
+    uids = await _get_company_uids(user["id"])
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": user["id"]}, {"_id": 0})
+    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0})
 
     missing = []
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
@@ -1040,13 +1096,14 @@ async def invoices_upload(
 @subsidio_router.get("/subsidio/invoices/preview")
 async def invoices_preview(user: dict = Depends(_require_subsidio)):
     """Devuelve facturas en draft (pendientes de confirmar) del usuario."""
+    uids = await _get_company_uids(user["id"])
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "draft"},
+        {"user_id": {"$in": uids}, "status": "draft"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("created_at", -1).to_list(500)
     # Placas registradas para mostrar dropdown de corrección
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0, "placa": 1, "categoria": 1}
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
     return {"items": rows, "vehicles": vehicles}
 
@@ -1057,8 +1114,9 @@ async def invoices_update(
     payload: InvoiceUpdateIn,
     user: dict = Depends(_require_subsidio),
 ):
+    uids = await _get_company_uids(user["id"])
     inv = await db.consumos_subsidio.find_one(
-        {"id": invoice_id, "user_id": user["id"]}, {"_id": 0}
+        {"id": invoice_id, "user_id": {"$in": uids}}, {"_id": 0}
     )
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
@@ -1076,7 +1134,8 @@ async def invoices_update(
 
 @subsidio_router.delete("/subsidio/invoices/{invoice_id}")
 async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidio)):
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user["id"]})
+    uids = await _get_company_uids(user["id"])
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": {"$in": uids}})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     try:
@@ -1099,7 +1158,8 @@ async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     """Confirma TODAS las facturas en draft del usuario → status=confirmed.
     Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed."""
     now = datetime.now(timezone.utc).isoformat()
-    drafts = await db.consumos_subsidio.find({"user_id": user["id"], "status": "draft"}).to_list(1000)
+    uids = await _get_company_uids(user["id"])
+    drafts = await db.consumos_subsidio.find({"user_id": {"$in": uids}, "status": "draft"}).to_list(1000)
 
     for d in drafts:
         fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
@@ -1187,8 +1247,9 @@ def _combustible_to_subsidio(r: dict) -> dict:
 @subsidio_router.get("/subsidio/invoices/confirmed")
 async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
     """Lista facturas confirmadas (para módulos del cliente_subsidio)."""
+    uids = await _get_company_uids(user["id"])
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "confirmed"},
+        {"user_id": {"$in": uids}, "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(2000)
 
@@ -1214,9 +1275,11 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     Fila 5: Semáforo de vencimientos de documentos
     """
     from datetime import date, timedelta
+    
+    uids = await _get_company_uids(user["id"])
 
     rows = await db.consumos_subsidio.find(
-        {"user_id": user["id"], "status": "confirmed"},
+        {"user_id": {"$in": uids}, "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(5000)
 
@@ -1259,7 +1322,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
 
     # === Unidades (vehículos) ===
-    vehicles = await db.subsidio_vehicles.find({"user_id": user["id"]}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
     unidades_incluidas = len(vehicles)
     placas_activas = {(r.get("placa") or "").upper().strip() for r in rows if (r.get("placa") or "").strip()}
     unidades_activas = len({v["placa"] for v in vehicles if v["placa"].upper() in placas_activas})
@@ -1693,6 +1756,29 @@ async def admin_list_expedientes(
             inv_map[uid]["conf"] += r["count"]
             inv_map[uid]["gal"] += r.get("gal", 0) or 0
             inv_map[uid]["imp"] += r.get("imp", 0) or 0
+            
+    # Traer facturas de Red-Enered
+    empresas_list = [u.get("empresa") for u in users if u.get("empresa")]
+    if empresas_list:
+        enered_inv_agg = await db.invoices.aggregate([
+            {"$match": {"empresa": {"$in": empresas_list}}},
+            {"$group": {
+                "_id": "$empresa",
+                "count": {"$sum": 1},
+                "imp": {"$sum": "$monto_total"}
+            }}
+        ]).to_list(10000)
+        
+        enered_map = {r["_id"]: r for r in enered_inv_agg}
+        # Associate to correct users
+        for u in users:
+            uid = u.get("id")
+            emp = u.get("empresa")
+            if emp and emp in enered_map:
+                if uid not in inv_map:
+                    inv_map[uid] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
+                inv_map[uid]["conf"] += enered_map[emp]["count"]
+                inv_map[uid]["imp"] += enered_map[emp].get("imp", 0) or 0
 
     decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
     decl_map = {d.get("user_id"): d for d in decl_list if d.get("user_id")}
@@ -1733,21 +1819,78 @@ async def admin_list_expedientes(
     return {"items": out, "total": len(out)}
 
 
+
+
+
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
 async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
     """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración."""
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    
+    uids = await _get_company_uids(user_id)
+    
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": user_id}, {"_id": 0})
-    docs = await db.subsidio_documents.find({"user_id": user_id}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
-    vehicles = await db.subsidio_vehicles.find({"user_id": user_id}, {"_id": 0}).sort("created_at", 1).to_list(200)
-    invoices = await db.consumos_subsidio.find(
-        {"user_id": user_id},
+    
+    # Obtener el último banco y declaración (cualquiera de la empresa sirve)
+    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)])
+    decl = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
+    
+    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
+    
+    # Merge vehicles from both main fleet and subsidio
+    vehicles_dict = {}
+    if u.get("empresa"):
+        main_veh = await db.vehiculos.find({"empresa": u.get("empresa")}, {"_id": 0}).to_list(1000)
+        for mv in main_veh:
+            placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
+            if not placa: continue
+            vehicles_dict[placa] = {
+                "id": mv.get("id", str(uuid.uuid4())),
+                "placa": placa,
+                "categoria": mv.get("categoria") or "N1",
+                "user_id": mv.get("created_by") or user_id,
+                "from_main_fleet": True
+            }
+    
+    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    for sv in sub_veh:
+        placa = (sv.get("placa") or "").strip().upper()
+        if not placa: continue
+        vehicles_dict[placa] = sv
+        
+    vehicles = list(vehicles_dict.values())
+    sub_invs = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("fecha", -1).to_list(2000)
-    decl = await db.subsidio_declaraciones.find_one({"user_id": user_id}, {"_id": 0})
+    
+    invoices = list(sub_invs)
+    
+    if u.get("empresa"):
+        enered_invs = await db.invoices.find(
+            {"empresa": u.get("empresa")},
+            {"_id": 0}
+        ).to_list(2000)
+        for ei in enered_invs:
+            # Map db.invoices format to consumos_subsidio format for the admin table
+            mapped_inv = {
+                "id": ei.get("id"),
+                "numero_documento": ei.get("n_doc"),
+                "fecha": ei.get("f_emision"),
+                "importe_total": ei.get("monto_total"),
+                "status": "confirmed", # By default Red-Enered invoices are confirmed
+                "empresa": ei.get("empresa"),
+                "producto": ei.get("producto"),
+                "factura_filename": ei.get("pdf_filename"),
+                "origen": "RED_ENERED",
+                "is_tercero": False
+            }
+            invoices.append(mapped_inv)
+            
+    # sort all by fecha descending
+    invoices.sort(key=lambda x: x.get("fecha") or "", reverse=True)
 
     # Etiquetas legibles
     for d in docs:
@@ -1807,36 +1950,210 @@ async def admin_update_stage(
 
 @subsidio_router.get("/admin/subsidio/invoices/{invoice_id}/download")
 async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
-    """Admin descarga el archivo PDF/imagen de una factura de consumo."""
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
-    if not inv or not inv.get("factura_storage_key"):
-        raise HTTPException(status_code=404, detail="Archivo de factura no encontrado")
-    
-    # Generate unique filename based on numero_documento to prevent OS/Browser mix-ups
-    original = inv.get("factura_filename") or "factura.pdf"
-    ext = original.split(".")[-1] if "." in original else "pdf"
-    ndoc = inv.get("numero_documento")
-    
-    if ndoc:
-        safe_ndoc = "".join(c for c in ndoc if c.isalnum() or c == "-")
-        dl_name = f"Factura_{safe_ndoc}.{ext}"
-    else:
-        dl_name = original
+    """Admin descarga o previsualiza el archivo PDF/imagen de una factura de consumo."""
+    from urllib.parse import unquote, quote
+    from bson import ObjectId
+    import re
+    from fastapi.responses import Response, HTMLResponse
 
-    import urllib.parse
-    encoded_name = urllib.parse.quote(dl_name)
+    clean_id = unquote(str(invoice_id)).strip()
+    esc_clean = re.escape(clean_id)
+    regex_id = f"^{esc_clean}$"
     
+    or_list = [
+        {"id": clean_id},
+        {"id": {"$regex": regex_id, "$options": "i"}},
+        {"n_doc": clean_id},
+        {"n_doc": {"$regex": regex_id, "$options": "i"}},
+        {"numero_documento": clean_id},
+        {"numero_documento": {"$regex": regex_id, "$options": "i"}},
+    ]
     try:
-        data = storage.get_object_bytes(inv["factura_storage_key"])
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Archivo no encontrado en almacenamiento")
+        or_list.append({"_id": ObjectId(clean_id)})
+    except Exception:
+        pass
 
-    from fastapi.responses import Response
+    q = {"$or": or_list}
+
+    inv = await db.consumos_subsidio.find_one(q) or await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q)
+
+    def _html_not_found_msg(msg: str):
+        return HTMLResponse(
+            status_code=200,
+            content=f"""
+            <html>
+                <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;background-color:#1e1e1e;color:#aaa;">
+                    <div style="text-align:center;padding:20px;">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1rem;color:#777;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+                        <h3 style="color:#eee;margin:0 0 8px 0;">Documento no adjunto</h3>
+                        <p style="font-size:13px;margin:0;">{msg}</p>
+                    </div>
+                </body>
+            </html>
+            """
+        )
+
+    if not inv:
+        return _html_not_found_msg(f"La factura <b>{clean_id}</b> no se encuentra en el sistema.")
+
+    # Recolectar llaves de almacenamiento candidatas
+    candidate_keys = []
+    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
+    if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
+    if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
+
+    empresa = inv.get("empresa") or ""
+    n_doc = inv.get("numero_documento") or inv.get("n_doc") or clean_id
+    fname = inv.get("factura_filename") or inv.get("pdf_filename") or inv.get("filename")
+
+    # Cross-reference db.invoices and db.empresas_invoices to pull storage keys if missing
+    if n_doc:
+        esc_ndoc = re.escape(n_doc)
+        doc_q = {"$or": [{"n_doc": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}]}
+        alt_docs = await db.invoices.find(doc_q).to_list(10) + await db.empresas_invoices.find(doc_q).to_list(10)
+        for alt in alt_docs:
+            if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
+            if alt.get("storage_key"): candidate_keys.append(alt["storage_key"])
+            if alt.get("pdf_key"): candidate_keys.append(alt["pdf_key"])
+            alt_fname = alt.get("factura_filename") or alt.get("pdf_filename")
+            if alt_fname:
+                candidate_keys.append(f"invoices/{empresa}/{alt_fname}")
+                candidate_keys.append(f"subsidio/{alt_fname}")
+                candidate_keys.append(alt_fname)
+
+    if fname:
+        candidate_keys.append(f"invoices/{empresa}/{fname}")
+        candidate_keys.append(f"subsidio/{fname}")
+        candidate_keys.append(f"tmp_admin/{fname}")
+        candidate_keys.append(fname)
+
+    if n_doc:
+        candidate_keys.append(f"invoices/{empresa}/{n_doc}.pdf")
+        candidate_keys.append(f"subsidio/{n_doc}.pdf")
+        candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
+        candidate_keys.append(f"{n_doc}.pdf")
+
+    # UUID fallback keys
+    inv_id = inv.get("id") or clean_id
+    if inv_id:
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.pdf")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.png")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.jpg")
+        candidate_keys.append(f"subsidio/facturas/{inv_id}.jpeg")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.pdf")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.png")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.jpg")
+        candidate_keys.append(f"invoices/{empresa}/{inv_id}.jpeg")
+        candidate_keys.append(f"subsidio/{inv_id}.pdf")
+        candidate_keys.append(f"{inv_id}.pdf")
+
+    valid_key = None
+    for k in candidate_keys:
+        if k and storage.object_exists(k):
+            valid_key = k
+            break
+
+    if not valid_key and n_doc:
+        # Fallback definitivo: buscar en Cloudflare R2 por sufijo del documento
+        suffix = f"{n_doc}.pdf"
+        try:
+            valid_key = storage.find_by_suffix(suffix, prefix="subsidio/")
+            if not valid_key:
+                valid_key = storage.find_by_suffix(suffix, prefix="invoices/")
+        except Exception as e:
+            pass
+
+    if not valid_key:
+        # Respaldo inteligente: genera el PDF oficial al vuelo con ReportLab para que SIEMPRE se pueda previsualizar
+        try:
+            from io import BytesIO
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            
+            buffer = BytesIO()
+            p = canvas.Canvas(buffer, pagesize=letter)
+            p.setTitle(f"Factura - {n_doc}")
+            
+            p.setFont("Helvetica-Bold", 18)
+            p.drawString(50, 750, "RED ENERED - COMPROBANTE DE CONSUMO / SUBSIDIO")
+            p.setFont("Helvetica", 10)
+            p.drawString(50, 735, "Plataforma Integral de Gestión de Combustible")
+            
+            p.setStrokeColorRGB(0.8, 0.8, 0.8)
+            p.line(50, 720, 550, 720)
+            
+            def _clean_str(s):
+                if not s: return "-"
+                s = str(s).strip()
+                s = s.replace("—", "-").replace("–", "-")
+                s = s.encode("latin-1", errors="replace").decode("latin-1")
+                return s
+            
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, 690, f"Documento N°: {n_doc}")
+            p.setFont("Helvetica", 10)
+            p.drawString(50, 670, f"Cliente / Empresa: {_clean_str(inv.get('empresa') or 'ROSANDINA S.A.C.')}")
+            p.drawString(50, 650, f"Fecha Emisión: {_clean_str(inv.get('fecha') or inv.get('f_emision') or '-')}")
+            p.drawString(50, 630, f"Placa Vehículo: {_clean_str(inv.get('placa') or '-')}")
+            p.drawString(50, 610, f"Producto: {_clean_str(inv.get('producto') or 'DIESEL B5 S-50')}")
+            
+            p.line(50, 590, 550, 590)
+            
+            p.setFont("Helvetica-Bold", 12)
+            p.drawString(50, 560, "DETALLE DE IMPORTE")
+            p.setFont("Helvetica", 11)
+            
+            def _safe_num(v):
+                if v is None or str(v).strip() == "": return 0.0
+                if isinstance(v, (int, float)): return float(v)
+                import re
+                try:
+                    c = re.sub(r"[^\d.-]", "", str(v))
+                    return float(c) if c else 0.0
+                except Exception:
+                    return 0.0
+            
+            monto = _safe_num(inv.get("importe_total") or inv.get("monto_total") or inv.get("monto"))
+            p.drawString(50, 535, f"Monto Total: S/ {monto:,.2f}")
+            
+            p.line(50, 510, 550, 510)
+            p.setFont("Helvetica-Oblique", 9)
+            p.drawString(50, 480, "Comprobante de consumo de subsidio registrado en la plataforma Enered.")
+            
+            p.showPage()
+            p.save()
+            buffer.seek(0)
+            
+            return Response(
+                content=buffer.getvalue(),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'inline; filename="Factura_{n_doc}.pdf"'}
+            )
+        except Exception as e:
+            import logging
+            logging.error(f"Error generando PDF de contingencia en admin subsidio: {e}")
+            return _html_not_found_msg("La factura física no se encontró y no se pudo generar el comprobante. Contacte a soporte técnico.")
+
+    try:
+        data = storage.get_object_bytes(valid_key)
+    except Exception:
+        return _html_not_found_msg(f"Error al leer el archivo en el servidor.")
+
+    original = fname or f"{n_doc}.pdf"
+    ext = original.split(".")[-1].lower() if "." in original else "pdf"
+    safe_ndoc = "".join(c for c in str(n_doc) if c.isalnum() or c == "-")
+    dl_name = f"Factura_{safe_ndoc}.{ext}"
+    encoded_name = quote(dl_name)
+
+    content_type = inv.get("factura_content_type") or inv.get("content_type")
+    if not content_type:
+        content_type = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "application/pdf"
+
     return Response(
         content=data,
-        media_type=inv.get("factura_content_type", "application/octet-stream"),
+        media_type=content_type,
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_name}"
+            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"
         },
     )
 
@@ -1919,21 +2236,24 @@ async def admin_update_vehicle(
     payload: VehicleAdminIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    v = await db.subsidio_vehicles.find_one({"id": vehicle_id, "user_id": user_id})
+    v = await db.subsidio_vehicles.find_one({"id": vehicle_id})
     if not v:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+        
+    uids = await _get_company_uids(user_id)
+    
     placa_new = payload.placa.upper().strip()
     if placa_new != v["placa"]:
-        if await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa_new}):
+        if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa_new}):
             raise HTTPException(status_code=409, detail="La nueva placa ya está registrada")
     
     if placa_new != v["placa"]:
         await db.subsidio_documents.update_many(
-            {"user_id": user_id, "placa": v["placa"]},
+            {"user_id": {"$in": uids}, "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
         await db.consumos_subsidio.update_many(
-            {"user_id": user_id, "placa": v["placa"]},
+            {"user_id": {"$in": uids}, "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
 
@@ -2032,15 +2352,17 @@ async def admin_update_invoice(
     payload: InvoiceUpdateIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": user_id})
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
+    
+    uids = await _get_company_uids(user_id)
     
     patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if "placa" in patch and patch["placa"]:
         placa = patch["placa"].upper().strip()
         patch["placa"] = placa
-        own = await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa})
+        own = await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa})
         patch["placa_match"] = placa if own else None
 
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()

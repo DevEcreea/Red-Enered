@@ -12,6 +12,7 @@ import {
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
 import PdfViewerModal from "../components/PdfViewerModal";
 import * as XLSX from "xlsx";
+import TabPrecios from "../components/TabPrecios";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -182,7 +183,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       if (r.EMPRESA) empresas.add(r.EMPRESA);
       if (r.PLACA) placas.add(r.PLACA);
       if (r.ESTACION) estaciones.add(r.ESTACION);
-      if (r.PRODUCTO) productos.add(r.PRODUCTO);
+      if (r.COMBUSTIBLE || r.PRODUCTO) productos.add(r.COMBUSTIBLE || r.PRODUCTO);
     });
     return {
       empresa: Array.from(empresas).sort(),
@@ -197,7 +198,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       if (filtros.empresa && r.EMPRESA !== filtros.empresa) return false;
       if (filtros.placa && r.PLACA !== filtros.placa) return false;
       if (filtros.estacion && r.ESTACION !== filtros.estacion) return false;
-      if (filtros.producto && r.PRODUCTO !== filtros.producto) return false;
+      if (filtros.producto && (r.COMBUSTIBLE || r.PRODUCTO) !== filtros.producto) return false;
       
       if (filtros.desde || filtros.hasta) {
         const rDate = r.FECHA ? new Date(r.FECHA) : (r.FECHA_TRANSACCION ? new Date(r.FECHA_TRANSACCION) : null);
@@ -453,9 +454,10 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     "Placa": r.PLACA || "—",
                     ...(isAdmin ? { "Empresa": r.EMPRESA || "—" } : {}),
                     "Fecha y Hora": fecha,
+                    "Red": r._origen === "subsidio" ? (r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor Externo") : "Enered",
                     "Ciudad / Estación": `${r.CIUDAD||""} / ${r.ESTACION||""}`,
                     "Kilometraje": km ? `${km} km` : "—",
-                    "Producto": r.PRODUCTO || "—",
+                    "Producto": r.COMBUSTIBLE || r.PRODUCTO || "—",
                     "Galones": galones > 0 ? galones.toFixed(2) : "—",
                     "Precio (S/)": precio > 0 ? precio.toFixed(2) : "—",
                     "Importe (S/)": importe > 0 ? importe.toFixed(2) : "—",
@@ -491,8 +493,8 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <thead>
               <tr style={{ background:HEADER_BG }}>
                 {(showAhorro
-                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
-                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Factura","Estado","Conductor",""]
+                  ? ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Red","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Estado","Conductor",""]
+                  : ["","Placa","Controles", isAdmin ? "Empresa" : null,"Fecha e Hora","Red","Ciudad / Estación","Kilometraje","Producto","Galones","Precio","Importe","Ahorro","Estado","Conductor",""]
                 ).filter(h => h !== null).map((h,i,arr)=>(
                   <th key={i} style={{ ...thSt, borderRadius:i===0?"12px 0 0 12px":i===arr.length-1?"0 12px 12px 0":"none" }}>{i===0?<input type="checkbox" style={{ width:16,height:16,accentColor:"#8B3DFF" }}/>:h}</th>
                 ))}
@@ -500,25 +502,31 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             </thead>
             <tbody>
               {filteredRows.slice(page * 50, (page + 1) * 50).map((r,i)=>{
-                let fecha = "—";
+                let fechaStr = "—";
+                let horaStr = "";
                 if (r.FECHA) {
                   const parts = r.FECHA.split("-");
                   if (parts.length === 3) {
                     let y = parseInt(parts[0], 10);
                     let m = parseInt(parts[1], 10);
                     let d = parseInt(parts[2], 10);
+<<<<<<< HEAD
 
                     fecha = `${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}`;
+=======
+                    fechaStr = `${d.toString().padStart(2,'0')}/${m.toString().padStart(2,'0')}/${y}`;
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                   } else {
-                    fecha = r.FECHA;
-                  }
-                  if (r.HORA) {
-                    const hParts = r.HORA.split(":");
-                    const hm = hParts.length >= 2 ? `${hParts[0]}:${hParts[1]}` : r.HORA;
-                    fecha += ` ${hm}`;
+                    fechaStr = r.FECHA;
                   }
                 }
-                const ciudadEstacion = [r.CIUDAD, r.ESTACION].filter(Boolean).join(" / ") || "—";
+                if (r.HORA) {
+                  const hParts = r.HORA.split(":");
+                  horaStr = hParts.length >= 2 ? `${hParts[0]}:${hParts[1]}` : r.HORA;
+                }
+                const ciudadStr = r.CIUDAD || "";
+                const estacionStr = r.ESTACION || "";
+                const ciudadEstacion = [ciudadStr, estacionStr].filter(Boolean).join(" / ") || "—";
                 const galones = parseFloat(r.CANTIDAD_GL||0);
                 const precio = parseFloat(r.PRECIO_UNITARIO||0);
                 const importe = parseFloat(r.IMPORTE_TOTAL||0);
@@ -701,21 +709,66 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                       })()}
                     </td>
                     {isAdmin && <td style={tdSt}>{r.EMPRESA||"—"}</td>}
-                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{fecha}</td>
-                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{ciudadEstacion}</td>
+                    <td style={{ ...tdSt, whiteSpace: "nowrap", minWidth: 90 }}>
+                      <div style={{ fontWeight: 600, fontSize: 12.5, color: "#111827", lineHeight: 1.3 }}>{fechaStr}</div>
+                      {horaStr && <div style={{ fontSize: 11, color: "#9CA3AF", lineHeight: 1.3, marginTop: 1 }}>{horaStr}</div>}
+                    </td>
+                    <td style={{ ...tdSt, whiteSpace: "normal", maxWidth: 150, minWidth: 110, textOverflow: "clip" }}>
+                      {(() => {
+                        if (r._origen === "subsidio") {
+                          const supplierName = r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor";
+                          return (
+                            <span 
+                              title={supplierName}
+                              style={{ 
+                                background: "#EFF6FF", 
+                                color: "#1D4ED8", 
+                                padding: "4px 8px", 
+                                borderRadius: 8, 
+                                fontSize: 11, 
+                                fontWeight: 700, 
+                                border: "1px solid #BFDBFE",
+                                maxWidth: 145,
+                                whiteSpace: "normal",
+                                wordBreak: "break-word",
+                                textAlign: "center",
+                                lineHeight: 1.25,
+                                display: "inline-block",
+                                verticalAlign: "middle"
+                              }}
+                            >
+                              {supplierName}
+                            </span>
+                          );
+                        }
+                        return (
+                          <span style={{ 
+                            background: "#ECFDF5", 
+                            color: "#059669", 
+                            padding: "3px 8px", 
+                            borderRadius: 8, 
+                            fontSize: 11, 
+                            fontWeight: 700, 
+                            border: "1px solid #A7F3D0",
+                            display: "inline-block"
+                          }}>
+                            Enered
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td style={{ ...tdSt, minWidth: 130, maxWidth: 180 }}>
+                      {ciudadStr && <div style={{ fontWeight: 600, fontSize: 12.5, color: "#111827", lineHeight: 1.3 }}>{ciudadStr}</div>}
+                      {estacionStr && <div style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.3, marginTop: 1, whiteSpace: "normal", wordBreak: "break-word" }}>{estacionStr}</div>}
+                      {!ciudadStr && !estacionStr && "—"}
+                    </td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
-                    <td style={tdSt}>{r.PRODUCTO||"—"}</td>
+                    <td style={tdSt}>{r.COMBUSTIBLE || r.PRODUCTO || "—"}</td>
                     <td style={tdSt}>{galones? galones.toFixed(2):"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{precio? `S/ ${precio.toFixed(2)}`:"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{importe? `S/ ${importe.toFixed(2)}`:"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ {ahorro? ahorro.toFixed(2):"0.00"}</td>
-                    <td style={tdSt}>
-                      {r.FACTURA_ASOCIADA || r.FACTURA || r.NOTA_DE_DESPACHO || r.NUMERO_DOCUMENTO || r.pdf_filename || r.factura_key ? (
-                        <span style={{ color:"#8B3DFF", fontSize:13, fontWeight:600, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <FileText style={{ width:14,height:14 }}/>{r.FACTURA_ASOCIADA || r.FACTURA || r.NOTA_DE_DESPACHO || r.NUMERO_DOCUMENTO || "Doc Adjunto"}
-                        </span>
-                      ) : "—"}
-                    </td>
+
                     <td style={tdSt}>
                       {(() => {
                         const estado = (r.ESTADO || "").toUpperCase();
@@ -734,7 +787,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
               })}
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={showAhorro?16:14} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
+                  <td colSpan={showAhorro?17:15} style={{ padding:"40px 20px",textAlign:"center",color:"#9ca3af",fontSize:14 }}>
                     Aún no hay cargas registradas. {!showAhorro && "Haz clic en \"Nueva carga\" para registrar la primera."}
                   </td>
                 </tr>
@@ -1351,9 +1404,10 @@ export default function Flotas() {
           onDownloadPdf={handleDownloadPdf}
         />
       )}
-      {activeTab==="Control" && <TabControl onToast={showToast}/>}
-      {activeTab==="QR"      && <TabQR onToast={showToast}/>}
+      {activeTab==="Precios" && <TabPrecios user={user} ahorroCapturado={totals.ahorro} />}
       {activeTab==="Eventos" && <TabEventos user={user}/>}
+      {activeTab==="QR"      && <TabQR onToast={showToast}/>}
+      {activeTab==="Control" && <TabControl onToast={showToast}/>}
 
       <ModalNuevaCarga open={nuevaCargaOpen} initialData={editCargaData} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo, isEdit)=>{
         if (newConsumo) {

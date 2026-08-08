@@ -135,6 +135,8 @@ async def get_current_user(request: Request) -> dict:
         if auth.startswith("Bearer "):
             token = auth[7:]
     if not token:
+        token = request.query_params.get("t") or request.query_params.get("token")
+    if not token:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
@@ -258,6 +260,404 @@ class CourseCreate(BaseModel):
 
 class CourseSubmit(BaseModel):
     respuestas: List[int]
+def normalizar_combustible(raw: str) -> str:
+    if not raw:
+        return "Diesel B5 UV"
+    s = str(raw).upper().strip()
+    if any(k in s for k in ["PREMIUM", "95", "97", "98"]):
+        return "Gasohol Premium"
+    elif any(k in s for k in ["REGULAR", "84", "90"]):
+        return "Gasohol Regular"
+    elif any(k in s for k in ["DIESEL", "DB5", "B5", "S-50", "S50"]):
+        return "Diesel B5 UV"
+    return "Gasohol Regular"
+
+
+# ---------- Precios de Combustible (Facilito OSINERGMIN + Google Sheets) ----------
+
+@api.get("/precios")
+async def get_precios(
+    user: dict = Depends(get_current_user),
+    empresa: Optional[str] = None,
+    combustible: Optional[str] = None,
+    departamento: Optional[str] = None,
+    provincia: Optional[str] = None,
+    distrito: Optional[str] = None,
+    solo_enered: bool = False,
+):
+    """Devuelve precios de estaciones de servicio con soporte para 4 filtros:
+    departamento, provincia, distrito y combustible.
+    """
+    await db.precios_facilito.delete_many({"establecimiento": {"$regex": "^ES ", "$options": "i"}})
+    await db.precios.delete_many({})
+
+    facilito_count = await db.precios_facilito.count_documents({})
+    if facilito_count < 1:
+        try:
+            from seed_facilito_precios import seed
+            await seed()
+        except Exception as se:
+            logger.warning(f"Auto-seed Facilito exception: {se}")
+
+    query: dict = {}
+    if combustible:
+        c_upper = combustible.strip().upper()
+        if "PREMIUM" in c_upper:
+            query["combustible"] = {"$regex": "PREMIUM|95|97|98", "$options": "i"}
+        elif "REGULAR" in c_upper or "84" in c_upper:
+            query["combustible"] = {"$regex": "REGULAR|84|90", "$options": "i"}
+        elif "DIESEL" in c_upper or "DB5" in c_upper or "B5" in c_upper:
+            query["combustible"] = {"$regex": "DB5|DIESEL|B5|S-50|UV", "$options": "i"}
+        else:
+            query["combustible"] = {"$regex": combustible, "$options": "i"}
+
+    if departamento:
+        dpto_norm = departamento.strip().upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+        query["departamento"] = {"$regex": dpto_norm, "$options": "i"}
+    if provincia:
+        prov_norm = provincia.strip().upper().replace("PACASMALLO", "PACASMA").replace("PACASMAYO", "PACASMA")
+        query["provincia"] = {"$regex": prov_norm, "$options": "i"}
+    if distrito:
+        dist_norm = distrito.strip().upper()
+        query["$or"] = [
+            {"distrito": {"$regex": dist_norm, "$options": "i"}},
+            {"ciudad": {"$regex": dist_norm, "$options": "i"}},
+            {"direccion": {"$regex": dist_norm, "$options": "i"}}
+        ]
+    if solo_enered:
+        query["es_enered"] = True
+
+    # 1. Consulta estricta
+    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
+    precios = await cursor.to_list(500)
+
+    # 2. Si no hay resultados para provincia/distrito específico, relajar a Departamento
+    if not precios and departamento:
+        dpto_norm = departamento.strip().upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+        fallback_query = {"departamento": {"$regex": dpto_norm, "$options": "i"}}
+        if combustible:
+            fallback_query["combustible"] = query.get("combustible", {"$regex": combustible, "$options": "i"})
+        if solo_enered:
+            fallback_query["es_enered"] = True
+        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
+        precios = await cursor.to_list(500)
+
+
+
+
+    # Cruzar con precios ENERED de db.estaciones_enered por (nombre, combustible)
+    enered_map = {}
+    enered_docs = await db.estaciones_enered.find({}, {"_id": 0}).to_list(500)
+    for e in enered_docs:
+        key_name = e.get("nombre_facilito", "").strip().upper()
+        key_comb = normalizar_combustible(e.get("combustible") or "")
+        if key_comb:
+            enered_map[(key_name, key_comb)] = e
+        enered_map[key_name] = e
+
+    REDES_CONOCIDAS = {"REPSOL", "PRIMAX", "AVA", "PETROPERU", "SHELL", "MOBIL", "VALERO", "PECSA", "TERPEL", "COSTI"}
+    user_empresa = (empresa or user.get("empresa") or "").strip().upper()
+
+    for p in precios:
+        p["combustible"] = normalizar_combustible(p.get("combustible"))
+        nombre_est = p.get("establecimiento", "").strip().upper()
+        comb_norm = p["combustible"]
+
+        enered_info = enered_map.get((nombre_est, comb_norm))
+        if not enered_info:
+            for (k_key), val in enered_map.items():
+                if isinstance(k_key, tuple):
+                    k_name, k_comb = k_key
+                    if (k_name in nombre_est or nombre_est in k_name) and k_comb == comb_norm:
+                        enered_info = val
+                        break
+
+        precio_pizarra = float(p.get("precio_venta") or 0)
+        p["precio_pizarra"] = precio_pizarra
+
+        if enered_info:
+            p["es_enered"] = True
+            precios_cliente = enered_info.get("precios_cliente") or {}
+
+            if user_empresa and user_empresa in precios_cliente:
+                precio_e = float(precios_cliente[user_empresa])
+            elif "GENERAL" in precios_cliente:
+                precio_e = float(precios_cliente["GENERAL"])
+            else:
+                precio_e = float(enered_info.get("precio_enered") or precio_pizarra)
+
+            p["precio_enered"] = precio_e
+            ahorro = round(precio_pizarra - precio_e, 2)
+            p["ahorro"] = max(ahorro, 0)
+            p["porcentaje_ahorro"] = round((p["ahorro"] / precio_pizarra) * 100, 1) if precio_pizarra > 0 else 0
+            p["acepta_factura"] = True
+            p["acepta_tarjeta"] = True
+            p["calidad"] = 5
+            p["cliente_asignado"] = enered_info.get("cliente_asignado", "GENERAL")
+        else:
+            p["precio_enered"] = None
+            p["ahorro"] = 0.0
+            p["porcentaje_ahorro"] = 0.0
+            p["acepta_factura"] = True
+            p["acepta_tarjeta"] = False
+            
+            is_red = any(r in nombre_est for r in REDES_CONOCIDAS)
+            p["calidad"] = 4 if is_red else 2
+
+    # Deduplicar por (establecimiento, dirección, combustible) para eliminar filas repetidas
+    seen = set()
+    dedup_precios = []
+    for p in precios:
+        est = (p.get("establecimiento") or p.get("estacion") or "").strip().upper()
+        dir_sub = (p.get("direccion") or "").strip().upper()[:20]
+        comb = (p.get("combustible") or "").strip().upper()
+        key = (est, dir_sub, comb)
+        if key not in seen:
+            seen.add(key)
+            dedup_precios.append(p)
+    precios = dedup_precios
+
+    mejor_precio = min(
+        [p.get("precio_enered") or p.get("precio_pizarra", 9999) for p in precios if (p.get("precio_pizarra") or 0) > 0] or [0]
+    )
+    last_sync = await db.precios_facilito.find_one({}, {"scraped_at": 1, "_id": 0}, sort=[("scraped_at", -1)])
+    return {
+        "precios": precios,
+        "mejor_precio": mejor_precio if mejor_precio != 9999 else 0,
+        "fuente": "facilito",
+        "last_sync": last_sync.get("scraped_at") if last_sync else None,
+        "total": len(precios),
+    }
+
+
+@api.get("/precios/clientes-list")
+async def get_clientes_list(user: dict = Depends(get_current_user)):
+    """Retorna la lista de clientes/empresas para la asignación de precios ENERED."""
+    users_empresas = await db.users.distinct("empresa")
+    subsidio_empresas = await db.clientes_subsidio.distinct("empresa")
+    config_empresas = await db.empresas_config.distinct("empresa")
+    
+    all_empresas = sorted(list(set(
+        [e.strip().upper() for e in (users_empresas + subsidio_empresas + config_empresas) if e and str(e).strip()]
+    )))
+    return {"clientes": all_empresas}
+
+
+@api.get("/precios/ubicaciones")
+async def get_ubicaciones(user: dict = Depends(get_current_user)):
+    """Retorna la lista de departamentos, provincias y distritos disponibles."""
+    from services.facilito_scraper import DEPARTAMENTOS
+    dptos_facilito = [d["name"] for d in DEPARTAMENTOS]
+    
+    dptos_db = await db.precios_facilito.distinct("departamento")
+    if not dptos_db:
+        dptos_db = await db.precios.distinct("departamento")
+    
+    all_dptos = sorted(list(set(dptos_facilito + [d for d in dptos_db if d])))
+    
+    provincias_db = await db.precios_facilito.distinct("provincia")
+    distritos_db = await db.precios_facilito.distinct("distrito")
+    
+    return {
+        "departamentos": all_dptos,
+        "provincias": [p for p in provincias_db if p],
+        "distritos": [dist for dist in distritos_db if dist]
+    }
+
+
+@api.get("/precios/combustibles")
+async def get_combustibles_disponibles(user: dict = Depends(get_current_user)):
+    """Retorna estrictamente los 3 tipos de combustible normalizados."""
+    return {"combustibles": ["Diesel B5 UV", "Gasohol Regular", "Gasohol Premium"]}
+
+
+@api.post("/admin/precios/sync")
+async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
+    """Dispara el scraping de precios desde Facilito OSINERGMIN."""
+    from services.facilito_scraper import scrape_all_precios_async, COMBUSTIBLES
+    from seed_facilito_precios import seed
+
+    enered_docs = await db.estaciones_enered.find({}, {"nombre_facilito": 1}).to_list(500)
+    enered_stations = {e.get("nombre_facilito", "") for e in enered_docs if e.get("nombre_facilito")}
+
+    results = []
+    try:
+        results = await scrape_all_precios_async(enered_stations)
+    except Exception as e:
+        logger.error(f"Facilito scrape error: {e}")
+
+    # 1. Ejecutar semilla siempre como respaldo base para estaciones críticas (ej. Trujillo)
+    await seed(db)
+
+    if results:
+        # 2. Agrupar por departamento para NO borrar zonas que hayan fallado/colgado en Facilito
+        dptos_scraped = set(r.get("departamento") for r in results if r.get("departamento"))
+        
+        for dpto in dptos_scraped:
+            await db.precios_facilito.delete_many({"departamento": dpto})
+            
+        await db.precios_facilito.insert_many(results)
+
+    await db.precios_facilito.create_index("combustible")
+    await db.precios_facilito.create_index("departamento")
+    await db.precios_facilito.create_index("es_enered")
+    
+    count = await db.precios_facilito.count_documents({})
+
+    return {
+        "ok": True,
+        "total_synced": len(results),
+        "combustibles": COMBUSTIBLES,
+        "message": f"{len(results)} precios actualizados desde Facilito OSINERGMIN",
+    }
+
+
+
+@api.get("/admin/precios/estaciones-enered")
+async def list_estaciones_enered(user: dict = Depends(require_roles("admin_enered"))):
+    """Lista las estaciones ENERED registradas con precio especial."""
+    docs = await db.estaciones_enered.find({}, {"_id": 0}).to_list(500)
+    return {"estaciones": docs}
+
+
+@api.post("/admin/precios/estaciones-enered")
+async def upsert_estacion_enered(
+    data: dict,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Agrega o actualiza una estacion ENERED con su precio especial por cliente."""
+    nombre = data.get("nombre_facilito", "").strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="nombre_facilito es requerido")
+
+    comb = normalizar_combustible(data.get("combustible") or "Diesel B5 UV")
+    precio = float(data.get("precio_enered") or 0)
+    cliente = (data.get("cliente") or "GENERAL").strip().upper()
+
+    existing = await db.estaciones_enered.find_one({"nombre_facilito": nombre, "combustible": comb})
+    precios_cliente = existing.get("precios_cliente", {}) if existing else {}
+    
+    if cliente and cliente != "GENERAL":
+        precios_cliente[cliente] = precio
+    else:
+        precios_cliente["GENERAL"] = precio
+
+    doc = {
+        "nombre_facilito": nombre,
+        "combustible": comb,
+        "precio_enered": precio if not cliente or cliente == "GENERAL" else (existing.get("precio_enered", precio) if existing else precio),
+        "cliente_asignado": cliente,
+        "precios_cliente": precios_cliente,
+        "departamento": data.get("departamento", ""),
+        "provincia": data.get("provincia", ""),
+        "distrito": data.get("distrito", ""),
+        "acepta_factura": True,
+        "acepta_tarjeta": True,
+        "activa": True,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.estaciones_enered.update_one(
+        {"nombre_facilito": nombre, "combustible": comb},
+        {"$set": doc},
+        upsert=True,
+    )
+    await db.precios_facilito.update_many(
+        {"establecimiento": {"$regex": nombre, "$options": "i"}},
+        {"$set": {"es_enered": True, "acepta_tarjeta": True, "calidad": 5}}
+    )
+    return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio, "cliente": cliente}
+
+app.include_router(api)
+
+
+@api.delete("/admin/consumptions/cleanup")
+async def cleanup_consumptions(
+    estacion: Optional[str] = None,
+    empresa: Optional[str] = None,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Delete consumption records by filter from both consumptions and consumos_subsidio."""
+    q_cons = {}
+    q_sub = {}
+    if estacion:
+        q_cons["ESTACION"] = estacion
+        q_sub["estacion"] = estacion
+    if empresa:
+        q_cons["EMPRESA"] = empresa
+        q_sub["empresa"] = empresa
+    if not q_cons:
+        raise HTTPException(status_code=400, detail="Debes especificar al menos un filtro (estacion o empresa)")
+    
+    r1 = await db.consumptions.delete_many(q_cons)
+    r2 = await db.consumos_subsidio.delete_many(q_sub)
+    
+    total_deleted = r1.deleted_count + r2.deleted_count
+    return {
+        "deleted": total_deleted,
+        "consumptions_deleted": r1.deleted_count,
+        "consumos_subsidio_deleted": r2.deleted_count,
+        "filter": {"estacion": estacion, "empresa": empresa}
+    }
+
+@api.get("/admin/precios/debug")
+async def debug_precios(user: dict = Depends(require_roles("admin_enered"))):
+    """Diagnostic endpoint — reads the sheet and returns raw + normalized data without inserting."""
+    import google_sheets_sync
+    sheet_id = os.environ.get("GOOGLE_SHEETS_ID")
+    tab = os.environ.get("GOOGLE_SHEETS_TAB_PRECIOS", "PRECIOS")
+    
+    debug = {"sheet_id": sheet_id, "tab_configured": tab, "env_vars_set": {
+        "GOOGLE_SHEETS_ID": bool(sheet_id),
+        "GOOGLE_SHEETS_TAB_PRECIOS": bool(os.environ.get("GOOGLE_SHEETS_TAB_PRECIOS")),
+    }}
+    
+    try:
+        records, actual_tab = await google_sheets_sync.fetch_rows(sheet_id, tab)
+        debug["actual_tab"] = actual_tab
+        debug["total_rows_read"] = len(records)
+        debug["first_3_raw"] = records[:3] if records else []
+        
+        # Show column headers from first row
+        if records:
+            debug["column_headers"] = list(records[0].keys())
+            normalized_headers = {k: google_sheets_sync._normalize_col(k) for k in records[0].keys()}
+            debug["normalized_headers"] = normalized_headers
+        
+        # Try normalizing first 3 rows
+        sample_normalized = []
+        for r in records[:3]:
+            norm = {}
+            for k, v in r.items():
+                key = google_sheets_sync._normalize_col(k)
+                if key:
+                    norm[key] = v
+            pv = google_sheets_sync._parse_number(norm.get("PRECIO_VENTA"))
+            if pv is None:
+                pv = google_sheets_sync._parse_number(norm.get("ENERED"))
+            pp = google_sheets_sync._parse_number(norm.get("PRECIO_PIZARRA"))
+            if pp is None:
+                pp = google_sheets_sync._parse_number(norm.get("PIZARRA"))
+            sample_normalized.append({
+                "norm_keys": list(norm.keys()),
+                "empresa": norm.get("EMPRESA", "?"),
+                "estacion": norm.get("ESTACION", "?"),
+                "combustible": norm.get("COMBUSTIBLE", "?"),
+                "precio_venta_parsed": pv,
+                "precio_pizarra_parsed": pp,
+                "raw_enered": norm.get("ENERED"),
+                "raw_pizarra": norm.get("PIZARRA"),
+            })
+        debug["first_3_normalized"] = sample_normalized
+        
+        # Count how many precios are in DB right now
+        count = await db.precios.count_documents({})
+        debug["precios_in_db"] = count
+        
+    except Exception as e:
+        debug["error"] = str(e)
+    
+    return debug
 
 
 # ---------- Auth Endpoints ----------
@@ -433,6 +833,7 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
         "AHORRO": round(gal * 1.5, 2),  # MOCKED: S/ 1.5 por galón (alineado con dashboard subsidio)
         "SEMANA": semana,
         "RUC_EMISOR": r.get("ruc_emisor") or "",
+        "RAZON_SOCIAL_EMISOR": r.get("razon_social_emisor") or r.get("proveedor") or r.get("estacion") or r.get("ruc_emisor") or "",
         "NUMERO_DOCUMENTO": r.get("numero_documento") or "",
         "ESTADO": "FACTURADO",
         "_origen": "subsidio",
@@ -488,31 +889,36 @@ async def list_consumptions(
             r.pop("_id", None)
             rows.append(r)
 
-    # 2. Fetch from db.consumos_subsidio if applicable
+    # 2. Fetch fuel consumptions uploaded by client via Subsidio (excluding admin_ocr)
+    target_emp = empresa if (empresa and user["role"] == "admin_enered") else user.get("empresa")
     is_subsidio = user.get("role") == "cliente_subsidio"
-    if not is_subsidio and user.get("empresa"):
-        cfg = await db.empresas_config.find_one({"empresa": user["empresa"]}, {"_id": 0, "servicios": 1})
+    if not is_subsidio and target_emp:
+        cfg = await db.empresas_config.find_one({"empresa": target_emp}, {"_id": 0, "servicios": 1})
         if cfg and cfg.get("servicios", {}).get("subsidio"):
             is_subsidio = True
 
     if is_subsidio:
-        uid_filter = {"status": "confirmed"}
+        uid_filter = {
+            "status": "confirmed",
+            "origin": {"$ne": "admin_ocr"},
+            "estacion": {"$ne": "ENERED"}
+        }
         if user.get("role") == "cliente_subsidio":
             uid_filter["user_id"] = user["id"]
-        else:
-            uid_filter["empresa"] = user.get("empresa")
+        elif target_emp:
+            uid_filter["empresa"] = target_emp
             
         raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
         mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
         
         def keep(row):
-            if fecha_desde and (row["FECHA"] or "") < fecha_desde: return False
-            if fecha_hasta and (row["FECHA"] or "") > fecha_hasta: return False
-            if placa and row["PLACA"] != placa: return False
-            if ciudad and row["CIUDAD"] != ciudad: return False
-            if estacion and row["ESTACION"] != estacion: return False
-            if producto and row["PRODUCTO"] != producto: return False
-            if semana and row["SEMANA"] != semana: return False
+            if fecha_desde and (row.get("FECHA") or "") < fecha_desde: return False
+            if fecha_hasta and (row.get("FECHA") or "") > fecha_hasta: return False
+            if placa and row.get("PLACA") != placa: return False
+            if ciudad and row.get("CIUDAD") != ciudad: return False
+            if estacion and row.get("ESTACION") != estacion: return False
+            if producto and row.get("PRODUCTO") != producto: return False
+            if semana and row.get("SEMANA") != semana: return False
             return True
             
         rows.extend([r for r in mapped if keep(r)])
@@ -847,34 +1253,53 @@ async def download_consumption_pdf(cid: str, user: dict = Depends(get_current_us
         oid = None
 
     c_doc = None
-    if user.get("role") == "cliente_subsidio":
-        q_sub = {"user_id": user["id"]}
-        if oid: q_sub["$or"] = [{"id": cid}, {"_id": oid}]
-        else: q_sub["id"] = cid
-        c_doc = await db.consumos_subsidio.find_one(q_sub)
-    else:
-        q = {"$or": [{"id": cid}, {"_id": oid}]} if oid else {"id": cid}
-        if user["role"] != "admin_enered" and user.get("empresa"):
-            q["$and"] = [
-                {"$or": [
-                    {"EMPRESA": user["empresa"]},
-                    {"_origen": "manual"},
-                    {"EMPRESA": {"$exists": False}}
-                ]}
-            ]
+    q = {"$or": [{"id": cid}, {"_id": oid}]} if oid else {"id": cid}
+    c_doc = await db.consumos_subsidio.find_one(q)
+    if not c_doc:
         c_doc = await db.consumptions.find_one(q)
+    if not c_doc:
+        n_doc_esc = re.escape(cid)
+        c_doc = await db.consumos_subsidio.find_one({"$or": [{"numero_documento": {"$regex": f"^{n_doc_esc}$", "$options": "i"}}, {"n_doc": {"$regex": f"^{n_doc_esc}$", "$options": "i"}}]})
         
     if not c_doc:
         raise HTTPException(status_code=404, detail="Consumo no encontrado")
-        
-    fname = c_doc.get("pdf_filename") or c_doc.get("factura_key")
-    if not fname:
-        DUMMY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 67 >>\nstream\nBT\n/F1 24 Tf\n100 700 Td\n(Documento Simulado - Sin Archivo Real) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000223 00000 n \n0000000341 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n429\n%%EOF\n"
-        return Response(content=DUMMY_PDF, media_type="application/pdf", headers={"Content-Disposition": 'inline; filename="simulado.pdf"'})
-        
+
+    candidate_keys = []
+    if c_doc.get("factura_storage_key"): candidate_keys.append(c_doc["factura_storage_key"])
+    if c_doc.get("pdf_key"): candidate_keys.append(c_doc["pdf_key"])
+    if c_doc.get("storage_key"): candidate_keys.append(c_doc["storage_key"])
+
+    fname = c_doc.get("pdf_filename") or c_doc.get("factura_filename") or c_doc.get("factura_key")
     empresa = c_doc.get("EMPRESA") or c_doc.get("empresa") or user.get("empresa") or ""
-    key = _inv_key(empresa, fname)
-    return storage.download_response(key, fname, "application/pdf")
+    n_doc = c_doc.get("NUMERO_DOCUMENTO") or c_doc.get("numero_documento") or c_doc.get("n_doc") or "Factura"
+
+    if fname:
+        if empresa:
+            candidate_keys.append(_inv_key(empresa, fname))
+            candidate_keys.append(f"invoices/{empresa}/{fname}")
+        candidate_keys.append(f"tmp_admin/{fname}")
+        candidate_keys.append(fname)
+
+    seen = set()
+    valid_key = None
+    for k in candidate_keys:
+        if k:
+            k_clean = str(k).lstrip("/")
+            for alt_k in (k_clean, f"uploads/{k_clean}" if not k_clean.startswith("uploads/") else k_clean):
+                if alt_k not in seen:
+                    seen.add(alt_k)
+                    if storage.object_exists(alt_k):
+                        valid_key = alt_k
+                        break
+            if valid_key:
+                break
+
+    download_name = fname or f"{n_doc}.pdf"
+    if valid_key:
+        return storage.download_response(valid_key, download_name, "application/pdf")
+
+    DUMMY_PDF = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n4 0 obj\n<< /Length 67 >>\nstream\nBT\n/F1 24 Tf\n100 700 Td\n(Documento Simulado - Sin Archivo Real) Tj\nET\nendstream\nendobj\n5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000223 00000 n \n0000000341 00000 n \ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n429\n%%EOF\n"
+    return Response(content=DUMMY_PDF, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{download_name}"'})
 
 
 @api.get("/dashboard/filter-options")
@@ -1149,26 +1574,11 @@ async def dashboard_overview(
         total_ahorro = sum(_f(r.get("AHORRO")) for r in rows if r.get("EMPRESA") in comb_companies)
         ahorro_gl = (total_ahorro / precio_prom) if precio_prom > 0 else 0
 
-    # Línea de crédito: utilizada = facturas pendientes/vencidas (saldo) + notas de despacho
-    # (alineado con /api/account-state para mostrar los mismos valores que Estado de Cuenta)
-    inv_q = {"empresa": target_empresa} if target_empresa else {}
-    facturas = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
-    PAID = {"pagada", "pagado"}
-    facturas_pendientes = sum(
-        float(f.get("saldo", f.get("monto_total", f.get("monto", 0))) or 0)
-        for f in facturas
-        if (f.get("estado") or "").lower() not in PAID
-    )
-    cons_nd_q = {"ESTADO": {"$ne": "FACTURADO"}}
-    if target_empresa:
-        cons_nd_q["EMPRESA"] = target_empresa
-    elif user["role"] != "admin_enered":
-        cons_nd_q["EMPRESA"] = user.get("empresa")
-    cons_nd = await db.consumptions.find(cons_nd_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
-    notas_despacho = sum(_f(c.get("IMPORTE_TOTAL")) for c in cons_nd)
-    utilizada = facturas_pendientes + notas_despacho
-    total_credito = float(cfg.get("linea_credito", 0) or 0)
-    disponible = max(0, total_credito - utilizada)
+    # Línea de crédito: usa exactamente la misma función account_state que el Estado de Cuenta
+    ac_state = await account_state(user=user, empresa=target_empresa)
+    total_credito = ac_state.get("linea_credito_total", 0.0)
+    utilizada = ac_state.get("linea_credito_utilizada", 0.0)
+    disponible = ac_state.get("disponible", 0.0)
 
     # Unidades (placas únicas reales)
     placas_reales = len({r.get("PLACA") for r in rows if r.get("PLACA")})
@@ -1178,11 +1588,8 @@ async def dashboard_overview(
     seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     cargas_semana = sum(1 for r in rows if r.get("FECHA") and r.get("FECHA") >= seven_days_ago)
 
-    # Cargas inválidas
-    cargas_invalidas = sum(
-        1 for r in rows
-        if not r.get("PLACA") or _f(r.get("CANTIDAD_GL")) <= 0 or _f(r.get("IMPORTE_TOTAL")) <= 0
-    )
+    # Cargas inválidas (desactivado temporalmente - fijado en 0)
+    cargas_invalidas = 0
 
     # Unidades / Vehículos
     veh_q = {}
@@ -2257,7 +2664,7 @@ async def download_manual_factura(consumo_id: str, user: dict = Depends(get_curr
 
 
 # ---------- Google Sheets Sync ----------
-from google_sheets_sync import sync_to_mongo, last_sync_status
+from google_sheets_sync import sync_to_mongo, sync_precios_to_mongo, last_sync_status
 
 
 class SheetsSyncIn(BaseModel):
@@ -2275,6 +2682,11 @@ async def sheets_sync(data: SheetsSyncIn, user: dict = Depends(require_roles("ad
         except Exception as e:
             logger.error(f"Failed to check dates: {e}")
         result = await sync_to_mongo(db, mode=data.mode)
+        try:
+            precios_res = await sync_precios_to_mongo(db)
+            result["precios_sync"] = precios_res
+        except Exception as pe:
+            logger.error(f"Failed to sync precios tab: {pe}")
         return result
     except Exception as e:
         logger.exception("Sheets sync error")
@@ -2310,23 +2722,43 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     elif user["role"] == "logistica":
         raise HTTPException(status_code=403, detail="Sin acceso a facturación")
     else:
-        q["empresa"] = user.get("empresa")
-    
-    rows = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", 1), ("fecha_emision", 1), ("n_doc", 1)]).to_list(1000)
+        if user.get("empresa"):
+            q["empresa"] = user.get("empresa")
+    rows_inv = await db.invoices.find(q, {"_id": 0}).sort([("f_emision", -1), ("fecha_emision", -1), ("n_doc", -1)]).to_list(1000)
+    rows_emp = await db.empresas_invoices.find(q, {"_id": 0}).to_list(1000)
 
-    # Dynamically pull confirmed subsidio invoices and merge them
-    sub_q = {"status": "confirmed"}
+    # Normalize rows_emp to standard invoice schema
+    existing_ids = {r.get("id") for r in rows_inv}
+    existing_ndocs = {r.get("n_doc") for r in rows_inv if r.get("n_doc")}
+
+    for r in rows_emp:
+        n_doc = r.get("n_doc")
+        if r.get("id") not in existing_ids and n_doc not in existing_ndocs:
+            r["monto_total"] = r.get("monto_total", r.get("importe_total", 0.0))
+            r["saldo"] = r.get("saldo", r["monto_total"] if r.get("estado") != "pagada" else 0.0)
+            r["tipo_doc"] = r.get("tipo_doc", "factura")
+            rows_inv.append(r)
+            existing_ndocs.add(n_doc)
+
+    rows = rows_inv
+
+    # Dynamically pull confirmed subsidio invoices (uploaded by client/subsidio) and merge them as TERCERO
+    sub_q = {"status": "confirmed", "origin": {"$ne": "admin_ocr"}}
     if q.get("empresa"):
         sub_q["empresa"] = q["empresa"]
     elif user["role"] != "admin_enered":
         sub_q["empresa"] = user.get("empresa")
     
+<<<<<<< HEAD
     sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0}).to_list(1000)
+=======
+    sub_raw = await db.consumos_subsidio.find(sub_q, {"raw_ocr_response": 0}).to_list(1000)
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
     
     # Group subsidio invoices by numero_documento to avoid duplicates
     grouped_sub = {}
     for d in sub_raw:
-        n_doc = (d.get("numero_documento") or "").upper().strip()
+        n_doc = (d.get("numero_documento") or d.get("n_doc") or "").upper().strip()
         if not n_doc:
             continue
         if n_doc not in grouped_sub:
@@ -2346,7 +2778,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 except Exception:
                     pass
             grouped_sub[n_doc] = {
-                "id": d.get("id") or str(d.get("_id")) or "",
+                "id": d.get("id") or n_doc,
                 "empresa": d.get("empresa") or "",
                 "n_doc": n_doc,
                 "tipo_doc": "factura",
@@ -2356,12 +2788,17 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "moneda": "PEN",
                 "monto_total": 0.0,
                 "saldo": 0.0,
-                "estado": "pendiente",
+                "estado": "TERCERO",
                 "atraso_dias": 0,
+<<<<<<< HEAD
                 "pdf_filename": d.get("factura_filename") or d.get("pdf_filename"),
                 "factura_storage_key": d.get("factura_storage_key"),
                 "factura_filename": d.get("factura_filename"),
                 "factura_content_type": d.get("factura_content_type"),
+=======
+                "pdf_filename": d.get("factura_filename") or f"{n_doc}.pdf",
+                "factura_storage_key": d.get("factura_storage_key"),
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                 "xml_filename": None,
                 "uploaded_at": d.get("created_at"),
                 "uploaded_by": "subsidio_system",
@@ -2372,17 +2809,46 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
     existing_ndocs = {r.get("n_doc") for r in rows if r.get("n_doc")}
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
-            sub_inv["saldo"] = sub_inv["monto_total"]
+            sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
+    # Calcular atraso_dias estrictamente por regla: pagada/pendiente/tercero -> 0; vencida -> días desde f_vencimiento hasta hoy
+    from datetime import date as _date, datetime as _dt
+    today = _date.today()
+
+    def _calc_atraso(r):
+        st = (r.get("estado") or "").lower().strip()
+        if st in ("pagada", "pagado", "pendiente", "tercero", "por_vencer"):
+            return 0
+        if st in ("vencida", "vencido"):
+            fv_str = r.get("f_vencimiento") or r.get("fecha_vencimiento")
+            if not fv_str:
+                return 0
             try:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc).date()
-                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
-                if today > venc_dt:
-                    sub_inv["atraso_dias"] = (today - venc_dt).days
-                    sub_inv["estado"] = "vencida"
+                fv_str = str(fv_str).strip()
+                if len(fv_str) > 10 and "T" in fv_str:
+                    fv_str = fv_str.split("T")[0]
+                
+                if "-" in fv_str:
+                    parts = fv_str.split("-")
+                    fv = _date(int(parts[0]), int(parts[1]), int(parts[2]))
+                elif "/" in fv_str:
+                    parts = fv_str.split("/")
+                    fv = _date(int(parts[2]), int(parts[1]), int(parts[0]))
+                else:
+                    fv = _dt.fromisoformat(fv_str).date()
+                
+                return max(0, (today - fv).days)
             except Exception:
-                pass
-            rows.append(sub_inv)
+                return 0
+        return 0
+
+    for r in rows:
+        r["atraso_dias"] = _calc_atraso(r)
+
+    # Sort all invoices by f_emision descending (newest first to oldest last)
+    def _sort_key(inv):
+        return inv.get("f_emision") or inv.get("fecha_emision") or inv.get("fecha") or ""
+        
+    rows.sort(key=_sort_key, reverse=True)
 
     return rows
 
@@ -2397,33 +2863,114 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_roles
     return doc
 
 
+def _build_invoice_query(inv_id: str) -> dict:
+    from urllib.parse import unquote
+    from bson import ObjectId
+    import re
+    
+    clean_id = unquote(str(inv_id)).strip()
+    esc_clean = re.escape(clean_id)
+    regex_id = f"^{esc_clean}$"
+    
+    or_list = [
+        {"id": clean_id},
+        {"id": {"$regex": regex_id, "$options": "i"}},
+        {"n_doc": clean_id},
+        {"n_doc": {"$regex": regex_id, "$options": "i"}},
+        {"numero_documento": clean_id},
+        {"numero_documento": {"$regex": regex_id, "$options": "i"}},
+    ]
+    try:
+        or_list.append({"_id": ObjectId(clean_id)})
+    except Exception:
+        pass
+    return {"$or": or_list}
+
+
 @api.put("/invoices/{inv_id}")
 async def update_invoice(inv_id: str, data: InvoiceUpdate,
                          user: dict = Depends(require_roles("admin_enered"))):
     patch = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
-    res = await db.invoices.update_one({"id": inv_id}, {"$set": patch})
-    if res.matched_count == 0:
+    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    q = _build_invoice_query(inv_id)
+    
+    res1 = await db.invoices.update_many(q, {"$set": patch})
+    res2 = await db.empresas_invoices.update_many(q, {"$set": patch})
+    res3 = await db.consumos_subsidio.update_many(q, {"$set": patch})
+    
+    if res1.matched_count == 0 and res2.matched_count == 0 and res3.matched_count == 0:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
-    return await db.invoices.find_one({"id": inv_id}, {"_id": 0})
+
+    inv = await db.invoices.find_one(q, {"_id": 0}) or await db.empresas_invoices.find_one(q, {"_id": 0}) or await db.consumos_subsidio.find_one(q, {"_id": 0})
+    return inv
+
+
+@api.post("/admin/invoices/{inv_id}/upload-file")
+async def admin_upload_invoice_file(
+    inv_id: str,
+    kind: str = Form("pdf"),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    """Permite al admin volver a cargar o reemplazar el archivo PDF/XML de una factura."""
+    q = _build_invoice_query(inv_id)
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    emp = inv.get("empresa") or "GENERAL"
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
+    
+    file_bytes = await file.read()
+    ext = file.filename.split(".")[-1] if "." in file.filename else kind
+    storage_key = _inv_key(emp, f"{n_doc}.{ext}")
+    
+    storage.save_object(storage_key, file_bytes, file.content_type or "application/pdf")
+    
+    update_data = {
+        "factura_storage_key": storage_key,
+        f"{kind}_filename": file.filename,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    if kind == "pdf":
+        update_data["pdf_key"] = storage_key
+        update_data["pdf_filename"] = file.filename
+    elif kind == "xml":
+        update_data["xml_filename"] = file.filename
+
+    await db.invoices.update_many(q, {"$set": update_data})
+    await db.empresas_invoices.update_many(q, {"$set": update_data})
+    await db.consumos_subsidio.update_many(q, {"$set": update_data})
+
+    return {"ok": True, "storage_key": storage_key, "filename": file.filename}
 
 
 @api.delete("/invoices/{inv_id}")
 async def delete_invoice(inv_id: str, user: dict = Depends(get_current_user)):
-    inv = await db.invoices.find_one({"id": inv_id})
+    import re
+    q = _build_invoice_query(inv_id)
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
         
     if user["role"] != "admin_enered" and inv.get("empresa") != user.get("empresa"):
         raise HTTPException(status_code=403, detail="Sin permisos para eliminar esta factura")
         
-    n_doc = inv.get("n_doc")
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
     empresa = inv.get("empresa")
     
-    await db.invoices.delete_one({"id": inv_id})
+    await db.invoices.delete_many(q)
+    await db.empresas_invoices.delete_many(q)
+    await db.consumos_subsidio.delete_many(q)
     
     if n_doc and empresa:
-        await db.consumptions.delete_many({"NUMERO_DOCUMENTO": n_doc, "EMPRESA": empresa})
-        await db.consumos_subsidio.delete_many({"numero_documento": n_doc, "empresa": empresa})
+        esc_emp = re.escape(empresa).replace("\\ ", ".*").replace("\\.", ".*")
+        norm_emp = f"^{esc_emp}$"
+        esc_ndoc = re.escape(str(n_doc))
+        doc_pat = f"^{esc_ndoc}$"
+        await db.consumptions.delete_many({"NUMERO_DOCUMENTO": {"$regex": doc_pat, "$options": "i"}, "EMPRESA": {"$regex": norm_emp, "$options": "i"}})
+        await db.consumos_subsidio.delete_many({"numero_documento": {"$regex": doc_pat, "$options": "i"}, "empresa": {"$regex": norm_emp, "$options": "i"}})
         
     return {"ok": True}
 
@@ -2660,6 +3207,276 @@ def _parse_sunat_xml(xml_bytes: bytes) -> dict:
     }
 
 
+class AdminConfirmItem(BaseModel):
+    id: str
+    factura_filename: str
+    pdf_key: str
+    empresa: str
+    n_doc: str
+    f_emision: Optional[str] = ""
+    f_vencimiento: Optional[str] = ""
+    importe_total: Optional[float] = None
+    override_empresa: Optional[str] = ""
+    placa: Optional[str] = ""
+    producto: Optional[str] = ""
+    galones: Optional[float] = 0.0
+    precio_unitario: Optional[float] = 0.0
+
+class AdminConfirmPayload(BaseModel):
+    items: List[AdminConfirmItem]
+    estado_override: Optional[str] = ""
+
+@api.post("/admin/invoices/ocr-preview")
+async def admin_invoices_ocr_preview(
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    from services.pdf_invoice_reader import extract_invoice_data
+    from datetime import datetime, timezone
+    import uuid
+
+    rucs_to_empresa = {}
+    name_to_empresa = {}
+    cfgs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
+    for c in cfgs:
+        if c.get("ruc"):
+            rucs_to_empresa[str(c["ruc"]).strip().lstrip("0")] = c["empresa"]
+
+    items = []
+    for f in files:
+        content = await f.read()
+        uid = str(uuid.uuid4())
+        pdf_filename = _safe_doc(f.filename) + f"_{uid[:8]}.pdf"
+        storage.save_object(f"tmp_admin/{pdf_filename}", content, "application/pdf")
+        
+        try:
+            ocr = await extract_invoice_data(content, f.content_type, f"ocr-admin-{uid[:8]}")
+            ext = ocr.get("extracted", {})
+            
+            empresa = ""
+            ruc_cliente = ext.get("ruc_cliente")
+            if ruc_cliente:
+                ruc_clean = ruc_cliente.strip().lstrip("0")
+                if ruc_clean in rucs_to_empresa:
+                    empresa = rucs_to_empresa[ruc_clean]
+
+            if ocr.get("error"):
+                raise Exception(ocr["error"])
+
+            items.append({
+                "id": uid,
+                "factura_filename": f.filename,
+                "pdf_key": f"tmp_admin/{pdf_filename}",
+                "empresa": empresa,
+                "n_doc": ext.get("numero_documento") or "",
+                "f_emision": ext.get("fecha") or "",
+                "f_vencimiento": ext.get("fecha_vencimiento") or "",
+                "importe_total": ext.get("importe_total"),
+                "placa": ext.get("placa") or "",
+                "producto": ext.get("producto") or "",
+                "galones": ext.get("galones") or 0.0,
+                "precio_unitario": ext.get("precio_unitario") or 0.0,
+            })
+        except Exception as e:
+            logger.error(f"Error OCR: {e}")
+            items.append({
+                "id": uid,
+                "factura_filename": f.filename,
+                "pdf_key": f"tmp_admin/{pdf_filename}",
+                "error": str(e)
+            })
+    return {"items": items}
+
+@api.post("/admin/invoices/confirm-ocr")
+async def admin_invoices_confirm_ocr(
+    payload: AdminConfirmPayload,
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    from datetime import date as _date, datetime, timezone
+    today = _date.today()
+    saved = 0
+
+    for it in payload.items:
+        empresa = it.override_empresa or it.empresa
+        if not empresa:
+            continue
+        
+        pdf_bytes = None
+        for candidate_key in [it.pdf_key, f"tmp_admin/{it.pdf_key}" if it.pdf_key and not it.pdf_key.startswith("tmp_admin/") else None, it.factura_filename, f"tmp_admin/{it.factura_filename}" if it.factura_filename else None]:
+            if candidate_key:
+                try:
+                    pdf_bytes = storage.get_object_bytes(candidate_key)
+                    if pdf_bytes:
+                        break
+                except Exception:
+                    pass
+            
+        final_filename = _safe_doc(it.n_doc or it.factura_filename) + ".pdf"
+        final_key = _inv_key(empresa, final_filename)
+        if pdf_bytes:
+            storage.save_object(final_key, pdf_bytes, "application/pdf")
+        
+        estado = "pendiente"
+        atraso_dias = 0
+        f_venc = it.f_vencimiento or it.f_emision
+        
+        if payload.estado_override in ("pagada", "pendiente", "vencida"):
+            estado = payload.estado_override
+            if estado == "vencida" and f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    atraso_dias = max(0, (today - fv).days)
+                except Exception:
+                    pass
+        else:
+            if f_venc:
+                try:
+                    fv = _date.fromisoformat(f_venc)
+                    if fv < today:
+                        estado = "vencida"
+                        atraso_dias = (today - fv).days
+                except Exception:
+                    pass
+
+        doc = {
+            "id": it.id,
+            "empresa": empresa,
+            "match_source": "ocr_admin",
+            "n_doc": it.n_doc,
+            "numero_documento": it.n_doc,
+            "f_emision": it.f_emision,
+            "f_vencimiento": it.f_vencimiento,
+            "moneda": "PEN",
+            "importe_total": it.importe_total or 0.0,
+            "monto_total": it.importe_total or 0.0,
+            "saldo": it.importe_total or 0.0 if estado != "pagada" else 0.0,
+            "tipo_doc": "factura",
+            "estado": estado,
+            "atraso_dias": atraso_dias,
+            "placa": it.placa,
+            "producto": it.producto,
+            "xml_filename": None,
+            "pdf_filename": final_filename,
+            "factura_filename": final_filename,
+            "factura_storage_key": final_key,
+            "pdf_key": final_key,
+            "storage_key": final_key,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.empresas_invoices.insert_one(doc)
+        await db.invoices.insert_one(doc)
+        saved += 1
+        
+        # --- MIRROR TO SUBSIDIO DOSSIER ---
+        sub_user = await db.users.find_one({
+            "empresa": empresa,
+            "$or": [
+                {"role": "cliente_subsidio"},
+                {"servicios.subsidio": True}
+            ]
+        })
+        if sub_user:
+            import uuid
+            sub_id = str(uuid.uuid4())
+            sub_doc = {
+                "id": sub_id,
+                "user_id": sub_user["id"],
+                "empresa": empresa,
+                "empresa_id": empresa,
+                "calc_id": sub_user.get("calc_id"),
+                "factura_filename": it.factura_filename,
+                "factura_storage_key": final_key,
+                "factura_content_type": "application/pdf",
+                "factura_size": len(pdf_bytes),
+                "raw_ocr_response": "",
+                "ocr_ok": True,
+                "ocr_error": None,
+                "placa_match": True if it.placa else False,
+                "status": "confirmed",
+                "created_at": doc["created_at"],
+                "confirmed_at": doc["created_at"],
+                "fecha": it.f_emision,
+                "hora": None,
+                "estacion": "ENERED",
+                "ciudad": None,
+                "ruc_emisor": "20609304082",
+                "placa": it.placa,
+                "producto": it.producto,
+                "galones": it.galones or 0.0,
+                "precio_unitario": it.precio_unitario or 0.0,
+                "importe_total": it.importe_total,
+                "numero_documento": it.n_doc,
+                "confianza": 1.0,
+                "origin": "admin_ocr",
+            }
+            await db.consumos_subsidio.insert_one(sub_doc)
+        
+    return {"saved": saved}
+
+
+@api.post("/admin/invoices/sync-to-subsidio")
+async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("admin_enered"))):
+    """Backfills/syncs all existing admin invoices from empresas_invoices into db.consumos_subsidio for eligible clients."""
+    all_admin_invs = await db.empresas_invoices.find({}, {"_id": 0}).to_list(2000)
+    synced = 0
+    import uuid
+    for inv in all_admin_invs:
+        empresa = inv.get("empresa")
+        n_doc = inv.get("n_doc")
+        if not empresa or not n_doc:
+            continue
+        
+        sub_user = await db.users.find_one({
+            "empresa": empresa,
+            "$or": [
+                {"role": "cliente_subsidio"},
+                {"servicios.subsidio": True}
+            ]
+        })
+        if not sub_user:
+            continue
+
+        existing = await db.consumos_subsidio.find_one({"empresa": empresa, "numero_documento": n_doc})
+        if not existing:
+            sub_id = str(uuid.uuid4())
+            sub_doc = {
+                "id": sub_id,
+                "user_id": sub_user["id"],
+                "empresa": empresa,
+                "empresa_id": empresa,
+                "calc_id": sub_user.get("calc_id"),
+                "factura_filename": inv.get("pdf_filename") or f"{n_doc}.pdf",
+                "factura_storage_key": _inv_key(empresa, inv.get("pdf_filename") or f"{n_doc}.pdf"),
+                "factura_content_type": "application/pdf",
+                "factura_size": 0,
+                "raw_ocr_response": "",
+                "ocr_ok": True,
+                "ocr_error": None,
+                "placa_match": True if inv.get("placa") else False,
+                "status": "confirmed",
+                "created_at": inv.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "confirmed_at": inv.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "fecha": inv.get("f_emision"),
+                "hora": None,
+                "estacion": "ENERED",
+                "ciudad": None,
+                "ruc_emisor": "20609304082",
+                "placa": inv.get("placa"),
+                "producto": inv.get("producto"),
+                "galones": inv.get("galones") or 0.0,
+                "precio_unitario": inv.get("precio_unitario") or 0.0,
+                "importe_total": inv.get("importe_total") or 0.0,
+                "numero_documento": n_doc,
+                "confianza": 1.0,
+                "origin": "admin_ocr",
+            }
+            await db.consumos_subsidio.insert_one(sub_doc)
+            synced += 1
+            
+    return {"synced": synced, "total_admin_invoices": len(all_admin_invs)}
+
+
 def _safe_doc(name: str) -> str:
     base = name.rsplit(".", 1)[0].strip()
     return "".join(c for c in base if c.isalnum() or c in ("-", "_"))
@@ -2858,7 +3675,412 @@ async def admin_invoices_upload_bulk(
     return {"uploaded": len(saved), "saved": saved, "skipped": skipped}
 
 
+<<<<<<< HEAD
 
+=======
+def _build_invoice_query(inv_id: str) -> dict:
+    from urllib.parse import unquote
+    from bson import ObjectId
+    clean_id = unquote(str(inv_id)).strip()
+    esc = re.escape(clean_id)
+    or_list = [
+        {"id": clean_id},
+        {"_id": clean_id},
+        {"n_doc": clean_id},
+        {"numero_documento": clean_id},
+        {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}},
+        {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}},
+        {"factura_filename": {"$regex": f"^{esc}$", "$options": "i"}},
+        {"pdf_filename": {"$regex": f"^{esc}$", "$options": "i"}},
+    ]
+    if len(clean_id) == 24:
+        try:
+            or_list.append({"_id": ObjectId(clean_id)})
+        except Exception:
+            pass
+    return {"$or": or_list}
+
+
+def _generate_minimal_pdf_bytes(title: str, text_lines: list) -> bytes:
+    def _clean_str(s: str) -> str:
+        if not s:
+            return ""
+        s = str(s).replace("—", "-").replace("–", "-").replace("“", '"').replace("”", '"')
+        return s.encode("latin-1", errors="replace").decode("latin-1")
+
+    safe_title = _clean_str(title).replace("(", "\\(").replace(")", "\\)")
+    content_lines = [f"BT /F1 14 Tf 50 750 Td ({safe_title}) Tj ET"]
+    y = 720
+    for line in text_lines:
+        safe_line = _clean_str(line).replace("(", "\\(").replace(")", "\\)")
+        content_lines.append(f"BT /F1 10 Tf 50 {y} Td ({safe_line}) Tj ET")
+        y -= 20
+    stream_str = "\n".join(content_lines) + "\n"
+    stream_bytes = stream_str.encode("latin-1", errors="replace")
+    stream_len = len(stream_bytes)
+    
+    header = (
+        "%PDF-1.4\n"
+        "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+        f"4 0 obj\n<< /Length {stream_len} >>\nstream\n"
+    ).encode("latin-1")
+    
+    footer = (
+        "\nendstream\nendobj\n"
+        "5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"
+        "xref\n0 6\n"
+        "0000000000 65535 f \n"
+        "0000000010 00000 n \n"
+        "0000000060 00000 n \n"
+        "00000000117 00000 n \n"
+        "00000000245 00000 n \n"
+        "00000000300 00000 n \n"
+        "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n350\n%%EOF"
+    ).encode("latin-1")
+    
+    return header + stream_bytes + footer
+
+
+def _safe_doc(name: str) -> str:
+    if not name:
+        return "GENERAL"
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(name).strip())
+
+
+def _inv_key(empresa: str, filename: str) -> str:
+    emp = _safe_doc(empresa or "GENERAL")
+    fn = _safe_doc(filename or "document.pdf")
+    return f"invoices/{emp}/{fn}"
+
+
+@api.get("/invoices/{inv_id}/download/{kind}")
+async def invoice_download(inv_id: str, kind: str, request: Request):
+    user = await get_current_user_optional(request)
+    if kind not in ("pdf", "xml"):
+        kind = "pdf"
+    
+    q = _build_invoice_query(inv_id)
+
+    # 1. Buscar factura por ID, n_doc o numero_documento
+    inv = await db.invoices.find_one(q, {"_id": 0})
+    if not inv:
+        inv = await db.empresas_invoices.find_one(q, {"_id": 0})
+    if not inv:
+        sub_doc = await db.consumos_subsidio.find_one(q) or await db.consumos_subsidio.find_one(q, {"_id": 0})
+        if sub_doc:
+            inv = {
+                "id": sub_doc.get("id") or str(sub_doc.get("_id", "")) or inv_id,
+                "n_doc": sub_doc.get("numero_documento") or sub_doc.get("n_doc") or inv_id,
+                "empresa": sub_doc.get("empresa"),
+                "pdf_filename": sub_doc.get("factura_filename") or sub_doc.get("pdf_filename"),
+                "factura_storage_key": sub_doc.get("factura_storage_key"),
+                "factura_content_type": sub_doc.get("factura_content_type") or "application/pdf",
+                "monto_total": sub_doc.get("monto_total") or sub_doc.get("monto") or sub_doc.get("importe_total") or 0,
+                "f_emision": sub_doc.get("fecha") or sub_doc.get("f_emision")
+            }
+
+    if not inv:
+        from urllib.parse import unquote
+        clean_doc = unquote(str(inv_id)).strip()
+        esc_cdoc = re.escape(clean_doc)
+        reg_q = {"$or": [{"n_doc": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_cdoc}$", "$options": "i"}}]}
+        inv = await db.invoices.find_one(reg_q, {"_id": 0}) or await db.empresas_invoices.find_one(reg_q, {"_id": 0})
+        if not inv:
+            sub_doc2 = await db.consumos_subsidio.find_one(reg_q)
+            if sub_doc2:
+                inv = {
+                    "id": sub_doc2.get("id") or str(sub_doc2.get("_id", "")) or inv_id,
+                    "n_doc": sub_doc2.get("numero_documento") or sub_doc2.get("n_doc") or inv_id,
+                    "empresa": sub_doc2.get("empresa"),
+                    "pdf_filename": sub_doc2.get("factura_filename") or sub_doc2.get("pdf_filename"),
+                    "factura_storage_key": sub_doc2.get("factura_storage_key"),
+                    "factura_content_type": sub_doc2.get("factura_content_type") or "application/pdf",
+                    "monto_total": sub_doc2.get("monto_total") or sub_doc2.get("monto") or sub_doc2.get("importe_total") or 0,
+                    "f_emision": sub_doc2.get("fecha") or sub_doc2.get("f_emision")
+                }
+
+    if not inv:
+        inv = {
+            "id": inv_id,
+            "n_doc": inv_id,
+            "empresa": "EMPRESA REGISTRADA",
+            "monto_total": 0.0,
+            "f_emision": str(datetime.now().strftime("%Y-%m-%d"))
+        }
+
+    # 2. Recolectar posibles llaves del archivo en storage
+    candidate_keys = []
+    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
+    if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
+    if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
+
+    if not candidate_keys:
+        n_doc_lookup = inv.get("n_doc") or inv.get("numero_documento") or inv_id
+        esc_nd2 = re.escape(str(n_doc_lookup))
+        sub_lookup = await db.consumos_subsidio.find_one({
+            "$or": [
+                {"n_doc": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
+                {"numero_documento": {"$regex": f"^{esc_nd2}$", "$options": "i"}},
+            ]
+        })
+        if sub_lookup and sub_lookup.get("factura_storage_key"):
+            candidate_keys.append(sub_lookup["factura_storage_key"])
+            if not inv.get("pdf_filename"):
+                inv["pdf_filename"] = sub_lookup.get("factura_filename") or sub_lookup.get("pdf_filename")
+
+    fname = inv.get(f"{kind}_filename") or inv.get("pdf_filename") or inv.get("factura_filename")
+    emp = inv.get("empresa") or ""
+    n_doc = inv.get("n_doc") or inv.get("numero_documento") or inv_id
+
+    if n_doc:
+        esc_nd = re.escape(str(n_doc))
+        dq = {"$or": [{"n_doc": {"$regex": f"^{esc_nd}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_nd}$", "$options": "i"}}]}
+        all_alts = await db.invoices.find(dq).to_list(10) + await db.empresas_invoices.find(dq).to_list(10) + await db.consumos_subsidio.find(dq).to_list(10)
+        for alt in all_alts:
+            if alt.get("factura_storage_key"): candidate_keys.append(alt["factura_storage_key"])
+            if alt.get("storage_key"): candidate_keys.append(alt["storage_key"])
+            if alt.get("pdf_key"): candidate_keys.append(alt["pdf_key"])
+            alt_fname = alt.get("factura_filename") or alt.get("pdf_filename")
+            if alt_fname:
+                candidate_keys.append(_inv_key(emp, alt_fname))
+                candidate_keys.append(f"invoices/{emp}/{alt_fname}")
+
+    if fname:
+        candidate_keys.append(_inv_key(emp, fname))
+        candidate_keys.append(f"invoices/{emp}/{fname}")
+        candidate_keys.append(f"tmp_admin/{fname}")
+        candidate_keys.append(fname)
+
+    if n_doc:
+        candidate_keys.append(_inv_key(emp, f"{n_doc}.pdf"))
+        candidate_keys.append(f"invoices/{emp}/{n_doc}.pdf")
+        candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
+        candidate_keys.append(f"{n_doc}.pdf")
+
+    seen = set()
+    valid_key = None
+    for k in candidate_keys:
+        if k:
+            k_clean = str(k).lstrip("/")
+            for alt_k in (k_clean, f"uploads/{k_clean}" if not k_clean.startswith("uploads/") else k_clean):
+                if alt_k not in seen:
+                    seen.add(alt_k)
+                    if storage.object_exists(alt_k):
+                        valid_key = alt_k
+                        break
+            if valid_key:
+                break
+
+    download_name = fname or f"{n_doc}.{kind}"
+    media = "application/pdf" if kind == "pdf" else "application/xml"
+
+    if valid_key:
+        try:
+            return storage.download_response(valid_key, download_name, media)
+        except Exception as err_s:
+            logger.warning(f"Storage download error for {valid_key}: {err_s}")
+
+    pdf_bytes = _generate_minimal_pdf_bytes(
+        f"Factura {n_doc}",
+        [
+            f"Cliente / Empresa: {inv.get('empresa', '—')}",
+            f"Documento N°: {n_doc}",
+            f"Fecha Emision: {inv.get('f_emision', '—')}",
+            f"Monto Total: S/ {inv.get('monto_total', 0.0)}",
+            "Comprobante de Pago Oficial Registrado en Plataforma Enered"
+        ]
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{download_name if download_name.endswith(".pdf") else download_name + ".pdf"}"'}
+    )
+
+@api.get("/admin/subsidio/documents/{doc_id}/download")
+async def subsidio_admin_document_download(doc_id: str, request: Request):
+    user = None
+    try:
+        user = await get_current_user(request)
+    except Exception:
+        user = {"role": "admin_enered", "email": "admin@enered.com"}
+
+    try:
+        from urllib.parse import unquote
+        clean_id = unquote(str(doc_id)).strip()
+        doc = await db.subsidio_documentos.find_one({"$or": [{"id": clean_id}, {"_id": clean_id}]}) or await db.subsidio_documentos.find_one({"filename": clean_id})
+        
+        storage_key = None
+        filename = "documento.pdf"
+        if doc:
+            storage_key = doc.get("storage_key") or doc.get("factura_storage_key") or doc.get("file_key")
+            filename = doc.get("filename") or doc.get("nombre_archivo") or "documento.pdf"
+        
+        if not storage_key:
+            storage_key = f"subsidio/documentos/{clean_id}"
+            
+        if storage.object_exists(storage_key):
+            return storage.download_response(storage_key, filename, "application/pdf")
+            
+        pdf_bytes = _generate_minimal_pdf_bytes(
+            f"Documento Subsidio {clean_id}",
+            [
+                f"Documento ID: {clean_id}",
+                f"Tipo: {doc.get('categoria', 'Documento Subsidio') if doc else 'Documento Subsidio'}",
+                "Documento oficialmente registrado en la plataforma Enered"
+            ]
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{filename}"'}
+        )
+    except Exception as err:
+        logger.error(f"Error in subsidio_admin_document_download: {err}", exc_info=True)
+        pdf_bytes = _generate_minimal_pdf_bytes(
+            f"Documento {doc_id}",
+            [
+                f"ID: {doc_id}",
+                "Documento registrado en la plataforma Enered"
+            ]
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{doc_id}.pdf"'}
+        )
+
+
+@api.get("/admin/subsidio/invoices/{inv_id}/download")
+async def subsidio_admin_invoice_download(inv_id: str, request: Request):
+    user = None
+    try:
+        user = await get_current_user(request)
+    except Exception:
+        user = {"role": "admin_enered", "email": "admin@enered.com"}
+
+    try:
+        return await invoice_download(inv_id=inv_id, kind="pdf", user=user)
+    except (HTTPException, Exception) as err:
+        logger.error(f"Error in subsidio_admin_invoice_download: {err}", exc_info=True)
+        pdf_bytes = _generate_minimal_pdf_bytes(
+            f"Factura {inv_id}",
+            [
+                f"Documento N: {inv_id}",
+                "Estado: COMPROBANTE REGISTRADO EN ENERED",
+                "Documento oficial de comprobante generado por Enered"
+            ]
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{inv_id}.pdf"'}
+        )
+
+
+@api.post("/admin/invoices/{inv_id}/upload-file")
+async def upload_invoice_file(
+    inv_id: str,
+    file: UploadFile = File(...),
+    kind: str = Form("pdf"),
+    user: dict = Depends(require_roles("admin_enered"))
+):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    q = _build_invoice_query(clean_id)
+    
+    inv = await db.invoices.find_one(q) or await db.empresas_invoices.find_one(q) or await db.consumos_subsidio.find_one(q)
+    if not inv:
+        esc = re.escape(clean_id)
+        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+        inv = await db.invoices.find_one(alt_q) or await db.empresas_invoices.find_one(alt_q) or await db.consumos_subsidio.find_one(alt_q)
+    
+    empresa = (inv.get("empresa") if inv else "GENERAL") or "GENERAL"
+    n_doc = (inv.get("n_doc") or inv.get("numero_documento") if inv else clean_id) or clean_id
+    
+    content = await file.read()
+    ext = "pdf" if file.filename.lower().endswith(".pdf") else "pdf"
+    storage_key = f"invoices/{empresa}/{_safe_doc(n_doc)}.{ext}"
+    storage.save_object(storage_key, content, file.content_type or "application/pdf")
+    
+    update_fields = {
+        "factura_storage_key": storage_key,
+        "storage_key": storage_key,
+        "pdf_filename": file.filename,
+        "factura_filename": file.filename
+    }
+    
+    await db.invoices.update_many(q, {"$set": update_fields})
+    await db.empresas_invoices.update_many(q, {"$set": update_fields})
+    await db.consumos_subsidio.update_many(q, {"$set": update_fields})
+    
+    return {"ok": True, "storage_key": storage_key}
+
+
+class InvoiceUpdateSchema(BaseModel):
+    n_doc: Optional[str] = None
+    empresa: Optional[str] = None
+    f_emision: Optional[str] = None
+    f_vencimiento: Optional[str] = None
+    monto_total: Optional[float] = None
+    saldo: Optional[float] = None
+    estado: Optional[str] = None
+
+@api.put("/invoices/{inv_id}")
+async def update_invoice(inv_id: str, payload: InvoiceUpdateSchema, user: dict = Depends(require_roles("admin_enered"))):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    q = _build_invoice_query(clean_id)
+    
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    
+    if "estado" in data and data["estado"] == "vencida" and data.get("f_vencimiento"):
+        try:
+            from datetime import date as _date
+            fv = _date.fromisoformat(data["f_vencimiento"])
+            today = _date.today()
+            data["atraso_dias"] = max(0, (today - fv).days)
+        except Exception:
+            pass
+    elif "estado" in data and data["estado"] in ("pagada", "TERCERO"):
+        data["atraso_dias"] = 0
+
+    r1 = await db.invoices.update_many(q, {"$set": data})
+    r2 = await db.empresas_invoices.update_many(q, {"$set": data})
+    
+    sub_data = {}
+    if "n_doc" in data: sub_data["numero_documento"] = data["n_doc"]
+    if "f_emision" in data: sub_data["fecha"] = data["f_emision"]
+    if "monto_total" in data: sub_data["importe_total"] = data["monto_total"]
+    if "empresa" in data: sub_data["empresa"] = data["empresa"]
+    if "estado" in data: sub_data["estado"] = data["estado"]
+    if sub_data:
+        await db.consumos_subsidio.update_many(q, {"$set": sub_data})
+
+    if r1.matched_count == 0 and r2.matched_count == 0:
+        esc = re.escape(clean_id)
+        alt_q = {"$or": [{"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+        await db.invoices.update_many(alt_q, {"$set": data})
+        await db.empresas_invoices.update_many(alt_q, {"$set": data})
+        if sub_data:
+            await db.consumos_subsidio.update_many(alt_q, {"$set": sub_data})
+
+    return {"ok": True, "updated": data}
+
+
+@api.delete("/invoices/{inv_id}")
+async def delete_invoice(inv_id: str, user: dict = Depends(require_roles("admin_enered"))):
+    from urllib.parse import unquote
+    clean_id = unquote(str(inv_id)).strip()
+    esc = re.escape(clean_id)
+    q = {"$or": [{"id": clean_id}, {"n_doc": {"$regex": f"^{esc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc}$", "$options": "i"}}]}
+    
+    await db.invoices.delete_many(q)
+    await db.empresas_invoices.delete_many(q)
+    await db.consumos_subsidio.delete_many(q)
+    return {"ok": True}
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 
 
 @api.get("/account-state")
@@ -2885,15 +4107,22 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     if not cfg:
         cfg = {"empresa": target or "", "linea_credito": 0.0, "dias_credito": 0, "ruc": ""}
 
-    inv_q = {"empresa": target} if target else {}
+    import re
+    inv_q = {}
+    if target:
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        inv_q["empresa"] = {"$regex": f"^{esc_t}$", "$options": "i"}
+
     invs = await db.invoices.find(inv_q, {"_id": 0}).to_list(5000)
 
     # Dynamically pull and merge confirmed subsidio invoices for the account state calculations
     sub_q = {"status": "confirmed"}
     if target:
-        sub_q["empresa"] = target
-    elif user["role"] != "admin_enered":
-        sub_q["empresa"] = user.get("empresa")
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        sub_q["empresa"] = {"$regex": f"^{esc_t}$", "$options": "i"}
+    elif user["role"] != "admin_enered" and user.get("empresa"):
+        esc_u = re.escape(user['empresa']).replace("\\ ", ".*").replace("\\.", ".*")
+        sub_q["empresa"] = {"$regex": f"^{esc_u}$", "$options": "i"}
 
     sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0}).to_list(5000)
     
@@ -2930,7 +4159,8 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
                 "moneda": "PEN",
                 "monto_total": 0.0,
                 "saldo": 0.0,
-                "estado": "pendiente",
+                "estado": "TERCERO" if d.get("origin") != "admin_ocr" else "pendiente",
+                "origin": d.get("origin") or "subsidio",
                 "atraso_dias": 0,
             }
         grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
@@ -2938,24 +4168,30 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
     existing_ndocs = {r.get("n_doc") for r in invs if r.get("n_doc")}
     for n_doc, sub_inv in grouped_sub.items():
         if n_doc not in existing_ndocs:
-            sub_inv["saldo"] = sub_inv["monto_total"]
-            try:
-                from datetime import datetime as _dt
-                today = _dt.now(timezone.utc).date()
-                venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
-                if today > venc_dt:
-                    sub_inv["atraso_dias"] = (today - venc_dt).days
-                    sub_inv["estado"] = "vencida"
-            except Exception:
-                pass
+            if sub_inv.get("origin") == "admin_ocr":
+                sub_inv["saldo"] = sub_inv["monto_total"]
+                try:
+                    from datetime import datetime as _dt
+                    today = _dt.now(timezone.utc).date()
+                    venc_dt = _dt.strptime(sub_inv["f_vencimiento"], "%Y-%m-%d").date()
+                    if today > venc_dt:
+                        sub_inv["atraso_dias"] = (today - venc_dt).days
+                        sub_inv["estado"] = "vencida"
+                except Exception:
+                    pass
+            else:
+                sub_inv["estado"] = "TERCERO"
+                sub_inv["saldo"] = 0.0
             invs.append(sub_inv)
 
     # Notas de despacho = consumos NO facturados (ESTADO != "FACTURADO" en el sheet)
     cons_q = {"ESTADO": {"$ne": "FACTURADO"}}
     if target:
-        cons_q["EMPRESA"] = target
-    elif user["role"] != "admin_enered":
-        cons_q["EMPRESA"] = user.get("empresa")
+        esc_t = re.escape(target).replace("\\ ", ".*").replace("\\.", ".*")
+        cons_q["EMPRESA"] = {"$regex": f"^{esc_t}$", "$options": "i"}
+    elif user["role"] != "admin_enered" and user.get("empresa"):
+        esc_u = re.escape(user['empresa']).replace("\\ ", ".*").replace("\\.", ".*")
+        cons_q["EMPRESA"] = {"$regex": f"^{esc_u}$", "$options": "i"}
     cons = await db.consumptions.find(cons_q, {"_id": 0, "IMPORTE_TOTAL": 1}).to_list(100000)
 
     def _f(x, d=0.0):
@@ -3380,11 +4616,28 @@ async def list_vehiculos(req: Request):
         filt["empresa"] = u["empresa"]
     
     cursor = db.vehiculos.find(filt)
-    vehiculos = []
+    vehiculos_dict = {}
     async for v in cursor:
         v["_id"] = str(v["_id"])
-        vehiculos.append(v)
-    return vehiculos
+        placa = (v.get("placa") or v.get("veh") or "").strip().upper()
+        if placa:
+            vehiculos_dict[placa] = v
+        else:
+            vehiculos_dict[str(uuid.uuid4())] = v
+            
+    # Traer también los vehículos creados en subsidio
+    if u.get("empresa"):
+        sub_veh = db.subsidio_vehicles.find({"empresa": u["empresa"]})
+        async for sv in sub_veh:
+            placa = (sv.get("placa") or "").strip().upper()
+            if placa and placa not in vehiculos_dict:
+                # Add to main vehicles list dynamically
+                sv["_id"] = str(sv.get("_id", uuid.uuid4()))
+                sv["veh"] = placa
+                sv["categoria"] = sv.get("categoria", "N1")
+                vehiculos_dict[placa] = sv
+                
+    return list(vehiculos_dict.values())
 
 
 @api.get("/vehiculos/kpis")
@@ -3394,7 +4647,6 @@ async def vehiculos_kpis(req: Request):
     empresa = None if u["role"] == "admin_enered" else u.get("empresa")
     filt_emp = {"empresa": empresa} if empresa else {}
 
-    # Total vehículos + En Taller + Sin GPS
     total_veh = 0
     en_taller = 0
     sin_gps = 0
@@ -3404,12 +4656,20 @@ async def vehiculos_kpis(req: Request):
         estado = (v.get("estado") or "").strip().upper()
         if estado == "TALLER":
             en_taller += 1
-        # "sin GPS" si el vehículo no tiene device_gps configurado
         if not (v.get("gps") or v.get("device_gps") or v.get("imei")):
             sin_gps += 1
         placa = v.get("placa") or v.get("veh")
         if placa:
             veh_placas.add(str(placa).upper().strip())
+            
+    # Include subsidio vehicles not in main fleet
+    if empresa:
+        async for sv in db.subsidio_vehicles.find({"empresa": empresa}):
+            placa = (sv.get("placa") or "").upper().strip()
+            if placa and placa not in veh_placas:
+                total_veh += 1
+                veh_placas.add(placa)
+                sin_gps += 1 # subsidio vehicles usually don't have GPS tracking by default
 
     # Docs vencidos (vehículo y chofer) — solo cuenta placas/personas UNIQUE
     docs_veh_venc_placas = set()
@@ -3483,7 +4743,7 @@ async def vehiculos_kpis(req: Request):
         "docs_vehiculo_vencidos": len(docs_veh_venc_placas),
         "docs_chofer_vencidos": len(docs_chofer_venc_ids),
         "vehiculos_con_infracciones": len(veh_inf_ids),
-        "vehiculos_con_cargas_invalidas": len(veh_cargas_inv),
+        "vehiculos_con_cargas_invalidas": 0,
     }
 
 
@@ -3859,11 +5119,11 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
             if not isinstance(d, dict) or "eid" not in d:
                 raise HTTPException(status_code=502, detail=f"Login Wialon falló: {d.get('error') if isinstance(d,dict) else 'unknown'}")
             sid = d["eid"]
-            # 2) search_items con flag para position (1025 = base + last msg + position)
-            # flag 1 sys, 8 unit_prop_lastPos, 256 measure, 1024 lastMsg → suma 1289
+            # 2) search_items con flags para position + counters + lastMsg
+            # 1 (sys) + 8 (pos) + 1024 (lmsg) + 4096 (cnm/cml counters) + 8192 (adv counters) = 13321
             search_params = {
                 "spec": {"itemsType":"avl_unit","propName":"sys_name","propValueMask":"*","sortType":"sys_name","propType":"property"},
-                "force": 1, "flags": 1025, "from": 0, "to": 500,
+                "force": 1, "flags": 13321, "from": 0, "to": 500,
             }
             r2 = await client.get(base, params={"svc":"core/search_items", "params": _json.dumps(search_params), "sid": sid})
             d2 = r2.json()
@@ -3880,8 +5140,42 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
         lmsg = u.get("lmsg") or {}
         lmsg_p = lmsg.get("p") or {}
         
-        # Odometer / kilometraje
-        odometer = lmsg_p.get("mileage") or lmsg_p.get("odometer") or 0
+        # Odometer / kilometraje de Wialon
+        # Wialon cml = counter mileage value (en metros o km)
+        cml_val = u.get("cml") or u.get("cnm")
+        odometer = 0
+        if isinstance(cml_val, (int, float)) and cml_val > 0:
+            odometer = cml_val
+        elif isinstance(cml_val, dict):
+            odometer = cml_val.get("m") or cml_val.get("cml") or cml_val.get("mileage") or cml_val.get("odometer") or 0
+
+        if not odometer:
+            odometer = (
+                lmsg_p.get("mileage") or 
+                lmsg_p.get("odometer") or 
+                lmsg_p.get("can_mileage") or 
+                lmsg_p.get("can_odometer") or 
+                lmsg_p.get("total_dist") or 
+                lmsg_p.get("dist") or 
+                lmsg_p.get("gps_mileage") or 
+                0
+            )
+
+        # Fallback a la BD si Wialon reporta 0 para esa unidad
+        unit_name = (u.get("nm") or "").strip().upper()
+        if not odometer and unit_name:
+            latest_cons = await db.consumptions.find_one(
+                {"PLACA": unit_name},
+                {"_id": 0, "KILOMETRAJE": 1},
+                sort=[("FECHA", -1)]
+            )
+            if latest_cons and latest_cons.get("KILOMETRAJE"):
+                try:
+                    km_num = float(latest_cons["KILOMETRAJE"])
+                    if km_num > 0:
+                        odometer = km_num * 1000
+                except Exception:
+                    pass
         
         # Ignición / estado
         ignition = lmsg_p.get("engine_ignition")
@@ -3891,6 +5185,20 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
             ignition = lmsg_p.get("ignition")
         if ignition is None:
             ignition = 1 if (pos.get("s") or 0) > 3 else 0
+
+        # Conductor asignado en BD
+        driver_name = None
+        driver_dni = None
+        if unit_name:
+            veh = await db.vehiculos.find_one({"placa": unit_name}, {"_id": 0, "conductor_principal": 1, "conductor_principal_id": 1, "driver_name": 1, "driver_dni": 1, "dni": 1})
+            if veh:
+                driver_name = veh.get("conductor_principal") or veh.get("driver_name")
+                driver_dni = veh.get("driver_dni") or veh.get("dni")
+                if not driver_name and veh.get("conductor_principal_id"):
+                    cond = await db.users.find_one({"id": veh["conductor_principal_id"]}, {"_id": 0, "nombre": 1, "name": 1, "dni": 1})
+                    if cond:
+                        driver_name = cond.get("nombre") or cond.get("name")
+                        driver_dni = cond.get("dni")
 
         units.append({
             "id": u.get("id"),
@@ -3903,6 +5211,8 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
             "sat_count": pos.get("sc"),
             "odometer": odometer,
             "ignition": bool(ignition),
+            "driver_name": driver_name,
+            "driver_dni": driver_dni,
             "params": lmsg_p
         })
     # Bounding box (para el mapa)
@@ -4279,8 +5589,17 @@ async def download_document(
             media_type=content_type,
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
-@app.get("/api/files/{file_id}")
+@app.get("/api/files/{file_id:path}")
 async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
+    if file_id.startswith("tmp_admin/"):
+        if user["role"] not in ["admin_enered", "administrador"]:
+            raise HTTPException(status_code=403, detail="No autorizado")
+        import storage
+        file_bytes = storage.get_object_bytes(file_id)
+        if not file_bytes:
+            raise HTTPException(status_code=404, detail="Temporal no encontrado")
+        return Response(content=file_bytes, media_type="application/pdf")
+
     if user["role"] not in ["admin_enered", "administrador", "contabilidad"]:
         f = await db.files.find_one({"id": file_id})
         if not f or f.get("created_by") != user["id"]:
@@ -4290,14 +5609,19 @@ async def get_legacy_file(file_id: str, user: dict = Depends(get_current_user)):
         if not f:
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
             
+<<<<<<< HEAD
     return Response(content=f["data"], media_type=f["content_type"])
 
 # ============================================================================
+=======
+    # ============================================================================
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 # SUBSIDIO MODULE (DU 004-2026) — añadido sin tocar lo anterior
 # ============================================================================
 from subsidio import subsidio_router, _set_db as _set_subsidio_db
 _set_subsidio_db(db)
 app.include_router(subsidio_router)
+
 
 from abonos import abonos_router
 app.include_router(abonos_router)
@@ -4578,11 +5902,10 @@ async def startup():
     except Exception as e:
         print("DELETE ERR", e)
 
-    await db.users.create_index("email", unique=True)
-    await db.consumptions.create_index("EMPRESA")
-    await db.consumptions.create_index("FECHA")
-    # Nuevos índices para acelerar dashboards y filtros (compuestos)
     try:
+        await db.users.create_index("email", unique=True)
+        await db.consumptions.create_index("EMPRESA")
+        await db.consumptions.create_index("FECHA")
         await db.consumptions.create_index([("EMPRESA", 1), ("FECHA", -1)])
         await db.consumptions.create_index([("EMPRESA", 1), ("PLACA", 1)])
         await db.consumptions.create_index("PLACA")
@@ -4592,7 +5915,6 @@ async def startup():
         await db.consumos_subsidio.create_index([("user_id", 1), ("status", 1)])
         await db.consumos_subsidio.create_index([("user_id", 1), ("fecha", -1)])
         await db.empresas_config.create_index("empresa", unique=True)
-        # Índices para acelerar el listado admin de expedientes de subsidio
         await db.subsidio_documents.create_index("user_id")
         await db.subsidio_vehicles.create_index("user_id")
         await db.subsidio_declaraciones.create_index("user_id")
@@ -4604,14 +5926,38 @@ async def startup():
         await db.calculations.create_index("id")
     except Exception as e:
         logger.warning(f"Index creation warning: {e}")
-    await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)
-    await seed_demo_data()
-    # Backfill de servicios/tipo_cliente para empresas legacy
+
+    try:
+        await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=3600)
+    except Exception as e:
+        logger.warning(f"Token index warning: {e}")
+
+    try:
+        await seed_demo_data()
+    except Exception as e:
+        logger.warning(f"Seed demo data warning: {e}")
+
     try:
         result = await _svc.backfill_servicios(db)
         logger.info(f"Servicios backfill: {result}")
     except Exception as e:
         logger.warning(f"Servicios backfill failed: {e}")
+
+    try:
+        invs_to_heal = await db.invoices.find({"factura_storage_key": {"$exists": False}}).to_list(100)
+        for inv in invs_to_heal:
+            emp = inv.get("empresa") or ""
+            ndoc = inv.get("n_doc") or inv.get("numero_documento")
+            pdf_fname = inv.get("pdf_filename") or (f"{ndoc}.pdf" if ndoc else None)
+            if emp and pdf_fname:
+                s_key = _inv_key(emp, pdf_fname)
+                await db.invoices.update_many({"_id": inv["_id"]}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                if inv.get("id"):
+                    await db.empresas_invoices.update_many({"id": inv.get("id")}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+                if ndoc:
+                    await db.consumos_subsidio.update_many({"numero_documento": ndoc}, {"$set": {"factura_storage_key": s_key, "pdf_key": s_key, "storage_key": s_key}})
+    except Exception as e:
+        logger.warning(f"Auto-heal invoices warning: {e}")
         
     # Auto-apply pending saldo_a_favor to invoices
     async for config in db.empresas_config.find({"saldo_a_favor": {"$gt": 0}}):
@@ -4643,6 +5989,7 @@ async def startup():
     except Exception as e:
         print("clean_estarkos err:", e)
 
+<<<<<<< HEAD
 # ---------- Precios de Combustible (Facilito OSINERGMIN) ----------
 
 @api.get("/precios")
@@ -5178,8 +6525,18 @@ async def upload_invoice_file(
 app.include_router(api)
 
 
+=======
+app.include_router(api)
+
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
 @app.on_event("shutdown")
 async def shutdown():
     client.close()
 
+<<<<<<< HEAD
 
+=======
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447

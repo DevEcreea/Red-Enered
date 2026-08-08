@@ -15,29 +15,24 @@ logger = logging.getLogger("enered.invoice_ocr")
 
 OCR_PROMPT = """Eres un asistente experto en extraer datos de FACTURAS ELECTRÓNICAS de COMBUSTIBLE peruanas (SUNAT).
 
-Analiza esta imagen y devuelve EXCLUSIVAMENTE un JSON válido (sin markdown, sin ```, sin comentarios) con exactamente estos campos:
+Analiza la imagen de la factura adjunta y devuelve EXCLUSIVAMENTE un JSON válido con estos campos:
 
 {
-  "fecha": "YYYY-MM-DD o null",
-  "hora": "HH:MM o null",
-  "estacion": "Nombre / razón social del grifo (string) o null",
-  "ciudad": "Ciudad del grifo o null",
-  "ruc_emisor": "RUC del grifo (11 dígitos) o null",
-  "placa": "Placa del vehículo (formato ABC-123 o ABC123) o null",
-  "producto": "Tipo de combustible (DIESEL B5, DIESEL B20, GASOHOL 90, etc.) o null",
-  "galones": número decimal (cantidad en galones) o null,
-  "precio_unitario": número decimal (precio por galón en soles) o null,
-  "importe_total": número decimal (total en soles, con IGV incluido) o null,
-  "numero_documento": "Serie-Correlativo (ej: F001-12345) o null",
-  "confianza": número entre 0 y 1 (qué tan seguro estás de los datos)
+  "fecha": "YYYY-MM-DD" (extrae la Fecha de Emisión, usa SIEMPRE formato YYYY-MM-DD. Ej: 2026-04-21),
+  "fecha_vencimiento": "YYYY-MM-DD" (extrae la Fecha de Vencimiento si la hay, sino usa la de emisión),
+  "ruc_cliente": "RUC del cliente/receptor (11 dígitos, obligatorio)",
+  "placa": "Placa del vehículo (formato ABC-123)",
+  "producto": "Nombre del combustible (ej: DIESEL B5 S-50, GASOHOL REGULAR, etc)",
+  "importe_total": número decimal (Total a pagar, sin IGV aparte, solo el TOTAL final. Ej: 1540.50),
+  "numero_documento": "Serie-Correlativo exacto (ej: F003-00000219)"
 }
 
-Reglas estrictas:
-- Si un campo no es legible o no aparece, usa null (no inventes).
-- Devuelve únicamente el JSON, sin texto adicional, sin envoltorio markdown.
-- placa: convierte a MAYÚSCULAS y elimina espacios. Si ves AAA 123 → AAA-123.
-- fecha en formato ISO YYYY-MM-DD (asume zona Perú).
-- Números siempre como decimal con punto (no coma).
+REGLAS ESTRICTAS:
+- No devuelvas texto adicional, solo el objeto JSON limpio.
+- El importe_total DEBE ser un número decimal con punto, NO con coma, sin símbolo de moneda.
+- Respeta estrictamente el formato YYYY-MM-DD en las fechas (AÑO-MES-DIA).
+- numero_documento debe conservar los ceros a la izquierda (ej: F003-00000219).
+- Si un dato no existe, devuelve null.
 """
 
 
@@ -54,7 +49,7 @@ def _emergent_key() -> str:
     _ensure_load_dotenv()
     key = os.environ.get("EMERGENT_LLM_KEY")
     if not key:
-        raise RuntimeError("EMERGENT_LLM_KEY no configurada")
+        raise RuntimeError("LLM_KEY no encontrada. Agrega EMERGENT_LLM_KEY en tu archivo .env")
     return key
 
 
@@ -94,24 +89,56 @@ def _normalize_to_image(content: bytes, content_type: str) -> tuple[bytes, str]:
 
 async def extract_invoice_data(content: bytes, content_type: str, session_id: str) -> dict:
     """Main entry point. Returns dict with extracted fields + raw response."""
-    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    import google.generativeai as genai
+    import os
+    import tempfile
 
-    img_bytes, mime = _normalize_to_image(content, content_type)
-    b64 = base64.b64encode(img_bytes).decode("ascii")
+    ct = (content_type or "").lower()
+    is_pdf = "pdf" in ct or content[:4] == b"%PDF"
 
-    chat = LlmChat(
-        api_key=_emergent_key(),
-        session_id=session_id,
-        system_message="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown.",
-    ).with_model("gemini", "gemini-2.5-flash")
-
-    msg = UserMessage(
-        text=OCR_PROMPT,
-        file_contents=[ImageContent(image_base64=b64)],
-    )
-
-    raw = await chat.send_message(msg)
-    text = raw if isinstance(raw, str) else str(raw)
+    sample_file = None
+    tmp_path = None
+    try:
+        genai.configure(api_key=_emergent_key())
+        
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."
+        )
+        
+        if is_pdf:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            
+            sample_file = genai.upload_file(path=tmp_path, display_name="Factura PDF")
+            response = await model.generate_content_async([
+                sample_file,
+                OCR_PROMPT
+            ])
+        else:
+            img_bytes, mime = _normalize_to_image(content, content_type)
+            response = await model.generate_content_async([
+                {"mime_type": mime, "data": img_bytes},
+                OCR_PROMPT
+            ])
+            
+        text = response.text
+    except Exception as e:
+        logger.warning(f"OCR bypass / Error: {e}")
+        # Return empty data so frontend allows manual filling
+        return {"extracted": _normalize_fields({}), "raw_response": str(e)}
+    finally:
+        if sample_file:
+            try:
+                genai.delete_file(sample_file.name)
+            except Exception:
+                pass
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
     # Strip code fences if present
     cleaned = text.strip()
@@ -147,7 +174,16 @@ def _normalize_fields(p: dict) -> dict:
             return None
         try:
             if isinstance(v, str):
-                v = v.replace(",", ".").replace("S/", "").strip()
+                v = v.replace("S/", "").replace("S/.", "").strip()
+                # Si tiene múltiples comas/puntos, asumimos que el último es el decimal
+                import re
+                v = re.sub(r"[^\d\.,]", "", v)
+                if "," in v and "." in v:
+                    v = v.replace(",", "") # Remove thousands comma
+                elif v.count(",") == 1 and v.count(".") == 0:
+                    v = v.replace(",", ".") # Comma is decimal
+                elif v.count(",") > 1:
+                    v = v.replace(",", "") # Commas are thousands
             return float(v)
         except Exception:
             return None
@@ -165,10 +201,12 @@ def _normalize_fields(p: dict) -> dict:
 
     return {
         "fecha": _to_str(p.get("fecha")),
+        "fecha_vencimiento": _to_str(p.get("fecha_vencimiento")),
         "hora": _to_str(p.get("hora")),
         "estacion": _to_str(p.get("estacion")),
         "ciudad": _to_str(p.get("ciudad")),
         "ruc_emisor": _to_str(p.get("ruc_emisor")),
+        "ruc_cliente": _to_str(p.get("ruc_cliente")),
         "placa": placa,
         "producto": _to_str(p.get("producto")),
         "galones": _to_float(p.get("galones")),

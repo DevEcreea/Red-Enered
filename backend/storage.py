@@ -131,6 +131,28 @@ def object_exists(key: str) -> bool:
     else:
         return (LOCAL_BASE / key).exists()
 
+def find_by_suffix(suffix: str, prefix: str = "") -> Optional[str]:
+    """Search for the first object matching a suffix (case-insensitive)."""
+    backend = _backend()
+    if backend == "r2":
+        try:
+            paginator = _get_r2().get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=_bucket(), Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    if obj['Key'].lower().endswith(suffix.lower()):
+                        return obj['Key']
+            return None
+        except Exception:
+            return None
+    else:
+        try:
+            for p in LOCAL_BASE.rglob("*"):
+                if p.is_file() and p.name.lower().endswith(suffix.lower()):
+                    return str(p.relative_to(LOCAL_BASE)).replace("\\", "/")
+        except Exception:
+            pass
+        return None
+
 
 def presigned_url(key: str, ttl: int = 3600, filename: Optional[str] = None,
                   content_type: Optional[str] = None) -> str:
@@ -151,14 +173,15 @@ def presigned_url(key: str, ttl: int = 3600, filename: Optional[str] = None,
     )
 
 
-def download_response(key: str, filename: str, content_type: str = "application/octet-stream"):
-    """Returns a FastAPI response that lets the client download the object.
+def download_response(key: str, filename: str, content_type: str = "application/octet-stream", inline: bool = True):
+    """Returns a FastAPI response that lets the client view/download the object.
 
     On R2: streams the bytes through the backend (avoids cross-origin redirect
     + R2 CORS issues with XHR/blob downloads).
     On local: FileResponse from disk.
     """
     from fastapi import HTTPException
+    disposition_type = "inline" if inline else "attachment"
     backend = _backend()
     if backend == "r2":
         try:
@@ -169,14 +192,19 @@ def download_response(key: str, filename: str, content_type: str = "application/
         return Response(
             content=data,
             media_type=content_type,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'{disposition_type}; filename="{filename}"'},
         )
     else:
         from fastapi.responses import FileResponse
         path = LOCAL_BASE / key
         if not path.exists():
             raise HTTPException(status_code=404, detail="archivo no encontrado en disco")
-        return FileResponse(path=str(path), filename=filename, media_type=content_type)
+        return FileResponse(
+            path=str(path),
+            filename=filename,
+            media_type=content_type,
+            headers={"Content-Disposition": f'{disposition_type}; filename="{filename}"'}
+        )
 
 def stream_object(key: str) -> io.BytesIO:
     """Get the object as a BytesIO stream (for in-memory processing)."""

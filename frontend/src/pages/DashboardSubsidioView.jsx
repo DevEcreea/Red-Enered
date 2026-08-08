@@ -575,8 +575,8 @@ function StagesRow({ stages, user, kpis }) {
 
   const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 0 });
 
-  // COUNTDOWN TIMER (Target: July 28, 2026 at 23:59:59)
-  const TARGET_DATE = useMemo(() => new Date("2026-07-28T23:59:59"), []);
+  // COUNTDOWN TIMER (Target: September 28, 2026 at 23:59:59)
+  const TARGET_DATE = useMemo(() => new Date("2026-09-28T23:59:59"), []);
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
   useEffect(() => {
@@ -685,7 +685,7 @@ function StagesRow({ stages, user, kpis }) {
         <div className="bg-[#b91c1c] text-white rounded-2xl px-4 py-2 flex items-center gap-3 border border-red-500 shadow-md">
           <div className="flex items-center gap-1.5">
             <Clock className="w-4 h-4 text-white animate-pulse" />
-            <span className="text-xs font-black tracking-wider whitespace-nowrap">28 JUL</span>
+            <span className="text-xs font-black tracking-wider whitespace-nowrap">28 SEP</span>
           </div>
           <div className="h-6 w-px bg-white/20" />
           <div className="flex gap-2 text-center items-center">

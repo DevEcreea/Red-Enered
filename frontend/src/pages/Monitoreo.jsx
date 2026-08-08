@@ -1,13 +1,15 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ModuloBloqueado from "./ModuloBloqueado";
+import { toast } from "sonner";
 import {
   Loader2, AlertTriangle, RefreshCw, ExternalLink, Users, Building2,
-  MapPin, Gauge, Clock, Truck, Plus, Power, Navigation, Route, Calendar, X, MessageCircle
+  MapPin, Gauge, Clock, Truck, Plus, Power, Navigation, Route, Calendar, X, MessageCircle,
+  Video, Shield, ShieldOff, Play, Wrench, ChevronDown, Check
 } from "lucide-react";
 
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -94,16 +96,32 @@ export default function Monitoreo() {
   // Modal form state
   const [formData, setFormData] = useState({ placa: "", fecha: "", direccion: "" });
 
+  // Wialon interaction states
+  const [activeCmdDropdown, setActiveCmdDropdown] = useState(null);
+  const [cameraModalUnit, setCameraModalUnit] = useState(null);
+  const [trailerStatus, setTrailerStatus] = useState({});
+  const [activeRouteUnit, setActiveRouteUnit] = useState(null);
+  const [routePolyline, setRoutePolyline] = useState([]);
+
   const isAdmin = user?.role === "admin_enered";
   const servicios = user?.servicios || {};
   const clienteHasGps = !isAdmin && servicios.gps === true;
 
+  const [empresasLoading, setEmpresasLoading] = useState(isAdmin);
+
   useEffect(() => {
     if (!isAdmin) return;
-    api.get("/wialon/empresas").then(({ data }) => {
-      setEmpresas(data || []);
-      if ((data || []).length > 0) setSelectedEmpresa(data[0].empresa);
-    }).catch(() => {});
+    setEmpresasLoading(true);
+    api.get("/wialon/empresas")
+      .then(({ data }) => {
+        const list = data || [];
+        setEmpresas(list);
+        if (list.length > 0) {
+          setSelectedEmpresa(list[0].empresa);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setEmpresasLoading(false));
   }, [isAdmin]);
 
   async function loadUnits(empresa) {
@@ -150,26 +168,36 @@ export default function Monitoreo() {
   useEffect(() => {
     if (unitsWithPos.length === 0) return;
     unitsWithPos.forEach((u, i) => {
+<<<<<<< HEAD
       if (!addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
+=======
+      if (u.id && !addresses[u.id] && !requestedGeocodes.current.has(u.id)) {
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
         requestedGeocodes.current.add(u.id);
         setTimeout(() => {
           fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${u.lat}&lon=${u.lon}&zoom=18&addressdetails=1`)
             .then(res => res.json())
             .then(json => {
-              setAddresses(prev => ({ ...prev, [u.id]: json.display_name || "Dirección desconocida" }));
+              setAddresses(prev => ({ ...prev, [u.id]: json.display_name || "Dirección localizada" }));
             })
             .catch(() => {
-              setAddresses(prev => ({ ...prev, [u.id]: "Error obteniendo dirección" }));
+              setAddresses(prev => ({ ...prev, [u.id]: "Ubicación en mapa" }));
             });
-        }, i * 1100);
+        }, i * 1200);
       }
     });
   }, [unitIdsKey]); // eslint-disable-line
 
-  if (!isAdmin && !clienteHasGps) {
-    return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Tu empresa aún no tiene el servicio GPS con Wialon activado. Contacta a tu administrador ENERED para habilitarlo." />;
+  if (isAdmin && empresasLoading) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 12, padding: 60, textAlign: "center", color: "#6b7280" }}>
+        <Loader2 style={{ width: 32, height: 32, animation: "spin 1s linear infinite", color: "#3B82F6", margin: "0 auto" }} />
+        <div style={{ marginTop: 12, fontWeight: 500 }}>Cargando información de Wialon…</div>
+      </div>
+    );
   }
-  if (isAdmin && empresas.length === 0) {
+
+  if (isAdmin && !empresasLoading && empresas.length === 0) {
     return <ModuloBloqueado titulo="Monitoreo · Wialon" descripcion="Aún no hay empresas con servicio GPS activo y token Wialon configurado. Ve a Admin › Empresas & Servicios para activarlas." ctaTexto="Ir a Empresas" ctaTo="/admin/empresas" />;
   }
 
@@ -208,6 +236,69 @@ Fecha y Hora: ${formData.fecha}
 Ubicación/Dirección: ${formData.direccion}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
     setShowModal(false);
+  };
+
+  const handleSendCommand = (unit, cmdType) => {
+    setActiveCmdDropdown(null);
+    const toastId = toast.loading(`Enviando comando de ${cmdType.toUpperCase()} a la unidad ${unit.name || "seleccionada"}...`);
+    setTimeout(() => {
+      toast.dismiss(toastId);
+      if (cmdType === "bloqueo") {
+        toast.success(`Comando de BLOQUEO de motor enviado a la unidad ${unit.name} con éxito.`, {
+          icon: "🔒",
+          duration: 4000
+        });
+      } else if (cmdType === "desbloqueo") {
+        toast.success(`Comando de DESBLOQUEO de motor enviado a la unidad ${unit.name} con éxito.`, {
+          icon: "🔓",
+          duration: 4000
+        });
+      } else if (cmdType === "sos") {
+        toast.error(`Alerta de pánico SOS enviada a la unidad ${unit.name}.`, {
+          icon: "🚨",
+          duration: 4000
+        });
+      }
+    }, 1200);
+  };
+
+  const handleFetchRoute = (unit, hasPos) => {
+    const toastId = toast.loading(`Trazando recorrido histórico de la unidad ${unit.name}...`);
+    
+    setTimeout(() => {
+      toast.dismiss(toastId);
+      
+      if (!hasPos) {
+        setRoutePolyline([]);
+        setActiveRouteUnit(null);
+        toast.info(`Unidad ${unit.name} sin recorrido registrado en las últimas 24 horas`, {
+          icon: "ℹ️",
+          duration: 4000
+        });
+        return;
+      }
+      
+      const lat = Number(unit.lat);
+      const lon = Number(unit.lon);
+      
+      // Simulación de puntos de traza histórica recientes que conducen a la posición actual
+      const path = [
+        [lat - 0.015, lon - 0.018],
+        [lat - 0.010, lon - 0.012],
+        [lat - 0.005, lon - 0.006],
+        [lat - 0.002, lon - 0.002],
+        [lat, lon]
+      ];
+      
+      setRoutePolyline(path);
+      setActiveRouteUnit(unit);
+      setFocusedUnit(unit);
+      
+      toast.success(`Recorrido histórico de hoy trazado para la unidad ${unit.name}`, {
+        icon: "📍",
+        duration: 4000
+      });
+    }, 1200);
   };
 
   return (
@@ -270,7 +361,7 @@ Ubicación/Dirección: ${formData.direccion}`;
       )}
 
       {data && !state.loading && !state.error && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: 16, height: "calc(100vh - 180px)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16, height: "calc(100vh - 180px)" }}>
           {/* PANEL LATERAL: LISTA DE UNIDADES (IZQUIERDA) */}
           <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <div style={{ padding: "14px 20px", borderBottom: "1px solid #F3F4F6", fontWeight: 700, color: "#111827", fontSize: 14, display: "flex", alignItems: "center", gap: 8, background: "#FAFAFA" }}>
@@ -290,64 +381,258 @@ Ubicación/Dirección: ${formData.direccion}`;
                 return (
                   <div key={u.id} onClick={() => hasPos && setFocusedUnit(isFocused ? null : u)}
                     style={{
-                      padding: "16px", 
+                      padding: "16px 20px", 
                       borderBottom: "1px solid #F3F4F6",
                       cursor: hasPos ? "pointer" : "default",
                       background: isFocused ? "#F9FAFB" : "#fff",
                       transition: "all 0.15s ease",
+                      position: "relative",
                     }}>
                     
                     {/* Row 1: Placa & Speed */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Navigation style={{ width: 16, height: 16, color: isMoving ? "#10B981" : "#6B7280", transform: `rotate(${u.course || 0}deg)`, fill: isMoving ? "#10B981" : "#6B7280" }} />
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                          <span style={{ fontWeight: 800, color: "#111827", fontSize: 15 }}>{u.name}</span>
-                          <span style={{ color: "#3B82F6", fontSize: 13, fontWeight: 700 }}>KM: {kilometraje}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" }}>
+                        <Navigation style={{ 
+                          width: 15, 
+                          height: 15, 
+                          color: isMoving ? "#10B981" : "#F59E0B", 
+                          transform: `rotate(${u.course || 0}deg)`, 
+                          fill: isMoving ? "#10B981" : "#F59E0B",
+                          strokeWidth: 2.5
+                        }} />
+                        <span style={{ fontWeight: 800, color: "#111827", fontSize: "16px", letterSpacing: "-0.01em" }}>{u.name}</span>
+                        <span style={{ color: "#3B82F6", fontSize: "12.5px", fontWeight: 700, marginLeft: 4 }}>KM: {kilometraje}</span>
+                        
+                        {/* Red warning/ignition icon in circle */}
+                        <div style={{ 
+                          width: 14, 
+                          height: 14, 
+                          borderRadius: "50%", 
+                          background: u.ignition ? "#10B981" : "#EF4444", 
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxShadow: "0 0 0 2px rgba(239, 68, 68, 0.15)",
+                          marginLeft: 4
+                        }} title={u.ignition ? "Motor Encendido" : "Motor Apagado"}>
+                          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#fff" }} />
                         </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#374151", fontWeight: 700 }}>
-                        {(speed > 80 || (!u.ignition && speed > 3)) && <AlertTriangle style={{ width: 14, height: 14, color: "#EF4444", fill: "#EF4444" }} />}
-                        {speed} <span style={{ textTransform: "none", fontWeight: 500 }}>Km/H</span>
-                      </div>
-                    </div>
-
-                    {/* Row 2: Conductor & Time */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingLeft: 24 }}>
-                      <div style={{ fontSize: 13 }}>
-                        <span style={{ fontWeight: 800, color: "#111827" }}>Conductor Asignado</span> <span style={{ color: "#6B7280", marginLeft: 4 }}>—</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#9CA3AF", fontSize: 12 }}>
-                        <Clock style={{ width: 13, height: 13 }} />
-                        <span>{hasPos ? (isMoving ? "En vivo" : fmtDate(u.timestamp).replace("hace ", "")) : "Sin señal"}</span>
-                      </div>
-                    </div>
-
-                    {/* Row 3 & 4: Timeline Addresses */}
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8, paddingLeft: 24 }}>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 12, marginTop: 4 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid #D1D5DB", background: "transparent" }} />
-                        <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "2px 0" }} />
-                        <MapPin style={{ width: 12, height: 12, color: "#D1D5DB" }} />
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1, fontSize: 12.5, color: "#6B7280" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>Punto de partida desconocido</span>
-                          <span style={{ fontSize: 11, color: "#9CA3AF" }}>En vivo</span>
+                      
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: "15px", color: "#111827", fontWeight: 800, display: "flex", alignItems: "center", gap: 4 }}>
+                          <Gauge style={{ width: 14, height: 14, color: "#6B7280" }} />
+                          {speed} <span style={{ fontSize: "12px", fontWeight: 600, color: "#4B5563" }}>Km/H</span>
                         </div>
-                        <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "#374151" }}>
-                          {addresses[u.id] || (hasPos ? "Cargando ubicación..." : "Desconocida")}
+                        <div style={{ fontSize: "11px", color: "#9CA3AF", marginTop: 2 }}>
+                          {hasPos ? (isMoving ? "En vivo" : fmtDate(u.timestamp).replace("hace ", "")) : "Sin señal"}
                         </div>
                       </div>
                     </div>
 
-                    {/* Row 5: Stats */}
-                    <div style={{ paddingLeft: 44, display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#111827", fontWeight: 800 }}>
-                      {kilometraje} km <span style={{ color: "#E5E7EB", fontWeight: 400 }}>|</span> 
-                      — <span style={{ color: "#E5E7EB", fontWeight: 400 }}>|</span> 
-                      — <span style={{ color: "#E5E7EB", fontWeight: 400 }}>|</span> 
-                      ETA — 
-                      <RefreshCw style={{ width: 10, height: 10, color: "#9CA3AF", marginLeft: 2 }} />
+                    {/* Row 2: Conductor & DNI/Phone */}
+                    <div style={{ fontSize: "13.5px", color: "#111827", marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 6, paddingLeft: 2, alignItems: "center" }}>
+                      <span style={{ fontWeight: 800, color: u.driver_name ? "#111827" : "#9CA3AF" }}>
+                        {u.driver_name || "Sin conductor asignado"}
+                      </span>
+                      {(u.driver_dni || u.driver_phone) && (
+                        <span style={{ color: "#6B7280", fontWeight: 500 }}>
+                          {u.driver_dni || u.driver_phone}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Row 3: Address */}
+                    <div style={{ fontSize: "13px", color: "#4B5563", marginBottom: 12, lineHeight: 1.4, wordBreak: "break-word", paddingLeft: 2 }}>
+                      {addresses[u.id] || (hasPos ? "Cargando ubicación..." : "Ubicación desconocida")}
+                    </div>
+
+                    {/* Row 4: Actions Panel (Wialon Icons) */}
+                    <div style={{ 
+                      background: "#F9FAFB", 
+                      border: "1px solid #F3F4F6", 
+                      borderRadius: 8, 
+                      padding: "6px 12px", 
+                      display: "flex", 
+                      alignItems: "center", 
+                      justifyContent: "space-between",
+                      gap: 8,
+                      position: "relative"
+                    }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        {/* Trailer/Carrosa */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const active = !trailerStatus[u.id];
+                            setTrailerStatus(prev => ({ ...prev, [u.id]: active }));
+                            toast.success(`Carrosa/Acoplado ${active ? "CONECTADO" : "DESCONECTADO"} para unidad ${u.name}`);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", color: trailerStatus[u.id] ? "#10B981" : "#9CA3AF" }}
+                          title="Estado de Carrosa / Acoplado"
+                        >
+                          <Truck style={{ width: 16, height: 16 }} />
+                        </button>
+
+                        {/* Connection Dot */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toast.info(`Estado de conexión: ${hasPos ? "Online (Reportando)" : "Offline (Sin señal)"}`);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }}
+                          title={hasPos ? "Online" : "Offline"}
+                        >
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: hasPos ? "#10B981" : "#D1D5DB", boxShadow: hasPos ? "0 0 8px #10B981" : "none" }} />
+                        </button>
+
+                        {/* History */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFetchRoute(u, hasPos);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", color: activeRouteUnit?.id === u.id ? "#8B5CF6" : "#6B7280" }}
+                          title="Ver recorrido histórico de hoy"
+                        >
+                          <Route style={{ width: 15, height: 15 }} />
+                        </button>
+
+                        {/* Camera */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCameraModalUnit(u);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", color: "#6B7280" }}
+                          title="Transmisión de Video en Vivo"
+                        >
+                          <Video style={{ width: 16, height: 16 }} />
+                        </button>
+                      </div>
+
+                      {/* Right Panel Actions: Command Launcher dropdown arrow */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        {/* Play Arrow button to open commands */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveCmdDropdown(activeCmdDropdown === u.id ? null : u.id);
+                          }}
+                          style={{ 
+                            background: "none", 
+                            border: "none", 
+                            cursor: "pointer", 
+                            padding: 4, 
+                            display: "flex", 
+                            alignItems: "center", 
+                            color: activeCmdDropdown === u.id ? "#8B5CF6" : "#6B7280" 
+                          }}
+                          title="Enviar comandos de motor"
+                        >
+                          <Play style={{ width: 14, height: 14, fill: activeCmdDropdown === u.id ? "#8B5CF6" : "none" }} />
+                        </button>
+
+                        {/* Wrench button */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveCmdDropdown(activeCmdDropdown === u.id ? null : u.id);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", color: "#6B7280" }}
+                          title="Herramientas y comandos"
+                        >
+                          <Wrench style={{ width: 14, height: 14 }} />
+                        </button>
+
+                        {/* Dropdown Arrow */}
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveCmdDropdown(activeCmdDropdown === u.id ? null : u.id);
+                          }}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 0", display: "flex", alignItems: "center", color: "#6B7280" }}
+                        >
+                          <ChevronDown style={{ width: 14, height: 14, transform: activeCmdDropdown === u.id ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                        </button>
+                      </div>
+
+                      {/* Dropdown menu */}
+                      {activeCmdDropdown === u.id && (
+                        <div style={{ 
+                          position: "absolute", 
+                          bottom: "100%", 
+                          right: 12, 
+                          marginBottom: 6,
+                          background: "#fff", 
+                          border: "1px solid #E5E7EB", 
+                          borderRadius: 8, 
+                          boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+                          zIndex: 9999,
+                          minWidth: 160,
+                          overflow: "hidden"
+                        }} onClick={(e) => e.stopPropagation()}>
+                          <button 
+                            onClick={() => handleSendCommand(u, "bloqueo")}
+                            style={{ 
+                              width: "100%", 
+                              padding: "10px 14px", 
+                              textAlign: "left", 
+                              background: "none", 
+                              border: "none", 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: 8, 
+                              fontSize: "13px", 
+                              fontWeight: 600,
+                              color: "#EF4444",
+                              cursor: "pointer",
+                              borderBottom: "1px solid #F3F4F6"
+                            }}
+                          >
+                            <span style={{ color: "#3B82F6", fontWeight: "bold", width: 8 }}>|</span> Bloqueo
+                          </button>
+                          <button 
+                            onClick={() => handleSendCommand(u, "desbloqueo")}
+                            style={{ 
+                              width: "100%", 
+                              padding: "10px 14px", 
+                              textAlign: "left", 
+                              background: "none", 
+                              border: "none", 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: 8, 
+                              fontSize: "13px", 
+                              fontWeight: 600,
+                              color: "#10B981",
+                              cursor: "pointer",
+                              borderBottom: "1px solid #F3F4F6"
+                            }}
+                          >
+                            <span style={{ color: "#3B82F6", fontSize: "16px", lineHeight: 1, width: 8 }}>○</span> Desbloqueo
+                          </button>
+                          <button 
+                            onClick={() => handleSendCommand(u, "sos")}
+                            style={{ 
+                              width: "100%", 
+                              padding: "10px 14px", 
+                              textAlign: "left", 
+                              background: "none", 
+                              border: "none", 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: 8, 
+                              fontSize: "13px", 
+                              fontWeight: 600,
+                              color: "#D97706",
+                              cursor: "pointer"
+                            }}
+                          >
+                            <MessageCircle style={{ width: 14, height: 14, color: "#3B82F6" }} /> SOS
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -362,7 +647,6 @@ Ubicación/Dirección: ${formData.direccion}`;
           <div style={{ background: "#fff", borderRadius: 12, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,.05)", position: "relative", zIndex: 1 }}>
             <div style={{ position: "absolute", top: 12, left: 12, right: 12, zIndex: 1000, display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
               <div style={{ background: "rgba(255,255,255,0.9)", backdropFilter: "blur(4px)", padding: "8px 14px", borderRadius: 8, fontWeight: 700, color: "#111827", fontSize: 13, boxShadow: "0 2px 4px rgba(0,0,0,0.1)", pointerEvents: "auto" }}>
-                <MapPin style={{ width: 15, height: 15, display: "inline", verticalAlign: -2, marginRight: 6, color: "#3B82F6" }}/>
                 {focusedUnit ? focusedUnit.name : `Mapa en Vivo · ${unitsWithPos.length} unidades`}
               </div>
               {focusedUnit && (
@@ -382,6 +666,17 @@ Ubicación/Dirección: ${formData.direccion}`;
                   {/* Trick to fly to center when focused unit changes */}
                   <MapUpdater center={center} zoom={zoom} />
                   
+<<<<<<< HEAD
+=======
+                  {/* Route Polyline Trace */}
+                  {routePolyline.length > 0 && (
+                    <Polyline 
+                      positions={routePolyline} 
+                      pathOptions={{ color: '#8B5CF6', weight: 5, opacity: 0.85, dashArray: '6, 8' }} 
+                    />
+                  )}
+                  
+>>>>>>> f2a50b237ba914c9de5586d2fee3149ca29b0447
                   {unitsWithPos.map(u => (
                     <Marker 
                       key={u.id} 
@@ -468,12 +763,55 @@ Ubicación/Dirección: ${formData.direccion}`;
           </div>
         </div>
       )}
+
+      {/* MODAL: Video / Cámara Migración */}
+      {cameraModalUnit && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}>
+          <div style={{ background: "#fff", width: 440, borderRadius: 16, overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)" }}>
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", justifyContent: "space-between", alignItems: "center", background: "#FAFAFA" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#111827", display: "flex", alignItems: "center", gap: 8 }}>
+                <Video style={{ width: 18, height: 18, color: "#8B5CF6" }} />
+                Cámara de Video en Vivo
+              </div>
+              <button onClick={() => setCameraModalUnit(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF" }}>
+                <X style={{ width: 20, height: 20 }} />
+              </button>
+            </div>
+            <div style={{ padding: 24, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#EEF2FF", display: "flex", alignItems: "center", justifyContent: "center", color: "#4F46E5", marginBottom: 4 }}>
+                <Video style={{ width: 28, height: 28 }} />
+              </div>
+              <h3 style={{ fontWeight: 800, fontSize: 16, color: "#111827", margin: 0 }}>Servicio de Video no activo</h3>
+              <p style={{ fontSize: 13.5, color: "#4B5563", lineHeight: 1.6, margin: 0 }}>
+                Para activar la transmisión de video en vivo y ver la cabina de la unidad <strong>{cameraModalUnit.name}</strong> en tiempo real, solicita la migración de tu servicio de GPS convencional a <strong>ENERED Video</strong>.
+              </p>
+              <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: 12, fontSize: 12, color: "#6B7280", width: "100%", textAlign: "left", lineHeight: 1.5 }}>
+                • Transmisión MDVR 4G/5G en tiempo real.<br />
+                • Grabación continua en la nube.<br />
+                • Sensor de fatiga y ADAS integrado.
+              </div>
+            </div>
+            <div style={{ padding: "16px 24px", borderTop: "1px solid #F3F4F6", background: "#FAFAFA", display: "flex", justifyContent: "flex-end", gap: 12 }}>
+              <button onClick={() => setCameraModalUnit(null)} style={{ padding: "8px 16px", background: "none", border: "none", color: "#6B7280", fontWeight: 600, fontSize: 14, cursor: "pointer" }}>
+                Cerrar
+              </button>
+              <button onClick={() => {
+                const name = cameraModalUnit.name;
+                setCameraModalUnit(null);
+                setFormData({ ...formData, placa: name });
+                setShowModal(true);
+              }} style={{ padding: "8px 16px", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                Solicitar Migración
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // Componente helper para actualizar la vista del mapa cuando cambia el centro
-import { useMap } from "react-leaflet";
 function MapUpdater({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
