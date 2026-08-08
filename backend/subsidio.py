@@ -1996,9 +1996,53 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     if not inv:
         return _html_not_found_msg(f"La factura <b>{clean_id}</b> no se encuentra en el sistema.")
 
-    # Recolectar llaves de almacenamiento candidatas
+    # ── PRIORIDAD ABSOLUTA: factura_storage_key ──────────────────────────────
+    # Si el registro tiene factura_storage_key, ese es el archivo original del
+    # cliente en R2. Se usa directamente, sin búsquedas alternativas ni
+    # generación de comprobantes sustitutos.
+    if inv.get("factura_storage_key"):
+        primary_key = inv["factura_storage_key"]
+        logger.info(f"[admin_download_invoice] factura_storage_key encontrada: {primary_key!r}")
+
+        if not storage.object_exists(primary_key):
+            logger.warning(f"[admin_download_invoice] objeto NO existe en R2 para key={primary_key!r}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Archivo original no encontrado en almacenamiento (key: {primary_key!r}). "
+                       f"El registro existe en base de datos pero el archivo físico no está en R2."
+            )
+
+        try:
+            data = storage.get_object_bytes(primary_key)
+        except Exception as exc:
+            logger.error(f"[admin_download_invoice] error leyendo R2 key={primary_key!r}: {exc}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al leer el archivo original de almacenamiento (key: {primary_key!r}): {exc}"
+            )
+
+        fname = inv.get("factura_filename") or inv.get("pdf_filename") or inv.get("filename")
+        n_doc = inv.get("numero_documento") or inv.get("n_doc") or clean_id
+        original = fname or f"{n_doc}.pdf"
+        ext = original.split(".")[-1].lower() if "." in original else "pdf"
+        safe_ndoc = "".join(c for c in str(n_doc) if c.isalnum() or c == "-")
+        dl_name = fname or f"Factura_{safe_ndoc}.{ext}"
+        encoded_name = quote(dl_name)
+
+        content_type = inv.get("factura_content_type") or inv.get("content_type")
+        if not content_type:
+            content_type = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png" if ext == "png" else "application/pdf"
+
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"},
+        )
+    # ── FIN PRIORIDAD ABSOLUTA ───────────────────────────────────────────────
+
+    # ── LÓGICA LEGACY: solo para registros SIN factura_storage_key ───────────
+    # Registros antiguos que no pasaron por el flujo de carga de Mi Flota.
     candidate_keys = []
-    if inv.get("factura_storage_key"): candidate_keys.append(inv["factura_storage_key"])
     if inv.get("storage_key"): candidate_keys.append(inv["storage_key"])
     if inv.get("pdf_key"): candidate_keys.append(inv["pdf_key"])
 
@@ -2006,7 +2050,7 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     n_doc = inv.get("numero_documento") or inv.get("n_doc") or clean_id
     fname = inv.get("factura_filename") or inv.get("pdf_filename") or inv.get("filename")
 
-    # Cross-reference db.invoices and db.empresas_invoices to pull storage keys if missing
+    # Cross-reference db.invoices y db.empresas_invoices para llaves alternativas
     if n_doc:
         esc_ndoc = re.escape(n_doc)
         doc_q = {"$or": [{"n_doc": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}, {"numero_documento": {"$regex": f"^{esc_ndoc}$", "$options": "i"}}]}
@@ -2033,7 +2077,6 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
         candidate_keys.append(f"tmp_admin/{n_doc}.pdf")
         candidate_keys.append(f"{n_doc}.pdf")
 
-    # UUID fallback keys
     inv_id = inv.get("id") or clean_id
     if inv_id:
         candidate_keys.append(f"subsidio/facturas/{inv_id}.pdf")
@@ -2054,90 +2097,80 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
             break
 
     if not valid_key and n_doc:
-        # Fallback definitivo: buscar en Cloudflare R2 por sufijo del documento
         suffix = f"{n_doc}.pdf"
         try:
             valid_key = storage.find_by_suffix(suffix, prefix="subsidio/")
             if not valid_key:
                 valid_key = storage.find_by_suffix(suffix, prefix="invoices/")
-        except Exception as e:
+        except Exception:
             pass
 
     if not valid_key:
-        # Respaldo inteligente: genera el PDF oficial al vuelo con ReportLab para que SIEMPRE se pueda previsualizar
+        # Solo para legacy: genera comprobante sustituto con ReportLab
         try:
             from io import BytesIO
             from reportlab.lib.pagesizes import letter
             from reportlab.pdfgen import canvas
-            
+
             buffer = BytesIO()
             p = canvas.Canvas(buffer, pagesize=letter)
             p.setTitle(f"Factura - {n_doc}")
-            
             p.setFont("Helvetica-Bold", 18)
             p.drawString(50, 750, "RED ENERED - COMPROBANTE DE CONSUMO / SUBSIDIO")
             p.setFont("Helvetica", 10)
             p.drawString(50, 735, "Plataforma Integral de Gestión de Combustible")
-            
             p.setStrokeColorRGB(0.8, 0.8, 0.8)
             p.line(50, 720, 550, 720)
-            
+
             def _clean_str(s):
                 if not s: return "-"
                 s = str(s).strip()
                 s = s.replace("—", "-").replace("–", "-")
                 s = s.encode("latin-1", errors="replace").decode("latin-1")
                 return s
-            
+
             p.setFont("Helvetica-Bold", 12)
             p.drawString(50, 690, f"Documento N°: {n_doc}")
             p.setFont("Helvetica", 10)
-            p.drawString(50, 670, f"Cliente / Empresa: {_clean_str(inv.get('empresa') or 'ROSANDINA S.A.C.')}")
+            p.drawString(50, 670, f"Cliente / Empresa: {_clean_str(inv.get('empresa') or '-')}")
             p.drawString(50, 650, f"Fecha Emisión: {_clean_str(inv.get('fecha') or inv.get('f_emision') or '-')}")
             p.drawString(50, 630, f"Placa Vehículo: {_clean_str(inv.get('placa') or '-')}")
             p.drawString(50, 610, f"Producto: {_clean_str(inv.get('producto') or 'DIESEL B5 S-50')}")
-            
             p.line(50, 590, 550, 590)
-            
             p.setFont("Helvetica-Bold", 12)
             p.drawString(50, 560, "DETALLE DE IMPORTE")
             p.setFont("Helvetica", 11)
-            
+
             def _safe_num(v):
                 if v is None or str(v).strip() == "": return 0.0
                 if isinstance(v, (int, float)): return float(v)
-                import re
                 try:
                     c = re.sub(r"[^\d.-]", "", str(v))
                     return float(c) if c else 0.0
                 except Exception:
                     return 0.0
-            
+
             monto = _safe_num(inv.get("importe_total") or inv.get("monto_total") or inv.get("monto"))
             p.drawString(50, 535, f"Monto Total: S/ {monto:,.2f}")
-            
             p.line(50, 510, 550, 510)
             p.setFont("Helvetica-Oblique", 9)
             p.drawString(50, 480, "Comprobante de consumo de subsidio registrado en la plataforma Enered.")
-            
             p.showPage()
             p.save()
             buffer.seek(0)
-            
             return Response(
                 content=buffer.getvalue(),
                 media_type="application/pdf",
                 headers={"Content-Disposition": f'inline; filename="Factura_{n_doc}.pdf"'}
             )
         except Exception as e:
-            import logging
-            logging.error(f"Error generando PDF de contingencia en admin subsidio: {e}")
-            return _html_not_found_msg("La factura física no se encontró y no se pudo generar el comprobante. Contacte a soporte técnico.")
+            logger.error(f"Error generando PDF de contingencia (legacy) en admin subsidio: {e}")
+            return _html_not_found_msg("La factura física no se encontró. Contacte a soporte técnico.")
 
     try:
         data = storage.get_object_bytes(valid_key)
     except Exception:
-        return _html_not_found_msg(f"Error al leer el archivo en el servidor.")
+        return _html_not_found_msg("Error al leer el archivo en el servidor.")
 
     original = fname or f"{n_doc}.pdf"
     ext = original.split(".")[-1].lower() if "." in original else "pdf"
@@ -2152,9 +2185,7 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     return Response(
         content=data,
         media_type=content_type,
-        headers={
-            "Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"
-        },
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"},
     )
 
 
