@@ -2147,13 +2147,43 @@ async def admin_delete_document(doc_id: str, _: dict = Depends(_require_admin_en
 
 @subsidio_router.delete("/admin/subsidio/invoices/{invoice_id}")
 async def admin_delete_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
-    """Admin elimina una factura de consumo. Se descuenta del historial del cliente."""
+    """Admin elimina una factura de consumo. Se descuenta del historial del cliente.
+
+    REGLA DE SEGURIDAD R2:
+    El archivo físico en R2 (factura_storage_key) puede estar referenciado desde
+    múltiples registros (consumos_subsidio y/o db.invoices). Solo se borra el
+    objeto de R2 si NINGÚN otro registro en NINGUNA de las dos colecciones lo
+    referencia después de eliminar este registro.
+    """
     inv = await db.consumos_subsidio.find_one({"id": invoice_id})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
-    if inv.get("factura_storage_key"):
-        storage.delete_object(inv["factura_storage_key"])
+
+    # 1. Eliminar el registro de MongoDB primero
     await db.consumos_subsidio.delete_one({"id": invoice_id})
+
+    # 2. Evaluar si el objeto R2 puede eliminarse de forma segura
+    key = inv.get("factura_storage_key")
+    if key:
+        # Contar referencias restantes en AMBAS colecciones
+        refs_consumos = await db.consumos_subsidio.count_documents({"factura_storage_key": key})
+        refs_invoices = await db.invoices.count_documents({"factura_storage_key": key})
+        total_refs = refs_consumos + refs_invoices
+        if total_refs == 0:
+            # Ningún otro registro usa este archivo → se puede borrar
+            try:
+                storage.delete_object(key)
+                logger.info(f"[admin_delete_invoice] R2 key eliminada (sin referencias): {key!r}")
+            except Exception as exc:
+                logger.warning(f"[admin_delete_invoice] No se pudo borrar R2 key={key!r}: {exc}")
+        else:
+            # Hay otros registros que usan este archivo → NO borrar
+            logger.info(
+                f"[admin_delete_invoice] R2 key conservada: {key!r} "
+                f"({refs_consumos} ref(s) en consumos_subsidio, "
+                f"{refs_invoices} ref(s) en invoices)"
+            )
+
     return {"status": "ok"}
 
 
@@ -2327,22 +2357,55 @@ async def admin_update_invoice(
     payload: InvoiceUpdateIn,
     _: dict = Depends(_require_admin_enered),
 ):
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
-    if not inv:
-        raise HTTPException(status_code=404, detail="Factura no encontrada")
-    
-    uids = await _get_company_uids(user_id)
-    
-    patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
-    if "placa" in patch and patch["placa"]:
-        placa = patch["placa"].upper().strip()
-        patch["placa"] = placa
-        own = await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa})
-        patch["placa_match"] = placa if own else None
+    """Admin edita los datos de una factura.
 
-    patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": patch})
-    return {"ok": True}
+    Busca el registro en consumos_subsidio primero; si no existe ahí, busca en
+    db.invoices (facturas confirmadas que se muestran en la vista combinada del
+    expediente). Aplica el mapeo de nombres de campo correcto para cada
+    colección. Devuelve 404 solo si el ID no existe en ninguna de las dos.
+    """
+    uids = await _get_company_uids(user_id)
+
+    # --- 1. Buscar en consumos_subsidio ---
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id})
+    if inv:
+        target_collection = db.consumos_subsidio
+        # Campos directos: el modelo InvoiceUpdateIn coincide 1-a-1 con consumos_subsidio
+        patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+        if "placa" in patch and patch["placa"]:
+            placa = patch["placa"].upper().strip()
+            patch["placa"] = placa
+            own = await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa})
+            patch["placa_match"] = placa if own else None
+        patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+        await target_collection.update_one({"id": invoice_id}, {"$set": patch})
+        return {"ok": True, "source": "consumos_subsidio"}
+
+    # --- 2. Si no está en consumos_subsidio, buscar en db.invoices ---
+    inv_enered = await db.invoices.find_one({"id": invoice_id})
+    if not inv_enered:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    # db.invoices usa nombres de campo distintos al modelo del frontend.
+    # El frontend envía: numero_documento, fecha, importe_total.
+    # db.invoices almacena:  n_doc,           f_emision, monto_total.
+    FIELD_MAP_TO_INVOICES = {
+        "numero_documento": "n_doc",
+        "fecha": "f_emision",
+        "importe_total": "monto_total",
+    }
+    raw_patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    inv_patch: dict = {}
+    for field, value in raw_patch.items():
+        mapped = FIELD_MAP_TO_INVOICES.get(field, field)
+        inv_patch[mapped] = value
+
+    if "placa" in inv_patch and inv_patch["placa"]:
+        inv_patch["placa"] = inv_patch["placa"].upper().strip()
+
+    inv_patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.invoices.update_one({"id": invoice_id}, {"$set": inv_patch})
+    return {"ok": True, "source": "invoices"}
 
 
 @subsidio_router.delete("/admin/subsidio/expedientes/{user_id}")
