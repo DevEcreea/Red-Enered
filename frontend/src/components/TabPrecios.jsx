@@ -36,6 +36,8 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
+  const sortedUnique = (arr) => [...new Set(arr.map((x) => (x || "").trim().toUpperCase()).filter(Boolean))].sort();
+
   useEffect(() => {
     api.get("/precios/ubicaciones")
       .then((r) => {
@@ -59,7 +61,6 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
       .catch(() => {});
   }, []);
 
-  const sortedUnique = (arr) => [...new Set(arr.map((x) => (x || "").trim().toUpperCase()).filter(Boolean))].sort();
 
   const fetchPrecios = useCallback(async () => {
     try {
