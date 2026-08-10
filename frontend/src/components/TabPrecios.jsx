@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
-import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw } from "lucide-react";
+import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw, Star, ShieldCheck, Plus } from "lucide-react";
 import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
 
 export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, syncing, isMobile = false }) {
@@ -12,6 +12,29 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   const [selClienteModal, setSelClienteModal] = useState("GENERAL");
   const [listaClientes, setListaClientes] = useState([]);
   const [savingEnered, setSavingEnered] = useState(false);
+
+  // Filtros y datos principales
+  const [precios, setPrecios] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [mejorPrecio, setMejorPrecio] = useState(0);
+  const [fuente, setFuente] = useState("facilito");
+  const [lastSync, setLastSync] = useState(null);
+  const [totalRegistros, setTotalRegistros] = useState(0);
+
+  // Filtros de ubicación / combustible
+  const [listaDepartamentos, setListaDepartamentos] = useState(DEPARTAMENTOS_PERU);
+  const [combustiblesDisponibles, setCombustiblesDisponibles] = useState(["Diesel B5 UV", "Gasohol Regular", "Gasohol Premium"]);
+  const [selDepartamento, setSelDepartamento] = useState("");
+  const [selProvincia, setSelProvincia] = useState("");
+  const [selDistrito, setSelDistrito] = useState("");
+  const [selCombustible, setSelCombustible] = useState("");
+  const [selEstacion, setSelEstacion] = useState("");
+  const [soloEnered, setSoloEnered] = useState(false);
+
+  // Paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
     api.get("/precios/ubicaciones")
