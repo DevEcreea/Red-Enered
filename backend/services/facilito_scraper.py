@@ -124,33 +124,66 @@ def _scrape_department(
     combustible: dict,
     enered_stations: set,
 ) -> list[dict]:
-    """Scrape all stations for a department+combustible combination."""
-    
-    # First try: POST with just departamento (gets all records without province filter)
-    payload = {
-        "method": "inicio",
-        "departamento_elegido": dpto["code"],
-        "provincia": "",
-        "distrito": "",
-        "combustible": combustible["value"],
-        "nameRedirectfile": "buscadorEESS",
-        "g-recaptcha-response": "",
-    }
-
+    """Scrape todas las estaciones de un departamento+combustible, iterando por provincia.
+    Iterar por provincia permite guardar el nombre de provincia en cada registro.
+    """
     results = []
-    
-    try:
-        response = session.post(
-            f"{ACTION_URL}?method=inicio",
-            data=payload,
-            timeout=TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        rows_found = _parse_table(response.text, dpto, combustible["value"], enered_stations)
-        results.extend(rows_found)
-        logger.info(f"[Facilito] {dpto['name']} / {combustible['value']}: {len(rows_found)} registros")
-    except Exception as e:
-        logger.warning(f"[Facilito] Error {dpto['name']} / {combustible['value']}: {e}")
+
+    # Obtener provincias para enriquecer cada registro con su provincia real
+    provinces = _get_provinces(session, dpto["code"])
+
+    if provinces:
+        for prov in provinces:
+            dpto_with_prov = {**dpto, "provincia": prov["name"]}
+            payload = {
+                "method": "inicio",
+                "departamento_elegido": dpto["code"],
+                "provincia": prov["code"],
+                "distrito": "",
+                "combustible": combustible["value"],
+                "nameRedirectfile": "buscadorEESS",
+                "g-recaptcha-response": "",
+            }
+            try:
+                response = session.post(
+                    f"{ACTION_URL}?method=inicio",
+                    data=payload,
+                    timeout=TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                rows_found = _parse_table(response.text, dpto_with_prov, combustible["value"], enered_stations)
+                results.extend(rows_found)
+                logger.info(
+                    f"[Facilito] {dpto['name']} / {prov['name']} / {combustible['value']}: {len(rows_found)} registros"
+                )
+                time.sleep(0.4)  # pausa corta entre provincias
+            except Exception as e:
+                logger.warning(
+                    f"[Facilito] Error {dpto['name']}/{prov['name']}/{combustible['value']}: {e}"
+                )
+    else:
+        # Fallback: scrape a nivel de departamento sin nombre de provincia
+        payload = {
+            "method": "inicio",
+            "departamento_elegido": dpto["code"],
+            "provincia": "",
+            "distrito": "",
+            "combustible": combustible["value"],
+            "nameRedirectfile": "buscadorEESS",
+            "g-recaptcha-response": "",
+        }
+        try:
+            response = session.post(
+                f"{ACTION_URL}?method=inicio",
+                data=payload,
+                timeout=TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            rows_found = _parse_table(response.text, dpto, combustible["value"], enered_stations)
+            results.extend(rows_found)
+            logger.info(f"[Facilito] {dpto['name']} / {combustible['value']}: {len(rows_found)} registros")
+        except Exception as e:
+            logger.warning(f"[Facilito] Error {dpto['name']} / {combustible['value']}: {e}")
 
     return results
 
@@ -211,9 +244,31 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
             telefono        = cols[3].strip()
             precio_raw      = cols[4].strip()
         elif len(cols) == 4:
-            # Some tables may not have distrito column separately
+            distrito        = ""
+            establecimiento = cols[0].strip()
+            direccion       = cols[1].strip()
+            telefono        = cols[2].strip()
+            precio_raw      = cols[3].strip()
+        else:
+            continue
+
+        precio = _parse_precio(precio_raw)
+        if not establecimiento or precio is None:
+            continue
+
+        es_enered = establecimiento.upper() in {s.upper() for s in enered_stations}
+
+        results.append({
+            "establecimiento": establecimiento,
+            "direccion": direccion,
+            "telefono": telefono,
+            "precio_venta": precio,
+            "precio_pizarra": precio,
+            "combustible": combustible_label,
+            "departamento": dpto["name"],
+            "provincia": dpto.get("provincia", dpto["name"]),
             "distrito": distrito,
-            "ciudad": distrito or dpto["name"],
+            "ciudad": distrito or dpto.get("provincia", dpto["name"]),
             "fuente": "facilito.gob.pe",
             "scraped_at": scraped_at,
             "es_enered": es_enered,
@@ -223,38 +278,6 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
         })
 
     return results
-
-
-=======
-def _scrape_one(
-    session: httpx.Client,
-    dpto: dict,
-    combustible: str,
-    enered_stations: set,
-) -> list[dict]:
-    payload = {
-        "departamento_elegido": dpto["code"],
-        "provincia": "",
-        "distrito": "",
-        "combustible": combustible,
-        "nameRedirectfile": "buscadorEESS",
-        "g-recaptcha-response": "",
-    }
-
-    try:
-        response = session.post(
-            f"{ACTION_URL}?method=inicio",
-            data=payload,
-            timeout=TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-    except Exception as e:
-        logger.warning(f"[Facilito] Error fetching {dpto['name']} / {combustible}: {e}")
-        return []
-
-    records = _parse_table(response.text, dpto, combustible, enered_stations)
-    logger.info(f"[Facilito] {dpto['name']} / {combustible}: {len(records)} registros")
-    return records
 
 
 

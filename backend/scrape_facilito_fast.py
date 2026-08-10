@@ -349,6 +349,7 @@ async def main():
 
         # Guardado continuo en MongoDB en segundo plano
         async def sync_to_db():
+            from pymongo import UpdateOne
             while True:
                 await asyncio.sleep(3)
                 batch = []
@@ -359,11 +360,27 @@ async def main():
                         seen.add(key)
                         all_results.append(r)
                         batch.append(r)
-                
+
                 if batch:
                     try:
-                        await db.precios_facilito.insert_many(batch)
-                        logger.info(f"💾 Guardado incremental: +{len(batch)} nuevas estaciones en MongoDB (Total actual: {len(all_results)})")
+                        ops = [
+                            UpdateOne(
+                                {
+                                    "establecimiento": r["establecimiento"],
+                                    "departamento":    r["departamento"],
+                                    "provincia":       r["provincia"],
+                                    "combustible":     r["combustible"],
+                                },
+                                {"$set": r},
+                                upsert=True,
+                            )
+                            for r in batch
+                        ]
+                        await db.precios_facilito.bulk_write(ops)
+                        logger.info(
+                            f"💾 Guardado incremental: +{len(batch)} estaciones "
+                            f"(Total acumulado: {len(all_results)})"
+                        )
                     except Exception as e:
                         logger.debug(f"Error guardando batch: {e}")
 

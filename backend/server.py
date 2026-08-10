@@ -288,9 +288,6 @@ async def get_precios(
     """Devuelve precios de estaciones de servicio con soporte para 4 filtros:
     departamento, provincia, distrito y combustible.
     """
-    await db.precios_facilito.delete_many({"establecimiento": {"$regex": "^ES ", "$options": "i"}})
-    await db.precios.delete_many({})
-
     facilito_count = await db.precios_facilito.count_documents({})
     if facilito_count < 1:
         try:
@@ -486,29 +483,40 @@ async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
     except Exception as e:
         logger.error(f"Facilito scrape error: {e}")
 
-    # 1. Ejecutar semilla siempre como respaldo base para estaciones críticas (ej. Trujillo)
-    await seed(db)
-
     if results:
-        # 2. Agrupar por departamento para NO borrar zonas que hayan fallado/colgado en Facilito
+        # Reemplazar solo los departamentos que se scrapearon exitosamente
+        # (conserva zonas que fallaron o no se incluyeron en esta corrida)
         dptos_scraped = set(r.get("departamento") for r in results if r.get("departamento"))
-        
         for dpto in dptos_scraped:
             await db.precios_facilito.delete_many({"departamento": dpto})
-            
         await db.precios_facilito.insert_many(results)
+        logger.info(f"[sync_precios] {len(results)} registros insertados para {len(dptos_scraped)} departamentos")
+    else:
+        # Scraping retornó 0 resultados: aplicar semilla SOLO si la colección está vacía
+        existing_count = await db.precios_facilito.count_documents({})
+        if existing_count == 0:
+            await seed(db)
+            logger.warning("[sync_precios] Scraping fallido. Semilla de respaldo aplicada.")
+        else:
+            logger.warning(
+                f"[sync_precios] Scraping retornó 0 resultados. "
+                f"Conservando {existing_count} registros existentes."
+            )
 
     await db.precios_facilito.create_index("combustible")
     await db.precios_facilito.create_index("departamento")
     await db.precios_facilito.create_index("es_enered")
-    
-    count = await db.precios_facilito.count_documents({})
 
+    count = await db.precios_facilito.count_documents({})
     return {
         "ok": True,
         "total_synced": len(results),
+        "total_en_db": count,
         "combustibles": COMBUSTIBLES,
-        "message": f"{len(results)} precios actualizados desde Facilito OSINERGMIN",
+        "message": (
+            f"{len(results)} precios actualizados desde Facilito OSINERGMIN"
+            if results else "Scraping sin resultados; base de datos previa conservada."
+        ),
     }
 
 
