@@ -19,6 +19,25 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   const [errorMsg, setErrorMsg] = useState("");
   const [mejorPrecio, setMejorPrecio] = useState(0);
   const [fuente, setFuente] = useState("facilito");
+  const [isSyncingInternal, setIsSyncingInternal] = useState(false);
+
+  // Use props if provided, otherwise use internal state
+  const isSyncing = syncing !== undefined ? syncing : isSyncingInternal;
+  
+  const doSync = handleSync || async () => {
+    if (!window.confirm("¿Iniciar sincronización masiva con Facilito? Esto puede tardar varios minutos.")) return;
+    try {
+      setIsSyncingInternal(true);
+      await api.post("/admin/precios/sync", { limit: 50 }); // Ajusta limit según tu backend
+      alert("Sincronización iniciada/completada con éxito.");
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error en sincronización: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSyncingInternal(false);
+    }
+  };
+
   const [lastSync, setLastSync] = useState(null);
   const [totalRegistros, setTotalRegistros] = useState(0);
 
@@ -271,12 +290,12 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
             )}
             {user?.role === "admin_enered" && (
               <button
-                onClick={handleSync}
-                disabled={syncing}
+                onClick={doSync}
+                disabled={isSyncing}
                 className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
               >
-                <RefreshCw className={`w-3 h-3 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Scrapeando..." : "Sincronizar Facilito"}
+                <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} />
+                {isSyncing ? "Scrapeando..." : "Sincronizar Facilito"}
               </button>
             )}
           </div>
