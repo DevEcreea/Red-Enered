@@ -24,7 +24,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   // Use props if provided, otherwise use internal state
   const isSyncing = syncing !== undefined ? syncing : isSyncingInternal;
   
-  const doSync = handleSync || async () => {
+  const doSync = handleSync ? handleSync : async () => {
     if (!window.confirm("¿Iniciar sincronización masiva con Facilito? Esto puede tardar varios minutos.")) return;
     try {
       setIsSyncingInternal(true);
