@@ -511,7 +511,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     let m = parseInt(parts[1], 10);
                     let d = parseInt(parts[2], 10);
 
-                    fecha = `${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}`;
+                    fechaStr = `${y}/${m.toString().padStart(2, '0')}/${d.toString().padStart(2, '0')}`;
                   } else {
                     fechaStr = r.FECHA;
                   }
