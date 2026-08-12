@@ -378,7 +378,10 @@ async def get_precios(
             {"direccion": {"$regex": dist_norm, "$options": "i"}}
         ]
     if solo_enered:
-        query["es_enered"] = True
+        # El flag es_enered de precios_facilito se pierde en cada scrape (reemplaza la colección).
+        # Filtramos por los nombres registrados en estaciones_enered (fuente de verdad).
+        _enered_names = await db.estaciones_enered.distinct("nombre_facilito")
+        query["establecimiento"] = {"$in": _enered_names or ["__NINGUNA__"]}
 
     # 1. Consulta estricta
     cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
@@ -391,7 +394,8 @@ async def get_precios(
         if combustible:
             fallback_query["combustible"] = query.get("combustible", {"$regex": combustible, "$options": "i"})
         if solo_enered:
-            fallback_query["es_enered"] = True
+            _en = await db.estaciones_enered.distinct("nombre_facilito")
+            fallback_query["establecimiento"] = {"$in": _en or ["__NINGUNA__"]}
         cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
         precios = await cursor.to_list(500)
 
@@ -5781,7 +5785,10 @@ async def get_precios(
             {"direccion": {"$regex": dist_norm, "$options": "i"}}
         ]
     if solo_enered:
-        query["es_enered"] = True
+        # El flag es_enered de precios_facilito se pierde en cada scrape (reemplaza la colección).
+        # Filtramos por los nombres registrados en estaciones_enered (fuente de verdad).
+        _enered_names = await db.estaciones_enered.distinct("nombre_facilito")
+        query["establecimiento"] = {"$in": _enered_names or ["__NINGUNA__"]}
 
     # 1. Consulta estricta
     cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
@@ -5794,7 +5801,8 @@ async def get_precios(
         if combustible:
             fallback_query["combustible"] = {"$regex": combustible, "$options": "i"}
         if solo_enered:
-            fallback_query["es_enered"] = True
+            _en = await db.estaciones_enered.distinct("nombre_facilito")
+            fallback_query["establecimiento"] = {"$in": _en or ["__NINGUNA__"]}
         cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
         precios = await cursor.to_list(500)
 
