@@ -283,12 +283,12 @@ class InvoiceCreate(BaseModel):
     fecha_emision: str
     fecha_vencimiento: str
     monto: float
-    estado: Literal["pendiente", "pagada", "vencida"] = "pendiente"
+    estado: Literal["pendiente", "pagada", "vencida", "tercero"] = "pendiente"
     pdf_url: Optional[str] = None
 
 
 class InvoiceUpdate(BaseModel):
-    estado: Optional[Literal["pendiente", "pagada", "vencida"]] = None
+    estado: Optional[Literal["pendiente", "pagada", "vencida", "tercero"]] = None
     pdf_url: Optional[str] = None
 
 
