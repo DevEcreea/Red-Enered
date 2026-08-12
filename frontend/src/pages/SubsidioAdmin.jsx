@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText,
   Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
@@ -25,7 +26,14 @@ export default function SubsidioAdmin() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("");
-  const [selectedId, setSelectedId] = useState(null);
+  // Expediente abierto persistido en la URL (?u=<userId>) para no perder el lugar al recargar.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get("u") || null;
+  const setSelectedId = (id) => {
+    const p = new URLSearchParams(searchParams);
+    if (id) { p.set("u", id); } else { p.delete("u"); p.delete("tab"); }
+    setSearchParams(p);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -202,7 +210,14 @@ export default function SubsidioAdmin() {
 function ExpedienteDetalle({ userId, onBack }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("general");
+  // Pestaña activa persistida en la URL (?tab=) para no perder el lugar al recargar.
+  const [tabParams, setTabParams] = useSearchParams();
+  const tab = tabParams.get("tab") || "general";
+  const setTab = (t) => {
+    const p = new URLSearchParams(tabParams);
+    p.set("tab", t);
+    setTabParams(p);
+  };
   const [savingStage, setSavingStage] = useState(false);
 
   useEffect(() => {
@@ -814,7 +829,25 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
   const [invPrecio, setInvPrecio] = useState("");
   const [invImporte, setInvImporte] = useState("");
   const [invProducto, setInvProducto] = useState("DIESEL B5");
+  const [invIgv, setInvIgv] = useState(false);
   const [savingInv, setSavingInv] = useState(false);
+  // Declarar factura como inválida (no se borra, solo se marca con motivo)
+  const [invInvalida, setInvInvalida] = useState(false);
+  const [invMotivos, setInvMotivos] = useState([]);
+  const [invMotivoOtros, setInvMotivoOtros] = useState("");
+  const toggleMotivo = (key) => {
+    setInvMotivos((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
+  };
+
+  // Checkbox "Agregar IGV (18%)": multiplica el precio unitario × 1.18 (o ÷ al desmarcar).
+  // El Importe Total se recalcula solo (galones × precio) por el useEffect de arriba.
+  const toggleIgv = (checked) => {
+    setInvIgv(checked);
+    const p = parseFloat(invPrecio);
+    if (!isNaN(p) && p > 0) {
+      setInvPrecio((checked ? p * 1.18 : p / 1.18).toFixed(4));
+    }
+  };
 
   // Auto-calculate Importe Total
   useEffect(() => {
@@ -929,6 +962,10 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
     setInvPrecio("");
     setInvImporte("");
     setInvProducto("DIESEL B5");
+    setInvIgv(false);
+    setInvInvalida(false);
+    setInvMotivos([]);
+    setInvMotivoOtros("");
     setShowInvoiceForm(true);
   };
 
@@ -957,12 +994,22 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
     setInvPrecio(inv.precio_unitario || "");
     setInvImporte(inv.importe_total || inv.monto_total || "");
     setInvProducto(inv.producto || "DIESEL B5");
+    setInvIgv(false);
+    setInvInvalida(!!inv.invalida);
+    setInvMotivos(inv.motivos_invalidez || []);
+    setInvMotivoOtros(inv.motivo_invalidez_otros || "");
     setShowInvoiceForm(true);
   };
 
   const saveInvoice = async (e) => {
     e.preventDefault();
-    if (!invNumero.trim() || !invFecha || !invPlaca) return alert("Número, fecha y placa son campos obligatorios.");
+    // Al declarar inválida no exigimos los campos (ej. motivo "sin placa"), pero sí un motivo.
+    if (invInvalida) {
+      if (invMotivos.length === 0) return alert("Selecciona al menos un motivo de invalidez.");
+      if (invMotivos.includes("otros") && !invMotivoOtros.trim()) return alert("Especifica el motivo en 'Otros'.");
+    } else if (!invNumero.trim() || !invFecha || !invPlaca) {
+      return alert("Número, fecha y placa son campos obligatorios.");
+    }
     setSavingInv(true);
     try {
       const payload = {
@@ -976,6 +1023,9 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
         precio_unitario: Number(invPrecio || 0),
         importe_total: Number(invImporte || 0),
         producto: invProducto,
+        invalida: invInvalida,
+        motivos_invalidez: invInvalida ? invMotivos : [],
+        motivo_invalidez_otros: invInvalida && invMotivos.includes("otros") ? invMotivoOtros.trim() : "",
       };
 
       if (editingInvoice) {
@@ -1357,6 +1407,15 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                         placeholder="0.00"
                         className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
                       />
+                      <label className="flex items-center gap-1.5 mt-1 text-[11px] font-medium text-neutral-600 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={invIgv}
+                          onChange={(e) => toggleIgv(e.target.checked)}
+                          className="accent-brand w-3.5 h-3.5"
+                        />
+                        Agregar IGV (18%)
+                      </label>
                     </div>
                     <div className="space-y-1 md:col-span-3">
                       <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
@@ -1369,6 +1428,54 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                         className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
                       />
                     </div>
+
+                    {/* Declarar factura como inválida (no se borra, solo se marca) */}
+                    <div className="md:col-span-3 border-t border-neutral-200 pt-3 mt-1">
+                      <label className="flex items-center gap-2 text-sm font-bold text-neutral-700 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={invInvalida}
+                          onChange={(e) => setInvInvalida(e.target.checked)}
+                          className="accent-red-600 w-4 h-4"
+                          data-testid="inv-invalida-toggle"
+                        />
+                        Declarar factura como inválida
+                      </label>
+                      {invInvalida && (
+                        <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                          <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide">Motivo (marca uno o más)</p>
+                          <div className="flex flex-wrap gap-3">
+                            {[
+                              { key: "tipo_combustible", label: "Tipo de combustible" },
+                              { key: "sin_placa", label: "Sin placa" },
+                              { key: "otros", label: "Otros" },
+                            ].map((m) => (
+                              <label key={m.key} className="flex items-center gap-1.5 text-xs font-medium text-neutral-700 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={invMotivos.includes(m.key)}
+                                  onChange={() => toggleMotivo(m.key)}
+                                  className="accent-red-600 w-3.5 h-3.5"
+                                  data-testid={`inv-motivo-${m.key}`}
+                                />
+                                {m.label}
+                              </label>
+                            ))}
+                          </div>
+                          {invMotivos.includes("otros") && (
+                            <input
+                              type="text"
+                              value={invMotivoOtros}
+                              onChange={(e) => setInvMotivoOtros(e.target.value)}
+                              placeholder="Especifica el motivo…"
+                              className="w-full h-9 px-3 border border-red-300 rounded-lg text-sm"
+                              data-testid="inv-motivo-otros"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="md:col-span-3 flex justify-end gap-2 pt-2">
                       <button
                         type="button"

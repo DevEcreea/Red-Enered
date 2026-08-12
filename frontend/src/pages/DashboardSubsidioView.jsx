@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Loader2, Fuel, Banknote, Truck, Building2, FileCheck2,
   CheckCircle2, Circle, AlertTriangle, ShieldCheck, BarChart3, Gauge, Users,
-  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench, Gift,
+  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench, Gift, MessageCircle,
 } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
@@ -67,6 +67,15 @@ export default function DashboardSubsidioView() {
     (kpis.gasto_total || 0) === 0 &&
     serie_semanal.length === 0 &&
     top_unidades.length === 0;
+
+  // Estado de validación de facturas por ENERED.
+  const invoicesConfirmed = kpis.invoices_confirmed || 0;
+  // Hay facturas cargadas que ENERED todavía está validando (aún no reflejan datos).
+  const enValidacion = pending_drafts > 0 || (invoicesConfirmed > 0 && hasNoData);
+  // No se ha cargado ninguna factura todavía.
+  const sinFacturas = hasNoData && pending_drafts === 0 && invoicesConfirmed === 0;
+  // WhatsApp para acelerar la validación.
+  const WA_VALIDACION = `https://wa.me/51972228870?text=${encodeURIComponent("Hola ENERED, cargué mis facturas de combustible y quisiera acelerar la validación para ver mis resultados.")}`;
 
   const donutData = useMemo(() => {
     if (!top_estaciones || top_estaciones.length === 0) {
@@ -192,35 +201,38 @@ export default function DashboardSubsidioView() {
         </button>
       </div>
 
-      {/* Banner: hay drafts pendientes de confirmar */}
-      {pending_drafts > 0 && (
+      {/* Banner: ENERED está validando las facturas cargadas */}
+      {enValidacion && (
         <div
-          className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3 shadow-sm"
-          data-testid="dashboard-drafts-banner"
+          className="bg-gradient-to-r from-brand/5 to-cyan-50 border border-brand/25 rounded-2xl p-4 flex items-start gap-3 shadow-sm"
+          data-testid="dashboard-validando-banner"
         >
-          <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center flex-shrink-0">
-            <AlertTriangle className="w-5 h-5" />
+          <div className="w-10 h-10 rounded-lg bg-brand text-white flex items-center justify-center flex-shrink-0">
+            <ShieldCheck className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <div className="font-cabinet font-bold text-amber-900">
-              Tienes {pending_drafts} {pending_drafts === 1 ? "factura subida" : "facturas subidas"} sin confirmar
+            <div className="font-cabinet font-bold text-neutral-900 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-brand" /> Estamos validando tus facturas
             </div>
-            <p className="text-xs text-amber-800 mt-0.5">
-              El dashboard solo muestra facturas <strong>confirmadas</strong>. Revísalas y confírmalas para que los KPIs y gráficos se actualicen.
+            <p className="text-xs text-neutral-600 mt-0.5">
+              ENERED está revisando {pending_drafts > 0 ? `las ${pending_drafts} ` : "las "}facturas que cargaste.
+              En cuanto se validen, verás aquí tu consumo, KPIs y rankings actualizados.
             </p>
           </div>
-          <button
-            onClick={() => navigate("/subsidio/verificar")}
-            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold rounded-lg flex items-center gap-2 flex-shrink-0"
-            data-testid="dashboard-drafts-banner-cta"
+          <a
+            href={WA_VALIDACION}
+            target="_blank"
+            rel="noreferrer"
+            className="px-4 py-2 bg-brand hover:bg-brand-hover text-white text-sm font-bold rounded-lg flex items-center gap-2 flex-shrink-0"
+            data-testid="dashboard-validando-cta"
           >
-            <CheckCircle2 className="w-4 h-4" /> Verificar y confirmar
-          </button>
+            <MessageCircle className="w-4 h-4" /> Obtener resultados ahora
+          </a>
         </div>
       )}
 
-      {/* Banner: sin facturas confirmadas todavía (sin drafts tampoco) */}
-      {hasNoData && pending_drafts === 0 && (
+      {/* Banner: sin facturas cargadas todavía */}
+      {sinFacturas && (
         <div
           className="bg-gradient-to-r from-brand/5 to-cyan-50 border border-brand/20 rounded-2xl p-4 flex items-start gap-3 shadow-sm"
           data-testid="dashboard-empty-banner"
@@ -229,9 +241,9 @@ export default function DashboardSubsidioView() {
             <Fuel className="w-5 h-5" />
           </div>
           <div className="flex-1">
-            <div className="font-cabinet font-bold text-neutral-900">Aún no hay facturas confirmadas</div>
+            <div className="font-cabinet font-bold text-neutral-900">Aún no has cargado facturas</div>
             <p className="text-xs text-neutral-600 mt-0.5">
-              Carga tus comprobantes de combustible y confírmalos para alimentar el dashboard con KPIs, evolución semanal y rankings.
+              Carga tus comprobantes de combustible. ENERED los validará y aquí verás tus KPIs, evolución semanal y rankings.
             </p>
           </div>
           <button

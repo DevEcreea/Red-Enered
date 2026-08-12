@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import io
+import re
 import uuid
 import random
 import secrets
@@ -5933,12 +5934,39 @@ async def invoice_download(inv_id: str, kind: str, request: Request):
         key = inv["factura_storage_key"]
         fname = inv.get("factura_filename") or inv.get("pdf_filename") or "factura_original.pdf"
         media = inv.get("factura_content_type") or "application/pdf"
-        
-        try:
-            data = storage.get_object_bytes(key)
-        except Exception:
+
+        data = None
+        # 1) Intentar la key guardada.
+        if key and storage.object_exists(key):
+            try:
+                data = storage.get_object_bytes(key)
+            except Exception:
+                data = None
+        # 2) Fallback robusto: el archivo real del cliente vive en
+        #    subsidio/{user_id}/factura_subsidio/{hash}-{factura_filename}. Buscamos por el
+        #    nombre de archivo real aunque factura_storage_key apunte a una key inexistente.
+        if data is None:
+            # Probar varias pistas: nombre real, nombre sin espacios (el archivo se saneó al
+            # subir) y, lo más estable, el número de documento (va embebido en el nombre).
+            n_doc = inv.get("n_doc") or inv.get("numero_documento") or ""
+            alt_fname = inv.get("factura_filename") or inv.get("pdf_filename") or ""
+            candidates = [c for c in [
+                alt_fname,
+                alt_fname.replace(" ", ""),
+                f"{n_doc}.pdf" if n_doc else "",
+            ] if c]
+            for cand in candidates:
+                alt_key = storage.find_by_suffix(cand, prefix="subsidio/")
+                if alt_key:
+                    try:
+                        data = storage.get_object_bytes(alt_key)
+                    except Exception:
+                        data = None
+                    if data is not None:
+                        break
+        if data is None:
             raise HTTPException(status_code=404, detail="El documento original no está disponible")
-            
+
         from fastapi.responses import Response
         import urllib.parse
         encoded_name = urllib.parse.quote(fname)

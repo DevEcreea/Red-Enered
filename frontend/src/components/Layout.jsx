@@ -26,7 +26,7 @@ const MENU = [
   { to: "/analitica", label: "Analytics BI", icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
   { to: "/monitoreo", label: "Monitoreo", icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
   { to: "/flotas", label: "Combustible", icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
-  { to: "/facturacion", label: "Gestión Gastos", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
+  { to: "/facturacion", label: "Gestión de Gastos", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
   { to: "/mantenimiento", label: "Mantenimiento", icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
   { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist" },
   { to: "/infracciones", label: "Infracciones", icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
@@ -247,8 +247,9 @@ export default function Layout({ children }) {
       if (user?.servicios?.plataforma) return false;
       if (user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
     }
-    // Condición: Ningún usuario de empresa ve Dashboard a menos que tengan el servicio plataforma
-    if (i.to === "/dashboard" && user.role !== "admin_enered") {
+    // Condición: Ningún usuario de empresa ve Dashboard a menos que tengan el servicio plataforma.
+    // Excepción: cliente_subsidio siempre ve su panel ("Mi Panel"), aunque no tenga plataforma.
+    if (i.to === "/dashboard" && user.role !== "admin_enered" && user.role !== "cliente_subsidio") {
       if (!user?.servicios?.plataforma) {
         return false;
       }

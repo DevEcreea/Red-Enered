@@ -10,65 +10,22 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
 // --- Subcomponente para cada factura editable ---
-function InvoiceRow({ item, setField, saveRow, deleteRow, vehicles, saving }) {
-  const isVehicleOk = vehicles.some((v) => v.placa === item.placa);
-  const placaColor = !item.placa ? "border-red-300 bg-red-50" : isVehicleOk ? "border-green-300 bg-green-50" : "border-yellow-300 bg-yellow-50";
-
+function InvoiceRow({ item, deleteRow }) {
+  // El cliente solo sube el archivo; ENERED valida y completa los datos después.
   return (
-    <div className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm mb-4 relative">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2 truncate">
-          <FileText className="w-4 h-4 text-neutral-400" />
-          <span className="font-medium text-sm text-neutral-800 truncate" title={item.factura_filename}>{item.factura_filename}</span>
+    <div className="bg-white border border-neutral-200 rounded-xl p-3.5 shadow-sm mb-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center flex-shrink-0">
+          <FileText className="w-4 h-4 text-brand" />
         </div>
-        <button onClick={() => deleteRow(item.id)} className="text-neutral-400 hover:text-red-500" title="Eliminar archivo">
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-sm">
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Proveedor</label>
-          <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.estacion || ""} onChange={(e) => setField(item.id, "estacion", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Fecha Emisión</label>
-          <input type="text" placeholder="YYYY-MM-DD" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.fecha || ""} onChange={(e) => setField(item.id, "fecha", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Placa</label>
-          <input type="text" className={`w-full border rounded p-1.5 focus:outline-none ${placaColor}`} value={item.placa || ""} onChange={(e) => setField(item.id, "placa", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Producto</label>
-          <input type="text" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.producto || ""} onChange={(e) => setField(item.id, "producto", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Cant (Gal)</label>
-          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.galones ?? ""} onChange={(e) => setField(item.id, "galones", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Precio Uni</label>
-          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.precio_unitario ?? ""} onChange={(e) => setField(item.id, "precio_unitario", e.target.value)} />
-        </div>
-        <div>
-          <label className="block text-[10px] font-bold text-neutral-500 uppercase mb-1">Importe</label>
-          <input type="number" step="0.01" className="w-full border border-neutral-300 rounded p-1.5 focus:border-brand focus:outline-none" value={item.importe_total ?? ""} onChange={(e) => setField(item.id, "importe_total", e.target.value)} />
+        <div className="min-w-0">
+          <span className="block font-medium text-sm text-neutral-800 truncate" title={item.factura_filename}>{item.factura_filename}</span>
+          <span className="text-[11px] text-emerald-600 font-medium">Subida ✓ · ENERED validará los datos</span>
         </div>
       </div>
-
-      {item._dirty && (
-        <div className="mt-3 flex justify-end">
-          <button
-            onClick={() => saveRow(item)}
-            disabled={saving}
-            className="px-3 py-1.5 bg-brand hover:bg-brand-hover text-white text-xs font-bold rounded flex items-center gap-2 disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-            Guardar cambios
-          </button>
-        </div>
-      )}
+      <button onClick={() => deleteRow(item.id)} className="text-neutral-400 hover:text-red-500 flex-shrink-0" title="Eliminar archivo">
+        <Trash2 className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -76,7 +33,7 @@ function InvoiceRow({ item, setField, saveRow, deleteRow, vehicles, saving }) {
 const ETAPAS = [
   { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
-  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF · OCR" },
+  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF o imagen · OCR" },
   { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
 ];
 
@@ -655,7 +612,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
 
   return (
     <div>
-      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga libre · Extracción OCR · Solo PDF" />
+      <EtapaHeader n={3} icon={Fuel} title="Facturas de combustible" subtitle="Carga todas tus facturas desde aquí" />
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-900 flex gap-2">
         <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -679,7 +636,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           </div>
           <label className={`px-4 py-2.5 ${uploading ? "bg-neutral-300" : "bg-brand hover:bg-brand-hover"} text-white font-bold rounded-lg flex items-center gap-2 cursor-pointer text-sm`} data-testid="combustible-upload">
             {uploading ? (<><Loader2 className="w-4 h-4 animate-spin" /> Procesando {uploadProgress.done}/{uploadProgress.total}…</>) : (<><Upload className="w-4 h-4" /> {items.length === 0 ? "Subir facturas" : "Adjuntar más"}</>)}
-            <input ref={fileRef} type="file" hidden multiple accept=".pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
+            <input ref={fileRef} type="file" hidden multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
           </label>
         </div>
         {uploading && uploadProgress.total > 0 && (
@@ -720,17 +677,13 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
             </div>
           </div>
           <div className="space-y-2 mt-4">
-            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Comprobantes subidos: (Si falta algún dato, llénalo manualmente y guarda)</h4>
+            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Comprobantes subidos:</h4>
             <div>
               {items.map((it) => (
-                <InvoiceRow 
-                  key={it.id} 
-                  item={it} 
-                  setField={setField} 
-                  saveRow={saveRow} 
-                  deleteRow={deleteRow} 
-                  vehicles={vehicles}
-                  saving={savingId === it.id}
+                <InvoiceRow
+                  key={it.id}
+                  item={it}
+                  deleteRow={deleteRow}
                 />
               ))}
             </div>
@@ -745,7 +698,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
       <div className="mt-4 flex items-center justify-end gap-3 flex-wrap">
         <label className="px-4 py-2 border border-neutral-300 bg-white rounded-lg text-sm font-bold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-50" data-testid="combustible-add-more">
           <Plus className="w-4 h-4" /> Adjuntar más
-          <input type="file" hidden multiple accept=".pdf" onChange={handleUpload} disabled={uploading} />
+          <input type="file" hidden multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={handleUpload} disabled={uploading} />
         </label>
         <button onClick={enviarReporte} disabled={confirming || items.length === 0}
           className="px-5 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"
@@ -877,7 +830,7 @@ function EtapaHeader({ n, icon: Ic, title, subtitle, inline }) {
       <div>
         <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Etapa 0{n}</span>
         <h3 className="font-cabinet text-xl font-bold">{title}</h3>
-        <p className="text-xs text-neutral-500">{subtitle}</p>
+        {subtitle && <p className="text-xs text-neutral-500">{subtitle}</p>}
       </div>
     </div>
   );

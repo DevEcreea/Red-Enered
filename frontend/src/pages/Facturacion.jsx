@@ -109,8 +109,34 @@ export default function Facturacion() {
       .finally(() => setLoading(false));
   }, [empresa]);
 
-  const totalPages = Math.max(1, Math.ceil(invoices.length / PAGE_SIZE));
-  const pageRows = invoices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Orden: primero las facturas con estado propio (ENERED), de la más reciente a la más
+  // vieja; al final, las de TERCERO (cargadas por el cliente, created_via=subsidio_confirm).
+  const sortedInvoices = useMemo(() => {
+    const dateKey = (inv) => {
+      let s = String(inv.f_emision || inv.fecha || "").trim();
+      if (!s) return "";
+      if (s.includes("T")) s = s.split("T")[0];
+      if (s.includes("/")) {
+        const p = s.split("/");
+        if (p.length === 3) {
+          return p[0].length === 4
+            ? `${p[0]}-${p[1].padStart(2, "0")}-${p[2].padStart(2, "0")}`
+            : `${p[2]}-${p[1].padStart(2, "0")}-${p[0].padStart(2, "0")}`;
+        }
+      }
+      return s.slice(0, 10);
+    };
+    const isTercero = (inv) => inv.created_via === "subsidio_confirm";
+    return [...invoices].sort((a, b) => {
+      const ta = isTercero(a) ? 1 : 0;
+      const tb = isTercero(b) ? 1 : 0;
+      if (ta !== tb) return ta - tb;                 // no-tercero primero, tercero al final
+      return dateKey(b).localeCompare(dateKey(a));   // más reciente → más vieja
+    });
+  }, [invoices]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedInvoices.length / PAGE_SIZE));
+  const pageRows = sortedInvoices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const donutData = useMemo(() => {
     if (!state) return [];
@@ -159,7 +185,7 @@ export default function Facturacion() {
       body: invoices.map((i) => [
         i.n_doc, i.tipo_doc || "—", i.f_emision || "—", i.f_vencimiento || "—",
         `${i.atraso_dias || 0} d`, formatSoles(i.monto_total), formatSoles(i.saldo),
-        (i.estado || "").toUpperCase(),
+        i.created_via === "subsidio_confirm" ? "TERCERO" : (i.estado || "").toUpperCase(),
       ]),
       headStyles: { fillColor: [30, 27, 75] },
       styles: { fontSize: 8 },
@@ -486,7 +512,12 @@ export default function Facturacion() {
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
                       <td className="px-3 py-2.5 text-center">
-                        {user?.role === "admin_enered" ? (
+                        {inv.created_via === "subsidio_confirm" ? (
+                          // Factura cargada por el cliente (comprobante de tercero, ej. grifo).
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE.TERCERO}`} title="Factura cargada por el cliente (tercero)">
+                            {ESTADO_LABEL.TERCERO}
+                          </span>
+                        ) : user?.role === "admin_enered" ? (
                           <EstadoEditor
                             inv={inv}
                             onUpdated={(newEstado) => {
