@@ -2159,15 +2159,25 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     # NOMBRE DE ARCHIVO real (que es confiable), no por numero_documento, que puede
     # venir corrupto del OCR. Esto localiza la factura aunque factura_storage_key
     # apunte a una key inexistente.
-    if not valid_key and fname:
-        try:
-            uid = inv.get("user_id")
-            if uid:
-                valid_key = storage.find_by_suffix(fname, prefix=f"subsidio/{uid}/")
-            if not valid_key:
-                valid_key = storage.find_by_suffix(fname, prefix="subsidio/")
-        except Exception:
-            pass
+    if not valid_key:
+        uid = inv.get("user_id")
+        # Varias pistas: nombre real, nombre sin espacios (el archivo se saneó al subir)
+        # y el número de documento. La primera que aparezca en R2 gana.
+        candidatos = [c for c in [
+            fname,
+            (fname or "").replace(" ", ""),
+            f"{n_doc}.pdf" if n_doc else "",
+        ] if c]
+        for cand in candidatos:
+            try:
+                if uid:
+                    valid_key = storage.find_by_suffix(cand, prefix=f"subsidio/{uid}/")
+                if not valid_key:
+                    valid_key = storage.find_by_suffix(cand, prefix="subsidio/")
+            except Exception:
+                valid_key = None
+            if valid_key:
+                break
 
     if not valid_key:
         # CASO 4: ninguna referencia válida → 404. No se genera ningún documento.
