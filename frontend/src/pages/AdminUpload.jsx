@@ -645,9 +645,10 @@ const ESTADO_BADGE = {
   pagado:    "bg-green-100 text-green-700 border-green-200",
   por_vencer:"bg-amber-100 text-amber-700 border-amber-200",
   vencido:   "bg-red-100  text-red-700  border-red-200",
+  tercero:   "bg-blue-100 text-blue-700 border-blue-200",
 };
 const ESTADO_LABEL = {
-  pagada:"PAGADA", pendiente:"PENDIENTE", vencida:"VENCIDA",
+  pagada:"PAGADA", pendiente:"PENDIENTE", vencida:"VENCIDA", tercero:"TERCERO",
   pagado:"PAGADA", por_vencer:"PENDIENTE", vencido:"VENCIDA",
 };
 
@@ -983,6 +984,7 @@ function InvoiceEditModal({ inv, onClose, onSaved }) {
     { v: "pagada",    l: "PAGADA",    cls: "bg-green-50 text-green-700 border-green-200" },
     { v: "pendiente", l: "PENDIENTE", cls: "bg-amber-50 text-amber-700 border-amber-200" },
     { v: "vencida",   l: "VENCIDA",   cls: "bg-red-50  text-red-700  border-red-200" },
+    { v: "tercero",   l: "TERCERO",   cls: "bg-blue-50 text-blue-700 border-blue-200" },
   ];
 
   return (
