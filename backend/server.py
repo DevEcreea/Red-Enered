@@ -172,7 +172,7 @@ async def get_current_user(request: Request) -> dict:
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
         # Impersonación: admin_enered puede "actuar como" una empresa (header X-Impersonate-Empresa).
-        imp = request.headers.get("X-Impersonate-Empresa") or request.query_params.get("_imp")
+        imp = request.headers.get("X-Impersonate-Empresa")
         if imp and user.get("role") == "admin_enered":
             eff = await _impersonate_context(user, imp.strip())
             if eff:
@@ -2789,7 +2789,7 @@ async def sheets_sync(data: SheetsSyncIn, user: dict = Depends(require_roles("ad
         raise HTTPException(status_code=400, detail=f"Error al sincronizar: {str(e)}")
 
 @api.get("/admin/force-sync-now")
-async def force_sync_now():
+async def force_sync_now(user: dict = Depends(require_roles("admin_enered"))):
     try:
         result = await sync_to_mongo(db, mode="replace")
         return {"status": "success", "message": "Sincronización completada con éxito. Las fechas han sido corregidas.", "result": result}
