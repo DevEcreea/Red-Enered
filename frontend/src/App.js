@@ -49,6 +49,7 @@ import SubsidioDocumentos from "./pages/SubsidioDocumentos";
 import SubsidioVerificar from "./pages/SubsidioVerificar";
 import SubsidioFinalizado from "./pages/SubsidioFinalizado";
 import SubsidioAdmin from "./pages/SubsidioAdmin";
+import Bitacora from "./pages/Bitacora";
 import Privacidad from "./pages/Privacidad";
 import { useAuth } from "./context/AuthContext";
 
@@ -143,6 +144,7 @@ function App() {
           <Route path="/admin/tesoreria" element={<Shell roles={["admin_enered", "contabilidad", "administrador"]}><AdminTesoreria /></Shell>} />
           <Route path="/admin/empresas" element={<Shell roles={["admin_enered"]}><AdminEmpresas /></Shell>} />
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
+          <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
