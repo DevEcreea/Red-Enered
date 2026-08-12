@@ -481,14 +481,16 @@ async def subsidio_validation_state(user: dict = Depends(_require_subsidio)):
     uids = await _get_company_uids(user["id"])
     # Total de facturas que el cliente subió (cualquier estado, incluido draft)
     uploaded = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}})
-    # "visible" = facturas que REALMENTE aparecerían en Combustible/Gestión de Gastos.
-    # Debe usar el mismo filtro que /consumptions para clientes de subsidio, para que el
-    # aviso coincida exactamente con lo que el cliente ve (0 KPIs = aún en validación).
+    # "visible" = facturas con datos REALES reconocidos que ya alimentan los KPIs.
+    # Clave: una factura puede estar 'confirmed' pero con galones/importe en 0/null porque
+    # el OCR no extrajo o ENERED aún no la validó — en ese caso los KPIs salen en 0 y el
+    # aviso DEBE mostrarse. Por eso exigimos galones > 0 (dato real), no solo status.
     visible = await db.consumos_subsidio.count_documents({
         "user_id": {"$in": uids},
         "status": "confirmed",
         "origin": {"$ne": "admin_ocr"},
         "estacion": {"$ne": "ENERED"},
+        "galones": {"$gt": 0},
     })
     fleet = 0
     empresa = user.get("empresa")
