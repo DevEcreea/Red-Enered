@@ -1522,6 +1522,13 @@ class WialonReportRunIn(BaseModel):
     date_to: int                            # epoch seconds
 
 
+class WialonFuelGraphIn(BaseModel):
+    empresa: Optional[str] = None          # solo admin_enered
+    unit_id: int
+    date_from: int                          # epoch seconds
+    date_to: int                            # epoch seconds
+
+
 @api.get("/empresas-config")
 async def list_empresas_config(user: dict = Depends(require_roles("admin_enered"))):
     configs = await db.empresas_config.find({}, {"_id": 0}).to_list(500)
@@ -5151,6 +5158,173 @@ async def wialon_report_run(body: WialonReportRunIn, user: dict = Depends(get_cu
         "date_from": body.date_from,
         "date_to": body.date_to,
         "tables": tables,
+    }
+
+
+# ---------- Wialon: evaluador de sensores (para gráfica de combustible) ----------
+def _wialon_parse_table(d):
+    """Parsea la tabla de calibración de un sensor Wialon: 'label|x0:y0:x1:y1...' -> [(x,y),...]."""
+    if not d:
+        return None
+    body = str(d).split("|")[-1] if "|" in str(d) else str(d)
+    try:
+        nums = [float(x) for x in body.split(":") if x.strip() != ""]
+    except Exception:
+        return None
+    pts = [(nums[i], nums[i + 1]) for i in range(0, len(nums) - 1, 2)]
+    return pts or None
+
+
+def _wialon_interp(pts, x):
+    """Interpolación lineal a trozos sobre la tabla de calibración."""
+    if not pts:
+        return x
+    if x <= pts[0][0]:
+        return pts[0][1]
+    if x >= pts[-1][0]:
+        return pts[-1][1]
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        if x0 <= x <= x1:
+            return y0 if x1 == x0 else y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
+_SAFE_EXPR_RE = re.compile(r"^[\d\s\.\+\-\*/\(\)]+$")
+
+
+def _wialon_eval_sensor(sensor, sensors_by_name, params, depth=0):
+    """
+    Evalúa el valor de un sensor Wialon para un mensaje, resolviendo fórmulas
+    ([Otro Sensor]) y aplicando su tabla de calibración. Maneja cualquier
+    configuración: parámetro directo (CANbus/%), fórmula de tanques, etc.
+    """
+    if depth > 6 or not sensor:
+        return None
+    p = str(sensor.get("p") or "").strip()
+    raw = None
+    if "[" in p:
+        # fórmula que referencia otros sensores por nombre
+        expr = re.sub(r"\[([^\]]+)\]",
+                      lambda m: str(_wialon_eval_sensor(sensors_by_name.get(m.group(1)), sensors_by_name, params, depth + 1) or 0),
+                      p)
+        if _SAFE_EXPR_RE.match(expr or ""):
+            try:
+                raw = eval(expr, {"__builtins__": {}}, {})  # noqa: S307 — expr saneada a solo aritmética
+            except Exception:
+                raw = None
+    elif p in params:
+        raw = params.get(p)
+    elif p:
+        # expresión con nombres de parámetros (ej. "io_270*0.1")
+        expr = re.sub(r"[a-zA-Z_]\w*", lambda m: str(params.get(m.group(0), 0)), p)
+        if _SAFE_EXPR_RE.match(expr or ""):
+            try:
+                raw = eval(expr, {"__builtins__": {}}, {})  # noqa: S307
+            except Exception:
+                raw = None
+    if raw is None:
+        return None
+    try:
+        raw = float(raw)
+    except Exception:
+        return None
+    pts = _wialon_parse_table(sensor.get("d"))
+    val = _wialon_interp(pts, raw) if pts else raw
+    try:
+        return round(float(val), 2)
+    except Exception:
+        return None
+
+
+def _is_fuel_sensor(s):
+    t = (s.get("t") or "").lower()
+    n = (s.get("n") or "").upper()
+    if "fuel" in t:
+        return True
+    return any(k in n for k in ["COMBUSTIBLE", "TANQUE", "NIVEL DE COMB", "% TANQUE", "FUEL", "CAN_FUEL"])
+
+
+# ---------- Wialon: serie temporal de nivel de combustible (gráfica) ----------
+@api.post("/wialon/fuel-graph")
+async def wialon_fuel_graph(body: WialonFuelGraphIn, user: dict = Depends(get_current_user)):
+    """
+    Devuelve la serie temporal de nivel de combustible de una unidad, calculada a
+    partir de los mensajes crudos + la configuración de sensores (fórmulas y tablas
+    de calibración). Auto-detecta los sensores de combustible de la unidad, por lo
+    que funciona con cualquier configuración (CANbus, % de tanque, tanques izq/der).
+    """
+    import json as _json
+    MAX_MSGS = 6000       # tope de mensajes a cargar
+    MAX_POINTS = 500      # puntos por serie devueltos al frontend (downsample)
+    target, cfg = await _resolve_wialon_target(user, body.empresa)
+    if body.date_to <= body.date_from:
+        raise HTTPException(status_code=400, detail="Rango de fechas inválido")
+    client, base, sid = await _wialon_login(cfg)
+    try:
+        # 1) config de sensores de la unidad (flag 0x1000)
+        r = await client.get(base, params={
+            "svc": "core/search_item",
+            "params": _json.dumps({"id": body.unit_id, "flags": 0x00000001 | 0x00001000}),
+            "sid": sid,
+        })
+        item = (r.json() or {}).get("item") or {}
+        unit_name = item.get("nm") or ""
+        sens = item.get("sens") or {}
+        by_name = {s.get("n"): s for s in sens.values()}
+        # sensores de combustible: preferir los de tipo "fuel level" (el total calculado)
+        fuel_sensors = [s for s in sens.values() if (s.get("t") or "").lower().find("fuel") >= 0]
+        if not fuel_sensors:
+            fuel_sensors = [s for s in sens.values() if _is_fuel_sensor(s)]
+        if not fuel_sensors:
+            raise HTTPException(status_code=404, detail=f"La unidad {unit_name or body.unit_id} no tiene sensores de combustible configurados en Wialon.")
+        # 2) cargar mensajes del intervalo
+        rr = await client.get(base, params={
+            "svc": "messages/load_interval",
+            "params": _json.dumps({"itemId": body.unit_id, "timeFrom": body.date_from, "timeTo": body.date_to,
+                                   "flags": 0, "flagsMask": 0, "loadCount": MAX_MSGS}),
+            "sid": sid,
+        })
+        msgs = (rr.json() or {}).get("messages") or []
+        await client.get(base, params={"svc": "messages/unload", "params": "{}", "sid": sid})
+    finally:
+        await client.aclose()
+
+    # 3) evaluar cada sensor de combustible por mensaje
+    series = []
+    for s in fuel_sensors:
+        pts = []
+        for m in msgs:
+            t = m.get("t")
+            v = _wialon_eval_sensor(s, by_name, m.get("p") or {})
+            if t is not None and v is not None:
+                pts.append((t, v))
+        if len(pts) < 2:
+            continue
+        # downsample uniforme
+        if len(pts) > MAX_POINTS:
+            step = len(pts) / MAX_POINTS
+            pts = [pts[int(i * step)] for i in range(MAX_POINTS)]
+        ys = [v for _, v in pts]
+        series.append({
+            "name": s.get("n") or "Combustible",
+            "unit": s.get("m") or "",
+            "points": [{"t": t, "v": v} for t, v in pts],
+            "min": round(min(ys), 2),
+            "max": round(max(ys), 2),
+            "first": ys[0],
+            "last": ys[-1],
+        })
+    if not series:
+        raise HTTPException(status_code=404, detail="No hay datos de combustible para ese rango de fechas.")
+    return {
+        "empresa": target,
+        "unit_id": body.unit_id,
+        "unit_name": unit_name,
+        "date_from": body.date_from,
+        "date_to": body.date_to,
+        "series": series,
     }
 
 
