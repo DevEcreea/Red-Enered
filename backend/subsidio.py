@@ -19,8 +19,34 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
 import storage  # tu storage.py existente (R2 + fallback local)
+import re as _re
 
 logger = logging.getLogger("enered.subsidio")
+
+# Conectores que van en minúscula dentro de nombres de ciudad
+_CITY_MINOR_WORDS = {"de", "del", "la", "las", "los", "y", "el", "en", "a"}
+
+
+def normalize_city(value: Optional[str]) -> str:
+    """Unifica escritura de ciudad: 'TRUJILLO'/'trujillo'/'tRujilLo' -> 'Trujillo'."""
+    if not value:
+        return ""
+    s = _re.sub(r"\s+", " ", str(value).strip())
+    if not s:
+        return ""
+    tokens = _re.split(r"([ \-])", s)
+    out, word_idx = [], 0
+    for tok in tokens:
+        if tok in (" ", "-"):
+            out.append(tok)
+            continue
+        low = tok.lower()
+        if word_idx > 0 and low in _CITY_MINOR_WORDS:
+            out.append(low)
+        elif low:
+            out.append(low[0].upper() + low[1:])
+        word_idx += 1
+    return "".join(out)
 
 subsidio_router = APIRouter(prefix="/api")
 
@@ -1085,7 +1111,7 @@ async def invoices_upload(
             "fecha": extracted.get("fecha"),
             "hora": extracted.get("hora"),
             "estacion": extracted.get("estacion"),
-            "ciudad": extracted.get("ciudad"),
+            "ciudad": normalize_city(extracted.get("ciudad")),
             "ruc_emisor": extracted.get("ruc_emisor"),
             "placa": extracted.get("placa"),
             "producto": extracted.get("producto"),
@@ -1927,7 +1953,7 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
                 "placa": ei.get("placa"),
                 "galones": ei.get("galones"),
                 "precio_unitario": ei.get("precio_unitario"),
-                "ciudad": ei.get("ciudad"),
+                "ciudad": normalize_city(ei.get("ciudad")),
                 "ruc_emisor": ei.get("ruc_emisor"),
                 "estacion": ei.get("estacion"),
                 "hora": ei.get("hora"),
@@ -2411,7 +2437,7 @@ async def admin_add_invoice(
         "fecha": payload.fecha,
         "hora": "12:00",
         "estacion": payload.estacion,
-        "ciudad": payload.ciudad,
+        "ciudad": normalize_city(payload.ciudad),
         "ruc_emisor": payload.ruc_emisor,
         "placa": placa,
         "producto": payload.producto or "DIESEL B5",

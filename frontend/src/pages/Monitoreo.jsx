@@ -2,11 +2,12 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ModuloBloqueado from "./ModuloBloqueado";
+import WialonInformes from "../components/WialonInformes";
 import { toast } from "sonner";
 import {
   Loader2, AlertTriangle, RefreshCw, ExternalLink, Users, Building2,
   MapPin, Gauge, Clock, Truck, Plus, Power, Navigation, Route, Calendar, X, MessageCircle,
-  Video, Shield, ShieldOff, Play, Wrench, ChevronDown, Check
+  Video, Shield, ShieldOff, Play, Wrench, ChevronDown, Check, Map as MapIcon, FileBarChart
 } from "lucide-react";
 
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
@@ -102,6 +103,7 @@ export default function Monitoreo() {
   const [trailerStatus, setTrailerStatus] = useState({});
   const [activeRouteUnit, setActiveRouteUnit] = useState(null);
   const [routePolyline, setRoutePolyline] = useState([]);
+  const [view, setView] = useState("mapa"); // "mapa" | "informes"
 
   const isAdmin = user?.role === "admin_enered";
   const servicios = user?.servicios || {};
@@ -324,10 +326,25 @@ Ubicación/Dirección: ${formData.direccion}`;
           )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowModal(true)} 
+          {/* Toggle Mapa | Informes */}
+          <div style={{ display: "inline-flex", background: "#F3F4F6", borderRadius: 8, padding: 3 }}>
+            <button onClick={() => setView("mapa")} data-testid="view-mapa"
+              style={{ padding: "6px 14px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6,
+                background: view === "mapa" ? "#fff" : "transparent", color: view === "mapa" ? "#5B21B6" : "#6b7280", boxShadow: view === "mapa" ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>
+              <MapIcon style={{ width: 15, height: 15 }} /> Mapa
+            </button>
+            <button onClick={() => setView("informes")} data-testid="view-informes"
+              style={{ padding: "6px 14px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6,
+                background: view === "informes" ? "#fff" : "transparent", color: view === "informes" ? "#5B21B6" : "#6b7280", boxShadow: view === "informes" ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>
+              <FileBarChart style={{ width: 15, height: 15 }} /> Informes
+            </button>
+          </div>
+          {view === "mapa" && (
+          <button onClick={() => setShowModal(true)}
             style={{ padding: "8px 14px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#374151", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Plus style={{ width: 16, height: 16 }} /> Agregar Unidad
           </button>
+          )}
           <button onClick={() => loadUnits(isAdmin ? selectedEmpresa : undefined)} data-testid="btn-wialon-refresh"
             style={{ padding: "8px 14px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#374151", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <RefreshCw style={{ width: 14, height: 14 }} /> Actualizar
@@ -339,14 +356,21 @@ Ubicación/Dirección: ${formData.direccion}`;
         </div>
       </div>
 
-      {state.loading && (
+      {view === "informes" && (
+        <WialonInformes
+          empresa={isAdmin ? selectedEmpresa : undefined}
+          units={(data?.units || []).map((u) => ({ id: u.id, name: u.name }))}
+        />
+      )}
+
+      {view === "mapa" && state.loading && (
         <div style={{ background: "#fff", borderRadius: 12, padding: 60, textAlign: "center", color: "#6b7280" }}>
           <Loader2 style={{ width: 32, height: 32, animation: "spin 1s linear infinite", color: "#3B82F6", margin: "0 auto" }} />
           <div style={{ marginTop: 12, fontWeight: 500 }}>Consultando posiciones en Wialon…</div>
         </div>
       )}
 
-      {state.error && !state.loading && (
+      {view === "mapa" && state.error && !state.loading && (
         <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 12, padding: 24, color: "#991B1B" }}>
           <AlertTriangle style={{ width: 20, height: 20, display: "inline", verticalAlign: -3, marginRight: 6 }} />
           <strong>Error:</strong> {state.error}
@@ -356,7 +380,7 @@ Ubicación/Dirección: ${formData.direccion}`;
         </div>
       )}
 
-      {data && !state.loading && !state.error && (
+      {view === "mapa" && data && !state.loading && !state.error && (
         <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1.5fr", gap: 16, height: "calc(100vh - 180px)" }}>
           {/* PANEL LATERAL: LISTA DE UNIDADES (IZQUIERDA) */}
           <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", overflow: "hidden", display: "flex", flexDirection: "column" }}>

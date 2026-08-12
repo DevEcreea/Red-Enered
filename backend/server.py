@@ -47,6 +47,44 @@ logger = logging.getLogger("enered")
 
 
 # ---------- Utils ----------
+# Conectores que en nombres de ciudad/lugar van en minúscula (excepto al inicio)
+_CITY_MINOR_WORDS = {"de", "del", "la", "las", "los", "y", "el", "en", "a"}
+
+
+def normalize_city(value: Optional[str]) -> str:
+    """
+    Unifica la escritura de una ciudad para reportes:
+    'TRUJILLO', 'trujillo', 'tRujilLo', '  trujillo ' -> 'Trujillo'.
+    'SAN MARTIN DE PORRES' -> 'San Martin de Porres'.
+    Respeta caracteres separadores (espacios, guiones) y deja vacío si no hay dato.
+    """
+    if not value:
+        return ""
+    s = re.sub(r"\s+", " ", str(value).strip())
+    if not s:
+        return ""
+
+    def _cap_word(w: str, first: bool) -> str:
+        if not w:
+            return w
+        low = w.lower()
+        if not first and low in _CITY_MINOR_WORDS:
+            return low
+        return low[0].upper() + low[1:]
+
+    # Capitaliza respetando separadores internos (espacio y guion)
+    tokens = re.split(r"([ \-])", s)
+    out = []
+    word_idx = 0
+    for tok in tokens:
+        if tok in (" ", "-"):
+            out.append(tok)
+            continue
+        out.append(_cap_word(tok, first=(word_idx == 0)))
+        word_idx += 1
+    return "".join(out)
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -919,7 +957,7 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
         "FECHA": fecha,
         "HORA": r.get("hora") or "",
         "PLACA": r.get("placa") or "",
-        "CIUDAD": r.get("ciudad") or "",
+        "CIUDAD": normalize_city(r.get("ciudad")),
         "ESTACION": r.get("estacion") or "",
         "PRODUCTO": r.get("producto") or "",
         "CANTIDAD_GL": gal,
@@ -1111,7 +1149,7 @@ async def create_consumption(
             "placa": PLACA.upper(),
             "fecha": FECHA[:10],
             "hora": HORA or "00:00",
-            "ciudad": CIUDAD or "",
+            "ciudad": normalize_city(CIUDAD),
             "estacion": ESTACION or "",
             "producto": PRODUCTO,
             "galones": CANTIDAD_GL,
@@ -1177,7 +1215,7 @@ async def create_consumption(
             "PLACA": PLACA.upper(),
             "FECHA": FECHA,
             "HORA": HORA or "",
-            "CIUDAD": CIUDAD or "",
+            "CIUDAD": normalize_city(CIUDAD),
             "ESTACION": ESTACION or "",
             "PRODUCTO": PRODUCTO,
             "CANTIDAD_GL": CANTIDAD_GL,
@@ -1259,7 +1297,7 @@ async def update_consumption(
         "placa" if user.get("role") == "cliente_subsidio" else "PLACA": PLACA.upper(),
         "fecha" if user.get("role") == "cliente_subsidio" else "FECHA": FECHA[:10] if user.get("role") == "cliente_subsidio" else FECHA,
         "hora" if user.get("role") == "cliente_subsidio" else "HORA": HORA or ("00:00" if user.get("role") == "cliente_subsidio" else ""),
-        "ciudad" if user.get("role") == "cliente_subsidio" else "CIUDAD": CIUDAD or "",
+        "ciudad" if user.get("role") == "cliente_subsidio" else "CIUDAD": normalize_city(CIUDAD),
         "estacion" if user.get("role") == "cliente_subsidio" else "ESTACION": ESTACION or "",
         "producto" if user.get("role") == "cliente_subsidio" else "PRODUCTO": PRODUCTO,
         "galones" if user.get("role") == "cliente_subsidio" else "CANTIDAD_GL": CANTIDAD_GL,
@@ -1473,6 +1511,15 @@ class ServiciosUpdate(BaseModel):
 class WialonConfigIn(BaseModel):
     token: str
     host: Optional[str] = None
+
+
+class WialonReportRunIn(BaseModel):
+    empresa: Optional[str] = None          # solo admin_enered
+    resource_id: int
+    template_id: int
+    unit_id: int
+    date_from: int                          # epoch seconds
+    date_to: int                            # epoch seconds
 
 
 @api.get("/empresas-config")
@@ -1990,7 +2037,7 @@ async def dashboard_kpis(
     est_ahorro = {}
     est_ahorro_gal = {}
     for r in rows:
-        c = r.get("CIUDAD", "Sin ciudad")
+        c = normalize_city(r.get("CIUDAD")) or "Sin ciudad"
         ah = _f(r.get("AHORRO"))
         pp = _f(r.get("PRECIO_PIZARRA"))
         ah_gal = (ah / pp) if (pp > 0 and ah > 0) else 0.0
@@ -2113,6 +2160,28 @@ async def dashboard_kpis(
         "cargas_por_dia": cargas_por_dia,
         "medio_identificacion": medio_identificacion,
     }
+
+
+@api.post("/admin/normalize-cities")
+async def admin_normalize_cities(user: dict = Depends(require_roles("admin_enered"))):
+    """
+    Unifica la escritura de la ciudad en TODOS los registros existentes (idempotente).
+    'TRUJILLO'/'trujillo'/'tRujilLo' -> 'Trujillo'. Se puede ejecutar cuantas veces se quiera.
+    """
+    updated_c = 0
+    async for r in db.consumptions.find({"CIUDAD": {"$nin": [None, ""]}}, {"_id": 1, "CIUDAD": 1}):
+        norm = normalize_city(r.get("CIUDAD"))
+        if norm and norm != r.get("CIUDAD"):
+            await db.consumptions.update_one({"_id": r["_id"]}, {"$set": {"CIUDAD": norm}})
+            updated_c += 1
+    updated_s = 0
+    async for r in db.consumos_subsidio.find({"ciudad": {"$nin": [None, ""]}}, {"_id": 1, "ciudad": 1}):
+        norm = normalize_city(r.get("ciudad"))
+        if norm and norm != r.get("ciudad"):
+            await db.consumos_subsidio.update_one({"_id": r["_id"]}, {"$set": {"ciudad": norm}})
+            updated_s += 1
+    logger.info("normalize-cities: consumptions=%s subsidio=%s (por %s)", updated_c, updated_s, user.get("email"))
+    return {"ok": True, "consumptions_actualizados": updated_c, "subsidio_actualizados": updated_s}
 
 
 @api.get("/analytics/fleet")
@@ -2537,6 +2606,9 @@ async def upload_consumptions(file: UploadFile = File(...),
     records = []
     for _, row in df.iterrows():
         rec = {k: (row[k] if k in df.columns and pd.notna(row[k]) else None) for k in df.columns}
+        # Normalizar ciudad para reportes (TRUJILLO/trujillo -> Trujillo)
+        if rec.get("CIUDAD"):
+            rec["CIUDAD"] = normalize_city(rec["CIUDAD"])
         # Type fixes
         for fnum in ["CANTIDAD_GL", "IMPORTE_TOTAL", "AHORRO", "PRECIO_UNITARIO", "PRECIO_PIZARRA", "KILOMETRAJE"]:
             if fnum in rec and rec[fnum] is not None:
@@ -2621,7 +2693,7 @@ async def create_manual_consumption(
         "id": consumo_id,
         "FECHA": fecha,
         "HORA": hora or "",
-        "CIUDAD": ciudad or "",
+        "CIUDAD": normalize_city(ciudad),
         "ESTACION": estacion or "",
         "PLACA": placa.strip().upper(),
         "PRODUCTO": producto or "DIESEL B5",
@@ -4915,6 +4987,171 @@ async def get_wialon_units(empresa: Optional[str] = None, user: dict = Depends(g
             "min_lon": min(lons) - pad, "max_lon": max(lons) + pad,
         }
     return {"empresa": target_empresa, "total": len(units), "units": units, "bbox": bbox}
+
+
+# ---------- Wialon: helpers de informes ----------
+async def _resolve_wialon_target(user: dict, empresa: Optional[str]):
+    """Resuelve la empresa objetivo + valida GPS + devuelve (target_empresa, cfg). Reutilizado por endpoints Wialon."""
+    if user.get("role") == "admin_enered":
+        if not empresa:
+            raise HTTPException(status_code=400, detail="admin_enered debe indicar empresa")
+        target = empresa
+    else:
+        target = user.get("empresa")
+        if not target:
+            raise HTTPException(status_code=400, detail="Usuario sin empresa asociada")
+    info = await _svc.get_empresa_servicios(db, target)
+    if not info["servicios"].get("gps"):
+        raise HTTPException(status_code=403, detail=f"Servicio GPS no habilitado para {target}")
+    cfg = await _svc.get_empresa_wialon_config(db, target)
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Token Wialon no configurado. Contacta al administrador de ENERED.")
+    return target, cfg
+
+
+async def _wialon_login(cfg: dict):
+    """Login a Wialon con el token guardado. Devuelve (client, base_url, sid). El caller debe cerrar el client."""
+    import json as _json, httpx as _httpx
+    host = cfg["host"]
+    base = f"https://{host}/wialon/ajax.html"
+    client = _httpx.AsyncClient(timeout=90.0)
+    try:
+        r = await client.get(base, params={"svc": "token/login", "params": _json.dumps({"token": cfg["token"]})})
+        d = r.json()
+    except _httpx.RequestError as e:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"No se pudo conectar a Wialon: {str(e)}")
+    sid = d.get("eid") if isinstance(d, dict) else None
+    if not sid:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Login Wialon falló: {d.get('error') if isinstance(d, dict) else 'desconocido'}")
+    return client, base, sid
+
+
+def _classify_report(name: str) -> str:
+    """Clasifica una plantilla de informe por su nombre para agrupar en la UI."""
+    n = (name or "").upper()
+    if any(k in n for k in ["COMBUSTIBLE", "FUEL", "CONSUMO", "ADBLUE", "FLS"]):
+        return "combustible"
+    if any(k in n for k in ["VIAJE", "RECORR", "TRIP", "KILOMET", "ESTACIONAM", "ACTIVIDAD DIARIA"]):
+        return "viajes"
+    if any(k in n for k in ["VELOCIDAD", "SPEED", "CONDUC", "EFICIEN", "ECO", "EVENTO"]):
+        return "conduccion"
+    if any(k in n for k in ["MANTENIM", "SERVICE", "SERVICIO"]):
+        return "mantenimiento"
+    return "otros"
+
+
+# ---------- Wialon: listar plantillas de informe disponibles ----------
+@api.get("/wialon/report/templates")
+async def wialon_report_templates(empresa: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """
+    Lista las plantillas de informe configuradas en la cuenta Wialon de la empresa,
+    con una categoría estimada (combustible / viajes / conduccion / mantenimiento / otros).
+    """
+    import json as _json
+    target, cfg = await _resolve_wialon_target(user, empresa)
+    client, base, sid = await _wialon_login(cfg)
+    try:
+        # search_items de recursos con flag 0x2000 (report templates)
+        params = {
+            "spec": {"itemsType": "avl_resource", "propName": "sys_name", "propValueMask": "*", "sortType": "sys_name"},
+            "force": 1, "flags": 0x00000001 | 0x00002000, "from": 0, "to": 200,
+        }
+        r = await client.get(base, params={"svc": "core/search_items", "params": _json.dumps(params), "sid": sid})
+        d = r.json()
+    finally:
+        await client.aclose()
+    out = []
+    for rr in (d.get("items") or []):
+        for rid, tpl in (rr.get("rep") or {}).items():
+            nm = tpl.get("n") or ""
+            ct = tpl.get("ct") or ""
+            out.append({
+                "resource_id": rr.get("id"),
+                "template_id": int(rid),
+                "name": nm,
+                "object_type": ct,
+                "single_unit": ct == "avl_unit",
+                "category": _classify_report(nm),
+            })
+    # Priorizar informes de unidad individual y las categorías útiles
+    orden = {"combustible": 0, "viajes": 1, "conduccion": 2, "mantenimiento": 3, "otros": 4}
+    out.sort(key=lambda t: (0 if t["single_unit"] else 1, orden.get(t["category"], 9), t["name"].lower()))
+    return {"empresa": target, "total": len(out), "templates": out}
+
+
+# ---------- Wialon: ejecutar un informe y traer sus tablas ----------
+@api.post("/wialon/report/run")
+async def wialon_report_run(body: WialonReportRunIn, user: dict = Depends(get_current_user)):
+    """
+    Ejecuta un informe Wialon para UNA unidad en un rango de fechas y devuelve las tablas
+    resultantes (cabeceras + filas). Wialon calcula internamente los sensores (nivel de
+    combustible, cargas/robos, etc.), por eso maneja cualquier configuración de sensor.
+    """
+    import json as _json
+    MAX_ROWS = 1500  # límite por tabla para no traer tablas gigantes (ej. seguimiento de mensajes)
+    target, cfg = await _resolve_wialon_target(user, body.empresa)
+    if body.date_to <= body.date_from:
+        raise HTTPException(status_code=400, detail="Rango de fechas inválido")
+    client, base, sid = await _wialon_login(cfg)
+    try:
+        # limpiar cualquier resultado previo en la sesión
+        await client.get(base, params={"svc": "report/cleanup_result", "params": "{}", "sid": sid})
+        exec_params = {
+            "reportResourceId": body.resource_id,
+            "reportTemplateId": body.template_id,
+            "reportObjectId": body.unit_id,
+            "reportObjectSecId": 0,
+            "interval": {"from": body.date_from, "to": body.date_to, "flags": 0},
+        }
+        r = await client.get(base, params={"svc": "report/exec_report", "params": _json.dumps(exec_params), "sid": sid})
+        ex = r.json()
+        if isinstance(ex, dict) and ex.get("error"):
+            raise HTTPException(status_code=502, detail=f"Wialon error {ex.get('error')} al ejecutar informe")
+        tables_meta = (ex.get("reportResult") or {}).get("tables") or []
+        tables = []
+        for ti, tmeta in enumerate(tables_meta):
+            nrows = int(tmeta.get("rows") or 0)
+            header = tmeta.get("header") or []
+            truncated = nrows > MAX_ROWS
+            fetch_to = min(nrows, MAX_ROWS)
+            rows = []
+            if fetch_to > 0:
+                rr = await client.get(base, params={
+                    "svc": "report/get_result_rows",
+                    "params": _json.dumps({"tableIndex": ti, "indexFrom": 0, "indexTo": fetch_to}),
+                    "sid": sid,
+                })
+                raw_rows = rr.json()
+                if isinstance(raw_rows, list):
+                    for row in raw_rows:
+                        cells = []
+                        for c in (row.get("c") or []):
+                            if isinstance(c, dict):
+                                cells.append(c.get("t", ""))
+                            else:
+                                cells.append(c)
+                        rows.append(cells)
+            tables.append({
+                "index": ti,
+                "label": tmeta.get("label") or tmeta.get("n") or f"Tabla {ti+1}",
+                "header": header,
+                "rows": rows,
+                "total_rows": nrows,
+                "truncated": truncated,
+            })
+        # limpiar resultado en el servidor
+        await client.get(base, params={"svc": "report/cleanup_result", "params": "{}", "sid": sid})
+    finally:
+        await client.aclose()
+    return {
+        "empresa": target,
+        "unit_id": body.unit_id,
+        "date_from": body.date_from,
+        "date_to": body.date_to,
+        "tables": tables,
+    }
 
 
 # ---------- Admin: eliminar empresa con cascada ----------
