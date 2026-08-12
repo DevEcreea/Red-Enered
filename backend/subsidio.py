@@ -479,19 +479,35 @@ async def subsidio_validation_state(user: dict = Depends(_require_subsidio)):
     - pending_validation: subió facturas pero aún ninguna fue validada
     """
     uids = await _get_company_uids(user["id"])
+    # Total de facturas que el cliente subió (cualquier estado, incluido draft)
     uploaded = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}})
-    confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
+    # "visible" = facturas que REALMENTE aparecerían en Combustible/Gestión de Gastos.
+    # Debe usar el mismo filtro que /consumptions para clientes de subsidio, para que el
+    # aviso coincida exactamente con lo que el cliente ve (0 KPIs = aún en validación).
+    visible = await db.consumos_subsidio.count_documents({
+        "user_id": {"$in": uids},
+        "status": "confirmed",
+        "origin": {"$ne": "admin_ocr"},
+        "estacion": {"$ne": "ENERED"},
+    })
     fleet = 0
     empresa = user.get("empresa")
     if empresa:
         fleet = await db.consumptions.count_documents({"EMPRESA": empresa})
-    validated = confirmed > 0 or fleet > 0
+    # ¿el cliente ya empezó a cargar su expediente? (facturas, documentos o vehículos)
+    docs = await db.subsidio_documents.count_documents({"user_id": {"$in": uids}})
+    vehicles = await db.subsidio_vehicles.count_documents({"user_id": {"$in": uids}})
+    started = uploaded > 0 or docs > 0 or vehicles > 0
+    validated = visible > 0 or fleet > 0
     return {
-        "uploaded": uploaded,
-        "confirmed": confirmed,
-        "has_uploads": uploaded > 0,
+        "uploaded": uploaded,        # facturas subidas (para el conteo del texto)
+        "visible": visible,          # facturas ya visibles en Combustible/Gestión
+        "docs": docs,
+        "vehicles": vehicles,
+        "has_uploads": started,
         "validated": validated,
-        "pending_validation": uploaded > 0 and not validated,
+        # Mostrar el aviso: el cliente ya cargó algo de su expediente pero nada está validado aún.
+        "pending_validation": started and not validated,
     }
 
 

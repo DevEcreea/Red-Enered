@@ -59,8 +59,9 @@ export default function ValidacionPendiente({ contexto = "tus indicadores" }) {
             </span>
           </div>
           <div style={{ fontSize: 13.5, color: "#78350F", marginTop: 6, lineHeight: 1.5, maxWidth: 680 }}>
-            Ya recibimos las facturas que subiste{state.uploaded ? ` (${state.uploaded})` : ""}. El equipo de <b>ENERED</b> las
-            está validando y, en cuanto queden aprobadas, <b>{contexto}</b> aparecerán aquí automáticamente.
+            {state.uploaded > 0
+              ? <>Ya recibimos las facturas que subiste ({state.uploaded}). El equipo de <b>ENERED</b> las está validando y, en cuanto queden aprobadas, <b>{contexto}</b> aparecerán aquí automáticamente.</>
+              : <>Ya recibimos la información que cargaste. El equipo de <b>ENERED</b> la está revisando y, en cuanto se valide, <b>{contexto}</b> aparecerán aquí automáticamente.</>}
           </div>
 
           {/* CTA: mientras tanto ordena tu empresa */}
