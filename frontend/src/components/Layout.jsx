@@ -206,13 +206,26 @@ function PlanCard({ label, title, color = "violet", testid, onClick, active = fa
 }
 
 export default function Layout({ children }) {
-  const { user, logout } = useAuth();
+  const { user, logout, enterEmpresa, exitEmpresa } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [overview, setOverview] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [wakingUp, setWakingUp] = useState(false);
+  // Impersonación: modal de elección al ingresar como admin_enered
+  const [showChooser, setShowChooser] = useState(false);
+  const [empresasList, setEmpresasList] = useState([]);
+  const [chooserEmpresa, setChooserEmpresa] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Mostrar el modal de elección cuando entra el admin principal (super-admin) y no eligió aún.
+  useEffect(() => {
+    if (user?.role === "admin_enered" && !user?.impersonando && user?.permisos == null
+        && !sessionStorage.getItem("enered_admin_choice")) {
+      setShowChooser(true);
+      api.get("/empresas").then((r) => setEmpresasList(r.data || [])).catch(() => {});
+    }
+  }, [user?.id, user?.role, user?.impersonando]);
 
   useEffect(() => {
     if (user && user.role !== "cliente_subsidio") {
@@ -371,6 +384,42 @@ export default function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-[#F6F7FB]">
+      {/* Modal: elegir ingresar como Admin o como empresa (impersonación) */}
+      {showChooser && (
+        <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" data-testid="admin-chooser">
+            <h3 className="font-cabinet font-black text-xl text-neutral-900 mb-1">¿Cómo querés ingresar?</h3>
+            <p className="text-sm text-neutral-500 mb-5">Operá como Administrador ENERED, o entrá en el contexto de una empresa para ver su información y módulos.</p>
+            <button
+              onClick={() => { sessionStorage.setItem("enered_admin_choice", "1"); setShowChooser(false); }}
+              className="w-full mb-4 px-4 py-3 rounded-xl border-2 border-brand bg-brand/5 hover:bg-brand/10 text-left transition-colors"
+              data-testid="chooser-admin">
+              <div className="font-bold text-brand">Ingresar como Administrador</div>
+              <div className="text-xs text-neutral-500">Acceso total: todas las empresas y módulos de administración.</div>
+            </button>
+            <div className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide mb-2">Entrar como empresa</div>
+            <div className="flex gap-2">
+              <select value={chooserEmpresa} onChange={(e) => setChooserEmpresa(e.target.value)}
+                className="flex-1 h-10 px-3 border border-neutral-300 rounded-lg text-sm" data-testid="chooser-empresa-select">
+                <option value="">Elegí una empresa…</option>
+                {empresasList.map((e) => <option key={e} value={e}>{e}</option>)}
+              </select>
+              <button disabled={!chooserEmpresa}
+                onClick={async () => { await enterEmpresa(chooserEmpresa); setShowChooser(false); navigate("/dashboard"); }}
+                className="px-4 h-10 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm disabled:opacity-50"
+                data-testid="chooser-entrar">Entrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Banner de impersonación */}
+      {user.impersonando && (
+        <div className="fixed top-0 left-0 right-0 z-[110] bg-amber-500 text-white text-xs font-bold py-2 px-4 text-center flex items-center justify-center gap-3 shadow" data-testid="impersonation-banner">
+          <span>👁️ Viendo como <strong>{user.empresa}</strong> (modo empresa)</span>
+          <button onClick={async () => { await exitEmpresa(); sessionStorage.removeItem("enered_admin_choice"); navigate("/dashboard"); }}
+            className="underline hover:no-underline" data-testid="btn-volver-admin">Volver a Admin</button>
+        </div>
+      )}
       {/* Banner "Reactivando servidor..." — se muestra si un request tarda >5s (cold-start Render free) */}
       {wakingUp && (
         <div className="fixed top-0 left-0 right-0 z-[100] bg-emerald-500 text-white text-xs font-semibold py-2 px-4 text-center shadow-lg flex items-center justify-center gap-2">

@@ -16,6 +16,12 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${t}`;
   }
+  // Impersonación: si un admin eligió "entrar como empresa", scopeamos todas las llamadas.
+  const imp = localStorage.getItem("enered_impersonate");
+  if (imp) {
+    config.headers = config.headers || {};
+    config.headers["X-Impersonate-Empresa"] = imp;
+  }
   return config;
 });
 
