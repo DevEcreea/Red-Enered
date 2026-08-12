@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import ValidacionPendiente from "../components/ValidacionPendiente";
 
 // --- Subcomponente para cada factura editable ---
 function InvoiceRow({ item, deleteRow }) {
@@ -129,6 +130,7 @@ export default function SubsidioDocumentos() {
 
   return (
     <div className="space-y-6" data-testid="subsidio-documentos">
+      <ValidacionPendiente contexto="los indicadores de tu flota" />
       {/* HEADER */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="flex items-start justify-between flex-wrap gap-4 mb-6">

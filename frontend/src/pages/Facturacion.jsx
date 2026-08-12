@@ -8,6 +8,7 @@ import {
 import { api, API } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
+import ValidacionPendiente from "../components/ValidacionPendiente";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -343,6 +344,7 @@ export default function Facturacion() {
 
   return (
     <div className="space-y-6" data-testid="estado-cuenta-page">
+      <ValidacionPendiente contexto="tu estado de cuenta y tus gastos" />
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-2 text-xs text-neutral-500 font-semibold">
           <Clock className="w-3.5 h-3.5" />

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
+import ValidacionPendiente from "../components/ValidacionPendiente";
 import {
   Receipt, Fuel, Gauge, Coins, Droplet, MapPin, Camera,
   FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
@@ -1387,9 +1388,12 @@ export default function Flotas() {
         ))}
       </div>
 
+      {/* Aviso: información en validación (cliente subsidio) */}
+      <ValidacionPendiente contexto="tu consumo de combustible y tus indicadores" />
+
       {/* CONTENT */}
       {activeTab==="Resumen" && (
-        <TabResumen 
+        <TabResumen
           rows={rows} 
           totals={totals} 
           services={services} 
