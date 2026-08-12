@@ -3,10 +3,11 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Loader2, FileBarChart, Truck, Calendar, Play, Fuel, AlertTriangle,
-  Table as TableIcon, Download, TrendingUp
+  Table as TableIcon, Download, TrendingUp, LineChart as LineChartIcon, ArrowDown, ArrowUp
 } from "lucide-react";
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  AreaChart, Area
 } from "recharts";
 
 const CAT_LABEL = {
@@ -53,8 +54,10 @@ export default function WialonInformes({ empresa, units }) {
   const [from, setFrom] = useState(() => ymd(new Date(Date.now() - 7 * 86400000)));
   const [to, setTo] = useState(() => ymd(new Date()));
 
+  const [mode, setMode] = useState("grafica"); // "grafica" | "informe"
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
+  const [graph, setGraph] = useState(null);
   const [runError, setRunError] = useState("");
 
   // cargar plantillas (solo unidad individual, que es lo soportado por el runner)
@@ -92,24 +95,34 @@ export default function WialonInformes({ empresa, units }) {
 
   async function run() {
     if (!unitId) { toast.error("Elige una unidad"); return; }
-    if (!templateKey) { toast.error("Elige un informe"); return; }
-    const [rid, tid] = templateKey.split(":").map(Number);
-    setRunning(true); setRunError(""); setResult(null);
+    setRunning(true); setRunError(""); setResult(null); setGraph(null);
     try {
-      const { data } = await api.post("/wialon/report/run", {
-        empresa: empresa || undefined,
-        resource_id: rid,
-        template_id: tid,
-        unit_id: Number(unitId),
-        date_from: epochFromInput(from, false),
-        date_to: epochFromInput(to, true),
-      });
-      setResult(data);
-      if (!data.tables || data.tables.length === 0) {
-        toast.info("El informe no arrojó datos para ese rango. Prueba ampliar las fechas.");
+      if (mode === "grafica") {
+        const { data } = await api.post("/wialon/fuel-graph", {
+          empresa: empresa || undefined,
+          unit_id: Number(unitId),
+          date_from: epochFromInput(from, false),
+          date_to: epochFromInput(to, true),
+        });
+        setGraph(data);
+      } else {
+        if (!templateKey) { toast.error("Elige un informe"); setRunning(false); return; }
+        const [rid, tid] = templateKey.split(":").map(Number);
+        const { data } = await api.post("/wialon/report/run", {
+          empresa: empresa || undefined,
+          resource_id: rid,
+          template_id: tid,
+          unit_id: Number(unitId),
+          date_from: epochFromInput(from, false),
+          date_to: epochFromInput(to, true),
+        });
+        setResult(data);
+        if (!data.tables || data.tables.length === 0) {
+          toast.info("El informe no arrojó datos para ese rango. Prueba ampliar las fechas.");
+        }
       }
     } catch (e) {
-      setRunError(e?.response?.data?.detail || "Error al ejecutar el informe");
+      setRunError(e?.response?.data?.detail || (mode === "grafica" ? "Error al generar la gráfica" : "Error al ejecutar el informe"));
     } finally {
       setRunning(false);
     }
@@ -125,6 +138,20 @@ export default function WialonInformes({ empresa, units }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Selector de modo */}
+      <div style={{ display: "inline-flex", background: "#F3F4F6", borderRadius: 10, padding: 4, alignSelf: "flex-start" }}>
+        <button onClick={() => setMode("grafica")} data-testid="mode-grafica"
+          style={{ padding: "8px 16px", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 13.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 7,
+            background: mode === "grafica" ? "#fff" : "transparent", color: mode === "grafica" ? "#0369A1" : "#6b7280", boxShadow: mode === "grafica" ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>
+          <Fuel style={{ width: 16, height: 16 }} /> Gráfica de combustible
+        </button>
+        <button onClick={() => setMode("informe")} data-testid="mode-informe"
+          style={{ padding: "8px 16px", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 13.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 7,
+            background: mode === "informe" ? "#fff" : "transparent", color: mode === "informe" ? "#5B21B6" : "#6b7280", boxShadow: mode === "informe" ? "0 1px 3px rgba(0,0,0,.1)" : "none" }}>
+          <FileBarChart style={{ width: 16, height: 16 }} /> Informe de Wialon
+        </button>
+      </div>
+
       {/* Barra de configuración */}
       <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", padding: 18, display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-end" }}>
         {/* Unidad */}
@@ -135,7 +162,8 @@ export default function WialonInformes({ empresa, units }) {
             {units.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
-        {/* Informe */}
+        {/* Informe (solo modo informe) */}
+        {mode === "informe" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 260 }}>
           <label style={lblStyle}><FileBarChart style={{ width: 13, height: 13 }} /> Informe</label>
           <select value={templateKey} onChange={(e) => setTemplateKey(e.target.value)} style={inputStyle} data-testid="inf-template" disabled={tplLoading}>
@@ -149,6 +177,7 @@ export default function WialonInformes({ empresa, units }) {
             ))}
           </select>
         </div>
+        )}
         {/* Fechas */}
         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <label style={lblStyle}><Calendar style={{ width: 13, height: 13 }} /> Desde</label>
@@ -165,10 +194,10 @@ export default function WialonInformes({ empresa, units }) {
           ))}
         </div>
         {/* Ejecutar */}
-        <button onClick={run} disabled={running || tplLoading || !unitId} data-testid="inf-run"
-          style={{ marginLeft: "auto", padding: "10px 20px", background: running ? "#A78BFA" : "#7C3AED", color: "#fff", border: "none", borderRadius: 8, cursor: running ? "wait" : "pointer", fontSize: 14, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <button onClick={run} disabled={running || !unitId || (mode === "informe" && tplLoading)} data-testid="inf-run"
+          style={{ marginLeft: "auto", padding: "10px 20px", background: running ? "#A78BFA" : (mode === "grafica" ? "#0284C7" : "#7C3AED"), color: "#fff", border: "none", borderRadius: 8, cursor: running ? "wait" : "pointer", fontSize: 14, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8 }}>
           {running ? <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} /> : <Play style={{ width: 16, height: 16 }} />}
-          {running ? "Generando…" : "Generar informe"}
+          {running ? "Generando…" : (mode === "grafica" ? "Ver gráfica" : "Generar informe")}
         </button>
       </div>
 
@@ -177,25 +206,101 @@ export default function WialonInformes({ empresa, units }) {
 
       {running && (
         <div style={{ background: "#fff", borderRadius: 12, padding: 50, textAlign: "center", color: "#6b7280" }}>
-          <Loader2 style={{ width: 30, height: 30, animation: "spin 1s linear infinite", color: "#7C3AED", margin: "0 auto" }} />
-          <div style={{ marginTop: 10, fontWeight: 600 }}>Wialon está calculando el informe…</div>
-          <div style={{ fontSize: 12.5, color: "#9CA3AF", marginTop: 4 }}>{unitName} · {selectedTpl?.name}</div>
+          <Loader2 style={{ width: 30, height: 30, animation: "spin 1s linear infinite", color: mode === "grafica" ? "#0284C7" : "#7C3AED", margin: "0 auto" }} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>{mode === "grafica" ? "Leyendo sensores y armando la gráfica…" : "Wialon está calculando el informe…"}</div>
+          <div style={{ fontSize: 12.5, color: "#9CA3AF", marginTop: 4 }}>{unitName}{mode === "informe" && selectedTpl ? ` · ${selectedTpl.name}` : ""}</div>
         </div>
       )}
 
-      {result && !running && (
+      {graph && !running && mode === "grafica" && <FuelGraphView graph={graph} />}
+      {result && !running && mode === "informe" && (
         <ResultView result={result} unitName={unitName} tplName={selectedTpl?.name} />
       )}
 
-      {!result && !running && !runError && (
+      {!result && !graph && !running && !runError && (
         <div style={{ background: "#fff", borderRadius: 12, padding: 50, textAlign: "center", color: "#9CA3AF" }}>
-          <FileBarChart style={{ width: 34, height: 34, margin: "0 auto", color: "#DDD6FE" }} />
-          <div style={{ marginTop: 10, fontWeight: 600, color: "#6b7280" }}>Elige unidad, informe y fechas, y presiona <b>Generar informe</b></div>
-          <div style={{ fontSize: 12.5, marginTop: 4 }}>Los datos se calculan en Wialon (nivel de combustible, cargas, viajes, km…)</div>
+          {mode === "grafica" ? <Fuel style={{ width: 34, height: 34, margin: "0 auto", color: "#BAE6FD" }} /> : <FileBarChart style={{ width: 34, height: 34, margin: "0 auto", color: "#DDD6FE" }} />}
+          <div style={{ marginTop: 10, fontWeight: 600, color: "#6b7280" }}>
+            {mode === "grafica"
+              ? <>Elige unidad y fechas, y presiona <b>Ver gráfica</b></>
+              : <>Elige unidad, informe y fechas, y presiona <b>Generar informe</b></>}
+          </div>
+          <div style={{ fontSize: 12.5, marginTop: 4 }}>
+            {mode === "grafica"
+              ? "Detectamos automáticamente el sensor de combustible de la unidad (CANbus, % de tanque, tanques izq/der…)"
+              : "Los datos se calculan en Wialon (cargas, viajes, km…)"}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+// ---------- Gráfica de nivel de combustible ----------
+function FuelGraphView({ graph }) {
+  const series = graph.series || [];
+  if (!series.length) return <Banner tone="info">No hay datos de combustible para ese rango.</Banner>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {series.map((s, i) => <FuelSeriesCard key={i} s={s} unitName={graph.unit_name} />)}
+    </div>
+  );
+}
+
+function FuelSeriesCard({ s, unitName }) {
+  const data = (s.points || []).map((p) => ({
+    t: p.t,
+    label: fmtTs(p.t),
+    nivel: p.v,
+  }));
+  const delta = (s.last ?? 0) - (s.first ?? 0);
+  return (
+    <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", padding: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 6 }}>
+        <div style={{ fontWeight: 800, color: "#111827", fontSize: 15, display: "flex", alignItems: "center", gap: 8 }}>
+          <Fuel style={{ width: 17, height: 17, color: "#0EA5E9" }} /> {s.name}
+          <span style={{ fontSize: 12, fontWeight: 500, color: "#9CA3AF" }}>· {unitName}</span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Stat label="Actual" value={`${s.last} ${s.unit}`} color="#0369A1" />
+          <Stat label="Mínimo" value={`${s.min} ${s.unit}`} color="#EF4444" />
+          <Stat label="Máximo" value={`${s.max} ${s.unit}`} color="#10B981" />
+          <Stat label="Variación" value={`${delta > 0 ? "+" : ""}${delta.toFixed(1)} ${s.unit}`} color={delta >= 0 ? "#10B981" : "#EF4444"}
+            icon={delta >= 0 ? <ArrowUp style={{ width: 12, height: 12 }} /> : <ArrowDown style={{ width: 12, height: 12 }} />} />
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 10 }}>Caída brusca ≈ posible robo · subida ≈ carga · unidad de medida: {s.unit || "—"}</div>
+      <ResponsiveContainer width="100%" height={300}>
+        <AreaChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id={`fuelGrad_${s.name.replace(/\W/g, "")}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0EA5E9" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="#0EA5E9" stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
+          <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#94A3B8" }} minTickGap={40} />
+          <YAxis tick={{ fontSize: 11, fill: "#94A3B8" }} width={44} domain={["auto", "auto"]} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} formatter={(v) => [`${v} ${s.unit}`, "Nivel"]} />
+          <Area type="monotone" dataKey="nivel" stroke="#0284C7" strokeWidth={2} fill={`url(#fuelGrad_${s.name.replace(/\W/g, "")})`} dot={false} activeDot={{ r: 4 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function Stat({ label, value, color, icon }) {
+  return (
+    <div style={{ textAlign: "right" }}>
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: ".03em" }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 800, color, display: "inline-flex", alignItems: "center", gap: 3 }}>{icon}{value}</div>
+    </div>
+  );
+}
+
+function fmtTs(t) {
+  const d = new Date(t * 1000);
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 // ---------- Resultado ----------
