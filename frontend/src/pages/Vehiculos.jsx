@@ -598,7 +598,7 @@ export default function Vehiculos() {
 
                             return (
                               <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 18px)", gap:"6px 8px", alignItems:"center", justifyContent:"center", width: 70 }}>
-                                
+
                                 {/* Row 1: Mantenimiento (P) */}
                                 <span title={pText} style={{ position:"relative", width:18, height:18, background:"#E5E7EB", borderRadius:4, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer" }}>
                                   <span style={{ color:"#fff", fontSize:12, fontWeight:700, lineHeight:1 }}>P</span>

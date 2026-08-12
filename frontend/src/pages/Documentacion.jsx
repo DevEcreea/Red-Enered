@@ -384,13 +384,45 @@ export default function Documentacion() {
       ];
     }
     const act = tabDocs.filter(d=>!d.archived);
+
+    // Pendientes de cargar: slots de documento vacíos por cada entidad del tab actual.
+    const norm = s => (s||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+    const countPend = (slots, entKeys, tipo, keyOf) => {
+      const filledByEnt = {};
+      docs.filter(d => d.tipo === tipo && !d.archived).forEach(d => {
+        const k = keyOf(d); if (!k) return;
+        if (!filledByEnt[k]) filledByEnt[k] = new Set();
+        slots.forEach(slot => { if (norm(d.doc).includes(norm(slot))) filledByEnt[k].add(slot); });
+      });
+      let pend = 0;
+      entKeys.forEach(k => { pend += slots.length - (filledByEnt[k]?.size || 0); });
+      return pend;
+    };
+    let pendientes = 0;
+    if (tab === "Vehículos") {
+      const set = new Set(vehiculos.map(v=>(v.placa||"").toUpperCase()).filter(Boolean));
+      docs.filter(d=>d.tipo==="Vehículos" && d.placa).forEach(d=>set.add(d.placa.toUpperCase()));
+      pendientes = countPend(VEHICULO_SLOTS, [...set], "Vehículos", d=>(d.placa||"").toUpperCase());
+    } else if (tab === "Personal") {
+      const key = d => ((d.placa||d.ref||d.conductor_id||d.por||"").split(":::")[0]||"").toUpperCase();
+      const set = new Set(docs.filter(d=>d.tipo==="Personal").map(key).filter(Boolean));
+      pendientes = countPend(DRIVER_SLOTS, [...set], "Personal", key);
+    } else if (tab === "Viajes") {
+      const key = d => ((d.viaje_id||d.placa||d.ref||"").split(":::")[0]||"").toUpperCase();
+      const set = new Set(docs.filter(d=>d.tipo==="Viajes").map(key).filter(Boolean));
+      pendientes = countPend(VIAJE_SLOTS, [...set], "Viajes", key);
+    } else if (tab === "Empresa") {
+      pendientes = countPend(EMPRESA_SLOTS, ["EMPRESA"], "Empresa", ()=>"EMPRESA");
+    }
+
     return [
       { n:act.length,                                  l:"DOCUMENTOS", icon:FileText,       iconColor:"#8B3DFF", iconBg:"#F1EAFF" },
       { n:act.filter(d=>d.est==="Vigente").length,     l:"VIGENTES",   icon:CheckCircle2,   iconColor:"#059669", iconBg:"#ECFDF5" },
       { n:act.filter(d=>d.est==="Próximo").length,     l:"PRÓXIMOS",   icon:Clock,          iconColor:"#D97706", iconBg:"#FFFBEB" },
       { n:act.filter(d=>d.est==="Vencido").length,     l:"VENCIDOS",   icon:AlertTriangle,  iconColor:"#DC2626", iconBg:"#FEF2F2" },
+      { n:pendientes,                                  l:"POR CARGAR", icon:UploadCloud,    iconColor:"#2563EB", iconBg:"#EFF6FF" },
     ];
-  }, [tab, tabDocs, templates, isTemplate]);
+  }, [tab, tabDocs, templates, isTemplate, docs, vehiculos]);
 
   // Actions
   const handleDeleteDriver = async (cid) => {
@@ -703,7 +735,7 @@ export default function Documentacion() {
       </div>
 
       {/* KPIs */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginBottom:22 }}>
+      <div style={{ display:"grid",gridTemplateColumns:`repeat(${kpis.length},1fr)`,gap:20,marginBottom:22 }}>
         {kpis.map((k,i)=>(
           <KpiCard key={i} icon={k.icon} value={k.n} label={k.l} iconColor={k.iconColor} iconBg={k.iconBg}/>
         ))}

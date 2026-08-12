@@ -31,6 +31,8 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME   = os.environ.get("DB_NAME",   "red_enered")
 
 MAP_URL           = "https://www.facilito.gob.pe/facilito/pages/facilito/buscadorEESS.jsp"
+# Combustibles a scrapear (coma-separado). Por defecto solo Diésel (subsidio). Vacío = todos.
+FUELS_FILTER      = [f.strip().upper() for f in os.environ.get("FUELS", "DB5 S-50 UV").split(",") if f.strip()]
 RESULT_URL_SUBSTR = "PreciosCombustibleAutomotorAction"
 
 DEPARTAMENTOS = [
@@ -239,15 +241,41 @@ async def rows_to_records(rows, dpto_name, provincia_name, combustible_label) ->
     return records
 
 
+async def load_dept(page, code, tries=6):
+    """Navega a la página de resultados de un departamento. El reCAPTCHA v3 en headless
+    es intermitente, así que reintenta hasta que aparezca el dropdown de provincias."""
+    for i in range(tries):
+        try:
+            await page.goto(MAP_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(1500)  # deja que grecaptcha.execute genere el token
+            await page.evaluate(f"makeAction('{code}')")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=25000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(1500)
+            sels = page.locator("select")
+            if await sels.count() >= 4:
+                provs = await get_options(sels.nth(1))
+                if provs:
+                    return provs
+        except Exception as e:
+            logger.warning(f"    intento {i+1} error: {e}")
+        logger.info(f"    reintento {i+1}/{tries} (reCAPTCHA no cargó resultados)…")
+        await page.wait_for_timeout(2500)
+    return []
+
+
 async def main():
     logger.info("=" * 60)
-    logger.info("FACILITO SCRAPER ANTI-REBOTE (ESTABLE 100%)")
+    logger.info("FACILITO SCRAPER (Playwright headless + reintentos reCAPTCHA)")
+    logger.info(f"Destino: {DB_NAME}.precios_facilito")
     logger.info("=" * 60)
 
     try:
         from playwright.async_api import async_playwright
     except ImportError:
-        logger.error("pip install playwright && playwright install")
+        logger.error("pip install playwright && python -m playwright install chromium")
         return
 
     client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
@@ -257,13 +285,10 @@ async def main():
     seen = set()
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(
-            headless=False,
-            args=["--window-size=1366,768", "--start-maximized"],
-        )
+        browser = await pw.chromium.launch(headless=True)
         context = await browser.new_context(
             viewport={"width": 1366, "height": 768},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             locale="es-PE",
         )
         page = await context.new_page()
@@ -271,94 +296,67 @@ async def main():
         for dpto_idx, dpto in enumerate(DEPARTAMENTOS, 1):
             dpto_name = dpto["name"]
             dpto_code = dpto["code"]
-            logger.info(f"\n[{dpto_idx}/{len(DEPARTAMENTOS)}] ==================== {dpto_name} ====================")
+            logger.info(f"\n[{dpto_idx}/{len(DEPARTAMENTOS)}] ============ {dpto_name} ============")
 
-            # 1. Cargar el mapa de forma limpia
-            try:
-                await page.goto(MAP_URL, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(1000)
-
-                # 2. Entrar al departamento llamando makeAction(code) y esperando navegacion completa
-                await page.evaluate(f"makeAction('{dpto_code}')")
-                await page.wait_for_load_state("networkidle", timeout=20000)
-                await page.wait_for_timeout(1500)
-            except Exception as e:
-                logger.warning(f"  Error cargando departamento {dpto_name}: {e}")
-                continue
-
-            # 3. Leer los dropdowns de Provincia y Producto de esta página
-            selects = page.locator("select")
-            n_selects = await selects.count()
-
-            if n_selects < 2:
-                logger.warning(f"  Sin dropdowns en la página de {dpto_name}")
-                continue
-
-            prov_select = selects.nth(1)
-            prod_select = selects.nth(3) if n_selects >= 4 else selects.nth(n_selects - 1)
-
-            provincias = await get_options(prov_select)
-            productos  = await get_options(prod_select)
-
+            provincias = await load_dept(page, dpto_code)
             if not provincias:
-                logger.warning(f"  Sin provincias para {dpto_name}")
+                logger.warning(f"  {dpto_name}: sin resultados tras reintentos → se omite")
                 continue
 
-            logger.info(f"  {len(provincias)} provincias encontradas: {[p['label'] for p in provincias]}")
+            n = await page.locator("select").count()
+            prod_sel = page.locator("select").nth(3) if n >= 4 else page.locator("select").nth(n - 1)
+            productos = await get_options(prod_sel)
+            # Filtro de combustible (env FUELS, coma-separado). Por defecto solo Diésel
+            # (el combustible del subsidio) → scrape nacional viable y confiable.
+            if FUELS_FILTER:
+                productos = [p for p in productos if p["label"].strip().upper() in FUELS_FILTER]
+            logger.info(f"  {len(provincias)} provincias · {len(productos)} productos")
 
-            # 4. Iterar provincias y productos dentro de la página de este departamento
             for prov in provincias:
+                # Página fresca por provincia: es la forma confiable de que DataTables
+                # recargue los datos (el cambio in-page no siempre dispara la recarga).
+                if not await load_dept(page, dpto_code):
+                    continue
                 try:
-                    selects = page.locator("select")
-                    prov_select = selects.nth(1)
-                    await prov_select.select_option(value=prov["value"])
-                    await page.wait_for_timeout(1000)
+                    await page.locator("select").nth(1).select_option(value=prov["value"])
+                    await page.wait_for_timeout(1200)
                 except Exception as e:
                     logger.debug(f"    Error prov {prov['label']}: {e}")
                     continue
 
                 for prod in productos:
                     try:
-                        selects = page.locator("select")
-                        prod_select = selects.nth(3) if await selects.count() >= 4 else selects.nth((await selects.count()) - 1)
+                        sels = page.locator("select")
+                        cnt = await sels.count()
+                        prod_select = sels.nth(3) if cnt >= 4 else sels.nth(cnt - 1)
                         await prod_select.select_option(value=prod["value"])
-                        
-                        # Esperar a que DataTables termine de renderizar las filas
                         await wait_datatables_ready(page)
 
-                        rows_raw = await extract_all_rows(page)
-                        records = await rows_to_records(rows_raw, dpto_name, prov["label"], prod["label"])
-
+                        records = await rows_to_records(await extract_all_rows(page), dpto_name, prov["label"], prod["label"])
+                        nuevos = 0
                         for r in records:
                             key = (r["establecimiento"].upper(), r["departamento"], r["provincia"], r["combustible"])
                             if key not in seen:
                                 seen.add(key)
                                 all_results.append(r)
-
-                        if len(records) > 0:
-                            logger.info(f"    ✅ {prov['label']} | {prod['label']} -> {len(records)} estaciones extraídas")
-                        else:
-                            logger.info(f"    ℹ️ {prov['label']} | {prod['label']} -> 0 estaciones")
-
+                                nuevos += 1
+                        logger.info(f"    {prov['label']} | {prod['label']} → {len(records)} filas ({nuevos} nuevos)")
                     except Exception as e:
-                        logger.debug(f"    Error prod: {e}")
+                        logger.debug(f"    Error prod {prod['label']}: {e}")
 
-                # Guardado continuo en MongoDB
-                if all_results:
-                    try:
-                        await db.precios_facilito.delete_many({})
-                        await db.precios_facilito.insert_many(all_results)
-                    except:
-                        pass
-
-            logger.info(f"  Acumulado total actual: {len(all_results)} estaciones")
+            logger.info(f"  Acumulado: {len(all_results)} precios")
 
         await browser.close()
 
+    # Reemplazo atómico: solo se sobrescribe si el scrape trajo datos (evita vaciar por un fallo).
+    if all_results:
+        await db.precios_facilito.delete_many({})
+        # insertar en lotes
+        for i in range(0, len(all_results), 1000):
+            await db.precios_facilito.insert_many(all_results[i:i + 1000])
     total_db = await db.precios_facilito.count_documents({})
     logger.info(f"\n{'='*60}")
-    logger.info(f"✅ COMPLETO: {total_db} estaciones guardadas en MongoDB!")
-    logger.info("Presiona F5 en Enered para ver la lista completa.")
+    logger.info(f"✅ COMPLETO: {total_db} precios guardados en {DB_NAME}.precios_facilito")
     logger.info(f"{'='*60}")
 
 

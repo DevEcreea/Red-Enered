@@ -986,6 +986,10 @@ class InvoiceUpdateIn(BaseModel):
     importe_total: Optional[float] = None
     numero_documento: Optional[str] = None
     ruc_emisor: Optional[str] = None
+    # Declarar factura como inválida (NO se borra, solo se marca con su motivo).
+    invalida: Optional[bool] = None
+    motivos_invalidez: Optional[List[str]] = None  # ej: ["tipo_combustible", "sin_placa"]
+    motivo_invalidez_otros: Optional[str] = None
 
 
 @subsidio_router.post("/subsidio/invoices/upload")
@@ -996,7 +1000,8 @@ async def invoices_upload(
     """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
     guarda el archivo en storage y un draft en consumos_subsidio (status=draft).
     Devuelve la lista con los datos extraídos para verificación."""
-    from services.pdf_invoice_reader import extract_invoice_data
+    from services.pdf_invoice_reader import extract_invoice_data as _extract_pdf_text
+    from services.invoice_ocr import extract_invoice_data as _extract_vision
 
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
@@ -1021,9 +1026,23 @@ async def invoices_upload(
         key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
         storage.save_object(key, content, content_type)
 
-        # OCR
+        # OCR — motor según formato: PDF con texto usa el parser; imágenes/escaneos usan Gemini Vision
+        ct = (content_type or "").lower()
+        is_pdf = "pdf" in ct or content[:4] == b"%PDF"
+        _sid = f"ocr-{user['id']}-{uuid.uuid4().hex[:6]}"
         try:
-            ocr = await extract_invoice_data(content, content_type, session_id=f"ocr-{user['id']}-{uuid.uuid4().hex[:6]}")
+            if is_pdf:
+                ocr = await _extract_pdf_text(content, content_type, session_id=_sid)
+                _ex = ocr.get("extracted") or {}
+                # PDF escaneado (sin texto extraíble) → reintenta con visión
+                if not any(_ex.get(k) for k in ("placa", "importe_total", "galones", "numero_documento")):
+                    try:
+                        ocr = await _extract_vision(content, content_type, session_id=_sid)
+                    except Exception:
+                        pass
+            else:
+                # Imágenes (JPG/PNG/WEBP/HEIC…) → Gemini Vision
+                ocr = await _extract_vision(content, content_type, session_id=_sid)
             extracted = ocr["extracted"]
             raw_resp = ocr["raw_response"]
             ocr_ok = True
@@ -1867,13 +1886,32 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     ).sort("fecha", -1).to_list(2000)
     
     invoices = list(sub_invs)
-    
+
+    # Evitar duplicados: una factura confirmada desde Subsidio existe tanto en
+    # consumos_subsidio (registro rico y editable) como en db.invoices (espejo de
+    # facturación, mismo id / mismo n_doc). Mostramos solo la de consumos_subsidio.
+    seen_ids = {i.get("id") for i in invoices if i.get("id")}
+    seen_ndocs = {
+        (i.get("numero_documento") or i.get("n_doc") or "").strip().upper()
+        for i in invoices
+    }
+    seen_ndocs.discard("")
+
     if u.get("empresa"):
         enered_invs = await db.invoices.find(
             {"empresa": u.get("empresa")},
             {"_id": 0}
         ).to_list(2000)
         for ei in enered_invs:
+            ndoc = (ei.get("n_doc") or "").strip().upper()
+            # Ya presente vía consumos_subsidio (mismo id o mismo número) → no duplicar
+            if ei.get("id") in seen_ids:
+                continue
+            if ndoc and ndoc in seen_ndocs:
+                continue
+            seen_ids.add(ei.get("id"))
+            if ndoc:
+                seen_ndocs.add(ndoc)
             # Map db.invoices format to consumos_subsidio format for the admin table
             mapped_inv = {
                 "id": ei.get("id"),
@@ -1884,6 +1922,19 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
                 "empresa": ei.get("empresa"),
                 "producto": ei.get("producto"),
                 "factura_filename": ei.get("pdf_filename"),
+                # Campos que antes se perdían al mapear → la tabla admin los mostraba vacíos
+                # y parecía que "no se guardaba". Se incluyen para reflejar el registro real.
+                "placa": ei.get("placa"),
+                "galones": ei.get("galones"),
+                "precio_unitario": ei.get("precio_unitario"),
+                "ciudad": ei.get("ciudad"),
+                "ruc_emisor": ei.get("ruc_emisor"),
+                "estacion": ei.get("estacion"),
+                "hora": ei.get("hora"),
+                "created_via": ei.get("created_via"),
+                "invalida": ei.get("invalida"),
+                "motivos_invalidez": ei.get("motivos_invalidez"),
+                "motivo_invalidez_otros": ei.get("motivo_invalidez_otros"),
                 "origen": "RED_ENERED",
                 "is_tercero": False
             }
@@ -2100,6 +2151,21 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
             valid_key = storage.find_by_suffix(suffix, prefix="subsidio/")
             if not valid_key:
                 valid_key = storage.find_by_suffix(suffix, prefix="invoices/")
+        except Exception:
+            pass
+
+    # Fallback robusto: el archivo original del cliente se guarda en
+    # subsidio/{user_id}/factura_subsidio/{hash}-{factura_filename}. Buscamos por el
+    # NOMBRE DE ARCHIVO real (que es confiable), no por numero_documento, que puede
+    # venir corrupto del OCR. Esto localiza la factura aunque factura_storage_key
+    # apunte a una key inexistente.
+    if not valid_key and fname:
+        try:
+            uid = inv.get("user_id")
+            if uid:
+                valid_key = storage.find_by_suffix(fname, prefix=f"subsidio/{uid}/")
+            if not valid_key:
+                valid_key = storage.find_by_suffix(fname, prefix="subsidio/")
         except Exception:
             pass
 
