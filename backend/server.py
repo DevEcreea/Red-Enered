@@ -111,6 +111,9 @@ def user_public(u: dict) -> dict:
         "expediente_status": u.get("expediente_status", "confirmed"),
         # Permisos por módulo (equipo ENERED). None = acceso total (super-admin).
         "permisos": u.get("permisos"),
+        # Impersonación: True si un admin está actuando como esta empresa.
+        "impersonando": u.get("_impersonando", False),
+        "impersonado_por": u.get("_impersonado_por"),
     }
 
 
@@ -131,6 +134,26 @@ async def user_public_with_servicios(u: dict) -> dict:
     return base
 
 
+async def _impersonate_context(admin: dict, empresa: str) -> Optional[dict]:
+    """Devuelve el contexto efectivo para que un admin_enered actúe como una empresa.
+    Usa un usuario representativo real (prefiere cliente_subsidio, luego administrador);
+    si no hay, sintetiza según tipo_cliente. Conserva la identidad admin para auditoría."""
+    if not empresa:
+        return None
+    rep = (await db.users.find_one({"empresa": empresa, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+           or await db.users.find_one({"empresa": empresa, "role": "administrador"}, {"_id": 0, "password_hash": 0})
+           or await db.users.find_one({"empresa": empresa}, {"_id": 0, "password_hash": 0}))
+    if rep:
+        rep = dict(rep)
+    else:
+        cfg = await db.empresas_config.find_one({"empresa": empresa}, {"_id": 0, "tipo_cliente": 1})
+        role = "cliente_subsidio" if (cfg or {}).get("tipo_cliente") == "subsidio" else "administrador"
+        rep = {"id": admin["id"], "email": admin["email"], "name": empresa, "role": role, "empresa": empresa}
+    rep["_impersonando"] = True
+    rep["_impersonado_por"] = admin.get("email")
+    return rep
+
+
 async def get_current_user(request: Request) -> dict:
     token = request.cookies.get("access_token")
     if not token:
@@ -148,6 +171,12 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        # Impersonación: admin_enered puede "actuar como" una empresa (header X-Impersonate-Empresa).
+        imp = request.headers.get("X-Impersonate-Empresa") or request.query_params.get("_imp")
+        if imp and user.get("role") == "admin_enered":
+            eff = await _impersonate_context(user, imp.strip())
+            if eff:
+                return eff
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesión expirada")
@@ -5357,6 +5386,7 @@ async def audit_middleware(request: Request, call_next):
             if uid:
                 u = await db.users.find_one({"id": uid}, {"_id": 0, "email": 1, "name": 1, "role": 1, "empresa": 1})
                 if u:
+                    imp_emp = request.headers.get("X-Impersonate-Empresa")
                     await db.audit_log.insert_one({
                         "id": str(uuid.uuid4()),
                         "at": datetime.now(timezone.utc).isoformat(),
@@ -5364,7 +5394,8 @@ async def audit_middleware(request: Request, call_next):
                         "user_email": u.get("email"),
                         "user_name": u.get("name"),
                         "user_role": u.get("role"),
-                        "empresa": u.get("empresa"),
+                        "empresa": imp_emp or u.get("empresa"),
+                        "impersonando": bool(imp_emp),
                         "action": _AUDIT_ACTION.get(request.method, request.method),
                         "modulo": _audit_modulo(path),
                         "method": request.method,
