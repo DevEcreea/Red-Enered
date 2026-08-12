@@ -109,6 +109,8 @@ def user_public(u: dict) -> dict:
         "created_at": u.get("created_at"),
         "documentos_completos": u.get("documentos_completos", True),
         "expediente_status": u.get("expediente_status", "confirmed"),
+        # Permisos por módulo (equipo ENERED). None = acceso total (super-admin).
+        "permisos": u.get("permisos"),
     }
 
 
@@ -180,6 +182,26 @@ def require_roles(*roles):
     return checker
 
 
+def user_has_module(user: dict, module: str) -> bool:
+    """True si el usuario puede acceder al módulo. admin_enered sin `permisos`
+    (None) = super-admin con acceso total. Con lista = solo esos módulos."""
+    if user.get("role") != "admin_enered":
+        return False
+    permisos = user.get("permisos")
+    if permisos is None:
+        return True  # super-admin
+    return module in permisos
+
+
+def require_permiso(module: str):
+    """Requiere admin_enered CON permiso al módulo (o super-admin)."""
+    async def checker(user: dict = Depends(get_current_user)):
+        if not user_has_module(user, module):
+            raise HTTPException(status_code=403, detail=f"Sin permiso para el módulo '{module}'")
+        return user
+    return checker
+
+
 # Alias usado por endpoints de Infracciones (estilo: u = await require_auth(req))
 async def require_auth(request: Request) -> dict:
     return await get_current_user(request)
@@ -213,6 +235,9 @@ class UserCreate(BaseModel):
     name: str
     role: Literal["admin_enered", "administrador", "logistica", "contabilidad"]
     empresa: Optional[str] = None
+    # Módulos permitidos para miembros del equipo ENERED (admin_enered).
+    # None/ausente = acceso total (super-admin). Lista = solo esos módulos.
+    permisos: Optional[List[str]] = None
 
 
 class UserUpdate(BaseModel):
@@ -220,6 +245,7 @@ class UserUpdate(BaseModel):
     role: Optional[Literal["admin_enered", "administrador", "logistica", "contabilidad"]] = None
     empresa: Optional[str] = None
     password: Optional[str] = None
+    permisos: Optional[List[str]] = None
 
 
 class InvoiceCreate(BaseModel):
@@ -749,13 +775,13 @@ async def reset_password(data: ResetIn):
 
 # ---------- Users Management ----------
 @api.get("/users")
-async def list_users(user: dict = Depends(require_roles("admin_enered"))):
+async def list_users(user: dict = Depends(require_permiso("usuarios"))):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
     return users
 
 
 @api.post("/users")
-async def create_user(data: UserCreate, user: dict = Depends(require_roles("admin_enered"))):
+async def create_user(data: UserCreate, user: dict = Depends(require_permiso("usuarios"))):
     email = data.email.lower().strip()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Correo ya registrado")
@@ -765,6 +791,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles("admi
         "name": data.name,
         "role": data.role,
         "empresa": data.empresa,
+        "permisos": data.permisos,  # None = acceso total; lista = módulos permitidos
         "password_hash": hash_password(data.password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -775,8 +802,11 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles("admi
 
 
 @api.put("/users/{uid}")
-async def update_user(uid: str, data: UserUpdate, user: dict = Depends(require_roles("admin_enered"))):
-    patch = {k: v for k, v in data.model_dump(exclude_unset=True).items() if v is not None}
+async def update_user(uid: str, data: UserUpdate, user: dict = Depends(require_permiso("usuarios"))):
+    raw = data.model_dump(exclude_unset=True)
+    patch = {k: v for k, v in raw.items() if v is not None}
+    if "permisos" in raw:  # permitir setear permisos a null (acceso total) o a lista
+        patch["permisos"] = raw["permisos"]
     if "password" in patch:
         patch["password_hash"] = hash_password(patch.pop("password"))
     if not patch:
@@ -789,11 +819,35 @@ async def update_user(uid: str, data: UserUpdate, user: dict = Depends(require_r
 
 
 @api.delete("/users/{uid}")
-async def delete_user(uid: str, user: dict = Depends(require_roles("admin_enered"))):
+async def delete_user(uid: str, user: dict = Depends(require_permiso("usuarios"))):
     if uid == user["id"]:
         raise HTTPException(status_code=400, detail="No puedes eliminarte a ti mismo")
     await db.users.delete_one({"id": uid})
     return {"ok": True}
+
+
+@api.get("/admin/audit-log")
+async def get_audit_log(
+    user: dict = Depends(require_permiso("bitacora")),
+    q: Optional[str] = None,
+    modulo: Optional[str] = None,
+    accion: Optional[str] = None,
+    limit: int = 200,
+):
+    """Bitácora de acciones (escrituras). Filtros: q (texto libre), modulo, accion."""
+    query: dict = {}
+    if modulo:
+        query["modulo"] = modulo
+    if accion:
+        query["action"] = accion
+    if q:
+        rx = {"$regex": re.escape(q), "$options": "i"}
+        query["$or"] = [
+            {"user_email": rx}, {"user_name": rx}, {"path": rx}, {"empresa": rx},
+        ]
+    limit = max(1, min(limit, 1000))
+    items = await db.audit_log.find(query, {"_id": 0}).sort("at", -1).limit(limit).to_list(limit)
+    return {"items": items, "total": len(items)}
 
 
 @api.get("/empresas")
@@ -5258,6 +5312,69 @@ if _cors_regex:
 
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
 logger.info(f"CORS allow_origins={_allow_origins} regex={_cors_regex!r}")
+
+
+# ─── Bitácora de acciones (audit log) ────────────────────────────────────────
+_AUDIT_METHODS = {"POST", "PUT", "DELETE", "PATCH"}
+_AUDIT_SKIP = ("/api/auth/login", "/api/auth/logout", "/api/auth/refresh")
+_AUDIT_ACTION = {"POST": "crear", "PUT": "editar", "PATCH": "editar", "DELETE": "borrar"}
+
+
+def _audit_modulo(path: str) -> str:
+    p = (path or "").lower()
+    if "/subsidio" in p: return "Subsidio"
+    if "/users" in p: return "Usuarios"
+    if "/empresas" in p or "/servicios" in p or "/wialon" in p: return "Empresas"
+    if "/invoices" in p or "/facturaci" in p or "/account-state" in p: return "Facturación"
+    if "/documents" in p or "/documento" in p: return "Documentación"
+    if "/vehiculos" in p or "/conductores" in p: return "Vehículos"
+    if "/consumptions" in p or "/consumos" in p: return "Combustible"
+    if "/abonos" in p or "/tesoreria" in p: return "Tesorería"
+    if "/precios" in p: return "Precios"
+    if "/qr" in p: return "QR"
+    if "/infracciones" in p: return "Infracciones"
+    return "Otro"
+
+
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    response = await call_next(request)
+    try:
+        path = request.url.path
+        if (request.method in _AUDIT_METHODS and response.status_code < 400
+                and not any(path.startswith(s) for s in _AUDIT_SKIP)):
+            token = request.cookies.get("access_token")
+            if not token:
+                auth = request.headers.get("Authorization", "")
+                if auth.startswith("Bearer "):
+                    token = auth[7:]
+            uid = None
+            if token:
+                try:
+                    uid = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM]).get("sub")
+                except Exception:
+                    uid = None
+            if uid:
+                u = await db.users.find_one({"id": uid}, {"_id": 0, "email": 1, "name": 1, "role": 1, "empresa": 1})
+                if u:
+                    await db.audit_log.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "at": datetime.now(timezone.utc).isoformat(),
+                        "user_id": uid,
+                        "user_email": u.get("email"),
+                        "user_name": u.get("name"),
+                        "user_role": u.get("role"),
+                        "empresa": u.get("empresa"),
+                        "action": _AUDIT_ACTION.get(request.method, request.method),
+                        "modulo": _audit_modulo(path),
+                        "method": request.method,
+                        "path": path,
+                        "status": response.status_code,
+                        "ip": request.client.host if request.client else None,
+                    })
+    except Exception:
+        pass
+    return response
 
 
 # ---------- Seed ----------

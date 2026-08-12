@@ -2,13 +2,16 @@ import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { formatApiError, ROLE_LABEL, formatDate } from "../lib/utils";
 import { Plus, Trash2, Pencil, X, Users as UsersIcon } from "lucide-react";
+import { MODULOS } from "../lib/modulos";
+
+const EMPTY_FORM = { email: "", password: "", name: "", role: "administrador", empresa: "", permisos: null };
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [empresas, setEmpresas] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
-  const [form, setForm] = useState({ email: "", password: "", name: "", role: "administrador", empresa: "" });
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [err, setErr] = useState("");
 
   useEffect(() => {
@@ -35,21 +38,23 @@ export default function AdminUsers() {
   const submit = async (e) => {
     e.preventDefault(); setErr("");
     try {
+      // permisos solo aplica a admin_enered; null = acceso total (super-admin)
+      const permisos = form.role === "admin_enered" ? form.permisos : null;
       if (edit) {
-        const patch = { name: form.name, role: form.role, empresa: form.empresa || null };
+        const patch = { name: form.name, role: form.role, empresa: form.empresa || null, permisos };
         if (form.password) patch.password = form.password;
         await api.put(`/users/${edit.id}`, patch);
       } else {
-        await api.post("/users", { ...form, empresa: form.empresa || null });
+        await api.post("/users", { ...form, empresa: form.empresa || null, permisos });
       }
-      setShowForm(false); setEdit(null); setForm({ email: "", password: "", name: "", role: "administrador", empresa: "" });
+      setShowForm(false); setEdit(null); setForm({ ...EMPTY_FORM });
       load();
     } catch (e2) { setErr(formatApiError(e2.response?.data?.detail)); }
   };
 
   const openEdit = (u) => {
     setEdit(u); setShowForm(true);
-    setForm({ email: u.email, password: "", name: u.name, role: u.role, empresa: u.empresa || "" });
+    setForm({ email: u.email, password: "", name: u.name, role: u.role, empresa: u.empresa || "", permisos: u.permisos ?? null });
   };
 
   const remove = async (u) => {
@@ -65,7 +70,7 @@ export default function AdminUsers() {
           <h1 className="font-cabinet font-black text-3xl md:text-4xl text-neutral-900">Usuarios</h1>
           <p className="text-neutral-500 mt-1 text-sm">Gestiona accesos, roles y empresas.</p>
         </div>
-        <button onClick={() => { setEdit(null); setForm({ email: "", password: "", name: "", role: "administrador", empresa: "" }); setShowForm(true); }} className="btn-brand text-sm flex items-center gap-2" data-testid="user-new-btn">
+        <button onClick={() => { setEdit(null); setForm({ ...EMPTY_FORM }); setShowForm(true); }} className="btn-brand text-sm flex items-center gap-2" data-testid="user-new-btn">
           <Plus className="w-4 h-4" /> Nuevo usuario
         </button>
       </div>
@@ -90,6 +95,46 @@ export default function AdminUsers() {
               <option value="">— Sin empresa (Admin ENERED) —</option>
               {empresas.map((e) => <option key={e}>{e}</option>)}
             </select>
+
+            {form.role === "admin_enered" && (
+              <div className="md:col-span-2 border-t border-border pt-3 mt-1">
+                <div className="text-xs font-bold text-neutral-600 uppercase tracking-wide mb-2">Acceso a módulos (equipo ENERED)</div>
+                <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer select-none">
+                  <input type="checkbox" checked={form.permisos == null}
+                    onChange={(e) => setForm({ ...form, permisos: e.target.checked ? null : [] })}
+                    className="accent-brand w-4 h-4" data-testid="perm-acceso-total" />
+                  <span className="font-medium">Acceso total (super-admin)</span>
+                </label>
+                {form.permisos != null && (
+                  <div className="bg-neutral-50 border border-border rounded-lg p-3 space-y-3">
+                    {["operacion", "admin"].map((grupo) => (
+                      <div key={grupo}>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-neutral-400 mb-1.5">
+                          {grupo === "operacion" ? "Operación" : "Administración"}
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
+                          {MODULOS.filter((m) => m.grupo === grupo).map((m) => (
+                            <label key={m.key} className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                              <input type="checkbox"
+                                checked={(form.permisos || []).includes(m.key)}
+                                onChange={() => setForm((f) => ({
+                                  ...f,
+                                  permisos: (f.permisos || []).includes(m.key)
+                                    ? f.permisos.filter((k) => k !== m.key)
+                                    : [...(f.permisos || []), m.key],
+                                }))}
+                                className="accent-brand w-3.5 h-3.5" />
+                              {m.label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {err && <div className="md:col-span-2 text-red-600 text-sm">{err}</div>}
             <div className="md:col-span-2 flex gap-2">
               <button type="submit" className="btn-brand text-sm">{edit ? "Guardar" : "Crear"}</button>

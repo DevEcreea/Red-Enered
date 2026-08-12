@@ -21,27 +21,28 @@ const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contab
 
 const MENU = [
   { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard" },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard", mkey: "dashboard" },
   { to: "/dashboard-subsidio", label: "Panel Subsidio", icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
-  { to: "/analitica", label: "Analytics BI", icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica" },
-  { to: "/monitoreo", label: "Monitoreo", icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo" },
-  { to: "/flotas", label: "Combustible", icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas" },
-  { to: "/facturacion", label: "Gestión de Gastos", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado" },
-  { to: "/mantenimiento", label: "Mantenimiento", icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento" },
-  { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist" },
-  { to: "/infracciones", label: "Infracciones", icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones" },
-  { to: "/vehiculos", label: "Vehículos", icon: Car, roles: ALL_REGULAR_ROLES, testid: "nav-vehiculos" },
-  { to: "/neumaticos", label: "Neumáticos", icon: Disc, roles: ALL_REGULAR_ROLES, testid: "nav-neumaticos" },
-  { to: "/viajes", label: "Viajes", icon: Route, roles: ALL_REGULAR_ROLES, testid: "nav-viajes" },
-  { to: "/documentacion", label: "Documentación", icon: FileText, roles: ALL_REGULAR_ROLES, testid: "nav-documentacion" },
+  { to: "/analitica", label: "Analytics BI", icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica", mkey: "analitica" },
+  { to: "/monitoreo", label: "Monitoreo", icon: Satellite, roles: ALL_REGULAR_ROLES, testid: "nav-monitoreo", mkey: "monitoreo" },
+  { to: "/flotas", label: "Combustible", icon: Fuel, roles: ALL_REGULAR_ROLES, testid: "nav-flotas", mkey: "combustible" },
+  { to: "/facturacion", label: "Gestión de Gastos", icon: Receipt, roles: ["admin_enered", "administrador", "contabilidad", "cliente_subsidio"], testid: "nav-estado", mkey: "facturacion" },
+  { to: "/mantenimiento", label: "Mantenimiento", icon: Wrench, roles: ALL_REGULAR_ROLES, testid: "nav-mantenimiento", mkey: "mantenimiento" },
+  { to: "/checklist", label: "Checklist", icon: ClipboardCheck, roles: ALL_REGULAR_ROLES, testid: "nav-checklist", mkey: "checklist" },
+  { to: "/infracciones", label: "Infracciones", icon: AlertTriangle, roles: ALL_REGULAR_ROLES, testid: "nav-infracciones", mkey: "infracciones" },
+  { to: "/vehiculos", label: "Vehículos", icon: Car, roles: ALL_REGULAR_ROLES, testid: "nav-vehiculos", mkey: "vehiculos" },
+  { to: "/neumaticos", label: "Neumáticos", icon: Disc, roles: ALL_REGULAR_ROLES, testid: "nav-neumaticos", mkey: "neumaticos" },
+  { to: "/viajes", label: "Viajes", icon: Route, roles: ALL_REGULAR_ROLES, testid: "nav-viajes", mkey: "viajes" },
+  { to: "/documentacion", label: "Documentación", icon: FileText, roles: ALL_REGULAR_ROLES, testid: "nav-documentacion", mkey: "documentacion" },
 ];
 
 const ADMIN_ITEMS = [
-  { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users" },
-  { to: "/admin/empresas", label: "Empresas & Servicios", icon: FolderCheck, testid: "nav-empresas" },
-  { to: "/admin/tesoreria", label: "Tesorería", icon: FolderCheck, testid: "nav-tesoreria" },
-  { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload" },
-  { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin" },
+  { to: "/admin/users", label: "Usuarios", icon: Users, testid: "nav-users", mkey: "usuarios" },
+  { to: "/admin/empresas", label: "Empresas & Servicios", icon: FolderCheck, testid: "nav-empresas", mkey: "empresas" },
+  { to: "/admin/tesoreria", label: "Tesorería", icon: FolderCheck, testid: "nav-tesoreria", mkey: "tesoreria" },
+  { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload", mkey: "datos" },
+  { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin", mkey: "subsidio" },
+  { to: "/admin/bitacora", label: "Bitácora", icon: FileText, testid: "nav-bitacora", mkey: "bitacora" },
 ];
 
 const ROUTE_TITLES = {
@@ -63,6 +64,7 @@ const ROUTE_TITLES = {
   "/admin/users": "Usuarios",
   "/admin/empresas": "Empresas & Servicios",
   "/admin/subsidio": "Subsidio · Expedientes",
+  "/admin/bitacora": "Bitácora",
   "/admin/upload": "Datos",
   "/admin/qr": "QR",
 };
@@ -233,7 +235,12 @@ export default function Layout({ children }) {
   if (!user) return null;
 
   const items = MENU.filter((i) => {
-    // Eliminamos la restricción de ocultar items del menú para que todos los clientes 
+    // Permisos por módulo (equipo ENERED): si el admin tiene una lista de permisos,
+    // se ocultan los módulos no incluidos. Super-admin (permisos null) ve todo.
+    if (user.role === "admin_enered" && Array.isArray(user.permisos) && i.mkey && !user.permisos.includes(i.mkey)) {
+      return false;
+    }
+    // Eliminamos la restricción de ocultar items del menú para que todos los clientes
     // (incluso los de solo subsidio) vean la plataforma completa y puedan recibir los upsells (Demos).
 
     if (!i.roles.includes(user.role)) {
@@ -319,7 +326,7 @@ export default function Layout({ children }) {
             }`}>
               Admin
             </div>
-            {ADMIN_ITEMS.map((item) => (
+            {ADMIN_ITEMS.filter((item) => !(Array.isArray(user.permisos) && item.mkey && !user.permisos.includes(item.mkey))).map((item) => (
               <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
             ))}
           </>
