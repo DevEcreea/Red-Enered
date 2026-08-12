@@ -507,6 +507,25 @@ export default function Layout({ children }) {
         {children}
         <EmayFooter variant="compact" />
       </main>
+
+      {/* Botón flotante de soporte por WhatsApp — visible en todos los módulos */}
+      <a
+        href={`https://wa.me/51972228870?text=${encodeURIComponent("Hola ENERED 👋, necesito soporte con la plataforma.")}`}
+        target="_blank"
+        rel="noreferrer"
+        title="Soporte por WhatsApp"
+        data-testid="wsp-soporte"
+        className="fixed bottom-5 right-5 z-[120] flex items-center gap-2 group"
+      >
+        <span className="hidden md:group-hover:flex bg-neutral-900 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-lg whitespace-nowrap items-center">
+          ¿Necesitás ayuda? Escribinos
+        </span>
+        <span className="w-14 h-14 rounded-full bg-[#25D366] hover:bg-[#1EBE57] shadow-[0_6px_20px_rgba(37,211,102,0.5)] flex items-center justify-center transition-colors">
+          <svg viewBox="0 0 32 32" width="30" height="30" fill="#fff" aria-hidden="true">
+            <path d="M16.003 0h-.006C7.163 0 .001 7.164.001 16c0 3.198.94 6.173 2.559 8.68L.94 32l7.552-1.987A15.9 15.9 0 0016 32c8.837 0 16-7.163 16-16S24.84 0 16.003 0zm9.35 22.6c-.39 1.1-1.94 2.01-3.17 2.28-.84.18-1.94.32-5.64-1.21-4.73-1.96-7.77-6.77-8.01-7.08-.23-.31-1.91-2.54-1.91-4.85 0-2.31 1.21-3.44 1.64-3.91.39-.43.86-.54 1.15-.54.29 0 .58.003.83.014.27.012.63-.1.98.75.36.87 1.22 3.01 1.33 3.23.11.22.18.48.03.79-.14.31-.21.5-.42.77-.21.27-.44.6-.63.81-.21.22-.42.46-.18.87.24.41 1.07 1.77 2.3 2.86 1.58 1.41 2.92 1.85 3.33 2.06.41.21.65.18.89-.11.24-.29 1.02-1.19 1.29-1.6.27-.41.54-.34.91-.2.37.14 2.36 1.11 2.77 1.31.41.2.68.3.78.47.1.17.1.99-.29 2.09z"/>
+          </svg>
+        </span>
+      </a>
     </div>
   );
 }
