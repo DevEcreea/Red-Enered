@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { api } from "../lib/api";
 import TrackerSubsidio from "../components/TrackerSubsidio";
+import ValidacionPendiente from "../components/ValidacionPendiente";
 
 const STAGE_ICONS = {
   solicitud_enviada:   FileCheck2,
@@ -258,6 +259,9 @@ export default function DashboardSubsidioView() {
 
       {/* FILA 1 — Stages */}
       <TrackerSubsidio />
+
+      {/* Aviso: información en validación — explica el consumo en S/0 */}
+      <ValidacionPendiente contexto="tu consumo de combustible y tus indicadores" />
 
       {/* MAIN 3-COLUMN CONTENT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

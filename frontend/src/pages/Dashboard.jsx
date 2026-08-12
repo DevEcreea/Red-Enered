@@ -12,6 +12,7 @@ import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import TrackerSubsidio from "../components/TrackerSubsidio";
+import ValidacionPendiente from "../components/ValidacionPendiente";
 
 const MAPS_LINK = "https://maps.app.goo.gl/LZpyBqYs54LazZtV7";
 const UPGRADE_WA = "https://wa.me/51900000000?text=Hola%2C%20quiero%20mejorar%20mi%20plan%20ENERED";
@@ -616,6 +617,9 @@ export default function Dashboard() {
       </div>
 
       {services.subsidio && <TrackerSubsidio />}
+
+      {/* Aviso: información en validación (cliente subsidio) — explica los KPIs en 0 */}
+      <ValidacionPendiente contexto="tu consumo de combustible y tus indicadores" />
 
       {/* ================= ROW 1 — 8 mini KPI cards ================= */}
       <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-2.5" data-testid="row-1-kpis">
