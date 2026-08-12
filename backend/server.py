@@ -3880,15 +3880,21 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
         try: return float(x) if x not in (None, "") else d
         except Exception: return d
 
-    total_facturado = sum(_f(i.get("monto_total")) for i in invs)
+    # Facturas de TERCERO (las que cargó el cliente, no emitidas por ENERED) NO son deuda
+    # con ENERED → se excluyen de todos los cálculos del estado de cuenta.
+    def _es_tercero(i):
+        return (i.get("estado") or "").lower() == "tercero" or i.get("created_via") == "subsidio_confirm"
+    invs_reales = [i for i in invs if not _es_tercero(i)]
+
+    total_facturado = sum(_f(i.get("monto_total")) for i in invs_reales)
     # Estados nuevos: pagada/pendiente/vencida. Compat con legacy: pagado/por_vencer/vencido.
     PAID = {"pagada", "pagado"}
     OVERDUE = {"vencida", "vencido"}
-    facturas_pendientes = sum(_f(i.get("saldo")) for i in invs if (i.get("estado") or "").lower() not in PAID)
+    facturas_pendientes = sum(_f(i.get("saldo")) for i in invs_reales if (i.get("estado") or "").lower() not in PAID)
     notas_despacho = sum(_f(c.get("IMPORTE_TOTAL")) for c in cons)
     notas_despacho_cnt = len(cons)
-    total_vencido = sum(_f(i.get("saldo")) for i in invs if (i.get("estado") or "").lower() in OVERDUE)
-    total_pagado = sum(_f(i.get("monto_total")) for i in invs if (i.get("estado") or "").lower() in PAID)
+    total_vencido = sum(_f(i.get("saldo")) for i in invs_reales if (i.get("estado") or "").lower() in OVERDUE)
+    total_pagado = sum(_f(i.get("monto_total")) for i in invs_reales if (i.get("estado") or "").lower() in PAID)
 
     linea_total = float(cfg.get("linea_credito") or 0)
     saldo_a_favor = float(cfg.get("saldo_a_favor") or 0.0)
@@ -3911,7 +3917,7 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
         "total_vencido": round(total_vencido, 2),
         "pct_utilizada": pct,
         "dias_credito": int(cfg.get("dias_credito") or 0),
-        "n_facturas": len(invs),
+        "n_facturas": len(invs_reales),
     }
 
 
