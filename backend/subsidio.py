@@ -468,6 +468,33 @@ async def subsidio_status(user: dict = Depends(_require_subsidio)):
     }
 
 
+@subsidio_router.get("/subsidio/validation-state")
+async def subsidio_validation_state(user: dict = Depends(_require_subsidio)):
+    """
+    Estado de validación de las facturas subidas por el cliente. Se usa para mostrar el
+    aviso 'estamos validando tu información' en Combustible, Gestión de Gastos y Mi Flota
+    mientras el equipo ENERED no haya validado (los KPIs salen en 0 hasta entonces).
+    - uploaded: total de facturas que el cliente subió (cualquier estado)
+    - confirmed: facturas ya validadas (status=confirmed → alimentan los KPIs)
+    - pending_validation: subió facturas pero aún ninguna fue validada
+    """
+    uids = await _get_company_uids(user["id"])
+    uploaded = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}})
+    confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
+    fleet = 0
+    empresa = user.get("empresa")
+    if empresa:
+        fleet = await db.consumptions.count_documents({"EMPRESA": empresa})
+    validated = confirmed > 0 or fleet > 0
+    return {
+        "uploaded": uploaded,
+        "confirmed": confirmed,
+        "has_uploads": uploaded > 0,
+        "validated": validated,
+        "pending_validation": uploaded > 0 and not validated,
+    }
+
+
 def _subsidio_key(user_id: str, category: str, placa: Optional[str], filename: str) -> str:
     safe = "".join(c for c in filename if c.isalnum() or c in ("-", "_", "."))[-80:]
     pid = f"{placa}-" if placa else ""
