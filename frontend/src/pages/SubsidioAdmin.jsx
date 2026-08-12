@@ -1499,7 +1499,7 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
                   {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
                     <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
                       <iframe
-                        src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download`}
+                        src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
                         className="w-full h-full min-h-[500px] bg-white"
                         title="Previsualización de factura"
                       />
