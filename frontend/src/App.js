@@ -75,11 +75,24 @@ function Gated({ children, titulo, roles }) {
 /** Render distinto del Dashboard según rol y servicios. */
 function DashboardRouter() {
   const { user } = useAuth();
-  // cliente_subsidio (o empresa con servicios.subsidio) sin combustible ni gps → default = subsidio
-  if (user?.role === "cliente_subsidio" && !user?.servicios?.combustible && !user?.servicios?.gps) {
+  const s = user?.servicios || {};
+  // cliente_subsidio SIN plataforma/combustible/gps → su vista principal es el Panel Subsidio.
+  // Al activarle "plataforma" (o combustible/gps) pasa al Dashboard general, que ya incluye el
+  // tracker del trámite (TrackerSubsidio) como encabezado.
+  if (user?.role === "cliente_subsidio" && !s.plataforma && !s.combustible && !s.gps) {
     return <DashboardSubsidioView />;
   }
   return <Dashboard />;
+}
+
+/** Redirección raíz: cliente solo-subsidio → Panel Subsidio; el resto → Dashboard. */
+function RootRedirect() {
+  const { user } = useAuth();
+  const s = user?.servicios || {};
+  if (user?.role === "cliente_subsidio" && !s.plataforma && !s.combustible && !s.gps) {
+    return <Navigate to="/dashboard-subsidio" replace />;
+  }
+  return <Navigate to="/dashboard" replace />;
 }
 
 /** Dashboard route: gateado para todos excepto cliente_subsidio (su dashboard es su vista principal). */
@@ -105,7 +118,7 @@ function App() {
           <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
           <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<RootRedirect />} />
           {/* Dashboard: router por rol; gateado para subsidio */}
           <Route path="/dashboard" element={<DashboardRoute />} />
           <Route path="/flotas" element={<Gated titulo="Combustible"><Flotas /></Gated>} />
@@ -146,7 +159,7 @@ function App() {
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<RootRedirect />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

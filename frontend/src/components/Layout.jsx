@@ -267,9 +267,11 @@ export default function Layout({ children }) {
       if (user?.servicios?.plataforma) return false;
       if (user.role !== "cliente_subsidio" && !user?.servicios?.subsidio) return false;
     }
-    // Condición: Ningún usuario de empresa ve Dashboard a menos que tengan el servicio plataforma.
-    // Excepción: cliente_subsidio siempre ve su panel ("Mi Panel"), aunque no tenga plataforma.
-    if (i.to === "/dashboard" && user.role !== "admin_enered" && user.role !== "cliente_subsidio") {
+    // Dashboard general: solo visible con el servicio "plataforma" (para cualquier rol de empresa,
+    // incluido cliente_subsidio). Un cliente solo-subsidio ve únicamente "Panel Subsidio"; al
+    // activarle plataforma, se oculta "Panel Subsidio" y aparece el Dashboard con el tracker del
+    // trámite como encabezado.
+    if (i.to === "/dashboard" && user.role !== "admin_enered") {
       if (!user?.servicios?.plataforma) {
         return false;
       }
