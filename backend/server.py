@@ -5988,6 +5988,23 @@ async def upsert_estacion_enered(
         {"establecimiento": {"$regex": nombre, "$options": "i"}},
         {"$set": {"es_enered": True}}
     )
+    return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio}
+
+
+@api.delete("/admin/precios/estaciones-enered")
+async def remove_estacion_enered(nombre_facilito: str, user: dict = Depends(require_roles("admin_enered"))):
+    """Quita una estación de la Red ENERED: borra su precio especial y revierte es_enered."""
+    nombre = (nombre_facilito or "").strip()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="nombre_facilito es requerido")
+    res = await db.estaciones_enered.delete_one({"nombre_facilito": nombre})
+    await db.precios_facilito.update_many(
+        {"establecimiento": {"$regex": re.escape(nombre), "$options": "i"}},
+        {"$set": {"es_enered": False}, "$unset": {"precio_enered": ""}},
+    )
+    return {"ok": True, "removed": res.deleted_count}
+
+
 def _build_invoice_query(inv_id: str) -> dict:
     from urllib.parse import unquote
     from bson import ObjectId

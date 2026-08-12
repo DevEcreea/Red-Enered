@@ -204,6 +204,17 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     }
   };
 
+  const quitarEnered = async (p) => {
+    const nombre = p.establecimiento || p.estacion;
+    if (!window.confirm(`¿Quitar "${nombre}" de la Red ENERED? Volverá a ser independiente.`)) return;
+    try {
+      await api.delete("/admin/precios/estaciones-enered", { params: { nombre_facilito: nombre } });
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error al quitar de ENERED: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
   const formatSync = (iso) => {
     if (!iso) return null;
     try {
@@ -494,6 +505,22 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                               <Plus className="w-3 h-3" />
                               Convertir a ENERED
                             </button>
+                          )}
+                          {esEnered && user?.role === "admin_enered" && (
+                            <div className="mt-1 flex items-center gap-3">
+                              <button
+                                onClick={() => { setEditModalStation(p); setInputPrecioEnered(String(precioEnered ?? "")); }}
+                                className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 hover:text-emerald-800 transition-colors"
+                              >
+                                <Plus className="w-3 h-3" /> Editar precio
+                              </button>
+                              <button
+                                onClick={() => quitarEnered(p)}
+                                className="flex items-center gap-1 text-[10px] font-bold text-rose-500 hover:text-rose-700 transition-colors"
+                              >
+                                <X className="w-3 h-3" /> Quitar
+                              </button>
+                            </div>
                           )}
                         </div>
                       </td>
