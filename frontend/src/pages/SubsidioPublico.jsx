@@ -1,9 +1,8 @@
 import React, { useState } from "react";
 import { api } from "../lib/api";
-import { toast } from "sonner";
 import {
-  Search, Loader2, Fuel, Truck, ShieldCheck, XCircle, CheckCircle2,
-  AlertTriangle, Building2, ArrowRight, Coins, User, Mail, Phone, Lock,
+  Search, Loader2, Truck, ShieldCheck, XCircle, CheckCircle2,
+  AlertTriangle, Building2, ArrowRight, Coins,
 } from "lucide-react";
 
 const fmtSoles = (n) => "S/ " + (Number(n) || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -20,12 +19,12 @@ export default function SubsidioPublico() {
     if (!/^\d{11}$/.test(r)) { setError("Ingresa un RUC válido de 11 dígitos"); return; }
     setLoading(true); setError("");
     try {
-      // Con solo el RUC, entra a la plataforma (Mi Flota · Etapa 0)
-      const { data } = await api.post("/subsidio/entrar", { ruc: r });
-      if (data.access_token) localStorage.setItem("enered_token", data.access_token);
-      window.location.href = "/subsidio/documentos";
+      // Diagnóstico PÚBLICO: solo consulta (NO crea usuario en la plataforma por cada búsqueda).
+      const { data } = await api.get("/subsidio/resumen", { params: { ruc: r } });
+      setData(data);
     } catch (e) {
-      setError(e?.response?.data?.detail || "No se pudo ingresar. Intenta de nuevo.");
+      setError(e?.response?.data?.detail || "No se pudo consultar. Intenta de nuevo.");
+    } finally {
       setLoading(false);
     }
   }
@@ -56,7 +55,7 @@ export default function SubsidioPublico() {
             <button onClick={consultar} disabled={loading} data-testid="sub-consultar"
               style={{ marginTop: 16, width: "100%", padding: "15px", background: loading ? "#A78BFA" : "#7C3AED", color: "#fff", border: "none", borderRadius: 12, cursor: loading ? "wait" : "pointer", fontSize: 16.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
               {loading ? <Loader2 style={{ width: 19, height: 19, animation: "spin 1s linear infinite" }} /> : <Search style={{ width: 19, height: 19 }} />}
-              {loading ? "Ingresando…" : "Ver mi subsidio"}
+              {loading ? "Consultando…" : "Ver mi subsidio"}
             </button>
             <div style={{ marginTop: 22, fontSize: 12.5, color: "#9CA3AF" }}>¿Ya tienes cuenta con contraseña? <a href="/login" style={{ color: "#7C3AED", fontWeight: 700 }}>Inicia sesión</a></div>
           </div>
@@ -87,7 +86,6 @@ const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/a
 function Etapa0({ data }) {
   const s = data.subsidio || {};
   const cumplen = data.unidades.filter((u) => u.cumple).length;
-  const [showReg, setShowReg] = useState(false);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -197,85 +195,18 @@ function Etapa0({ data }) {
         </div>
       </div>
 
-      {/* CTA */}
+      {/* CTA WhatsApp (conversión) */}
       <div style={{ background: "#fff", borderRadius: 16, padding: 20, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, boxShadow: "0 10px 30px rgba(0,0,0,.2)" }}>
         <div>
           <div style={{ fontWeight: 800, color: "#111827", fontSize: 15 }}>¿Quieres reclamar tu subsidio completo?</div>
-          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>ENERED te ayuda a regularizar tus unidades y cargar tu expediente. Empieza tu registro.</div>
+          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>La ATU permite postular una sola vez. Escríbenos y nuestro equipo arma tu expediente sin margen de error.</div>
         </div>
-        <button onClick={() => setShowReg(true)} data-testid="sub-continuar" style={{ padding: "13px 24px", background: "#7C3AED", color: "#fff", border: "none", borderRadius: 11, cursor: "pointer", fontSize: 15, fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 8 }}>
-          Continuar mi registro <ArrowRight style={{ width: 17, height: 17 }} />
-        </button>
-      </div>
-
-      {showReg && <RegistroModal ruc={data.ruc} razonSocial={data.razon_social} montoMax={s.total_monto} onClose={() => setShowReg(false)} />}
-    </div>
-  );
-}
-
-function RegistroModal({ ruc, razonSocial, montoMax, onClose }) {
-  const [f, setF] = useState({ contacto: "", email: "", telefono: "", password: "", password2: "" });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-
-  async function registrar() {
-    setErr("");
-    if (!f.contacto.trim()) return setErr("Ingresa tu nombre");
-    if (!/^\S+@\S+\.\S+$/.test(f.email)) return setErr("Ingresa un correo válido");
-    if (f.password.length < 8) return setErr("La contraseña debe tener al menos 8 caracteres");
-    if (f.password !== f.password2) return setErr("Las contraseñas no coinciden");
-    setBusy(true);
-    try {
-      const { data } = await api.post("/subsidio/registro-publico", {
-        ruc, razon_social: razonSocial || `RUC ${ruc}`,
-        contacto: f.contacto.trim(), telefono: f.telefono.trim() || "—", email: f.email.trim(), password: f.password,
-      });
-      if (data.access_token) localStorage.setItem("enered_token", data.access_token);
-      toast.success("¡Cuenta creada! Entrando a tu panel…");
-      setTimeout(() => { window.location.href = "/"; }, 800);
-    } catch (e) {
-      setErr(e?.response?.data?.detail || "No se pudo crear la cuenta");
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(11,18,32,.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 18, maxWidth: 460, width: "100%", padding: 26, boxShadow: "0 24px 70px rgba(0,0,0,.4)" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#F5F3FF", color: "#6D28D9", padding: "4px 12px", borderRadius: 999, fontSize: 11.5, fontWeight: 800, marginBottom: 10 }}>
-          <Coins style={{ width: 14, height: 14 }} /> Registro · reclama {fmtSoles(montoMax)}
-        </div>
-        <div style={{ fontSize: 20, fontWeight: 800, color: "#111827" }}>Crea tu cuenta</div>
-        <div style={{ fontSize: 13, color: "#6b7280", marginTop: 3, marginBottom: 16 }}>{razonSocial || `RUC ${ruc}`} · Define tu contraseña para entrar a la plataforma.</div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-          <Field icon={<User style={fi} />} placeholder="Nombre del representante" value={f.contacto} onChange={set("contacto")} />
-          <Field icon={<Mail style={fi} />} placeholder="Correo electrónico" value={f.email} onChange={set("email")} type="email" />
-          <Field icon={<Phone style={fi} />} placeholder="Celular (opcional)" value={f.telefono} onChange={set("telefono")} />
-          <Field icon={<Lock style={fi} />} placeholder="Crea tu contraseña (mín. 8)" value={f.password} onChange={set("password")} type="password" />
-          <Field icon={<Lock style={fi} />} placeholder="Repite tu contraseña" value={f.password2} onChange={set("password2")} type="password" onEnter={registrar} />
-        </div>
-        {err && <div style={{ marginTop: 10, color: "#DC2626", fontSize: 13, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><AlertTriangle style={{ width: 14, height: 14 }} /> {err}</div>}
-
-        <button onClick={registrar} disabled={busy} data-testid="sub-registrar"
-          style={{ marginTop: 16, width: "100%", padding: "13px", background: busy ? "#A78BFA" : "#7C3AED", color: "#fff", border: "none", borderRadius: 11, cursor: busy ? "wait" : "pointer", fontSize: 15.5, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-          {busy ? <Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> : <CheckCircle2 style={{ width: 18, height: 18 }} />}
-          {busy ? "Creando cuenta…" : "Crear cuenta y entrar"}
-        </button>
-        <button onClick={onClose} style={{ marginTop: 8, width: "100%", padding: "10px", background: "none", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Cancelar</button>
+        <a href={`https://wa.me/51997389536?text=${encodeURIComponent(`Hola ENERED, soy ${data.razon_social || `RUC ${data.ruc}`}. Vi mi diagnóstico de subsidio (hasta ${fmtSoles(s.total_monto)}) y quiero que me ayuden a reclamarlo.`)}`}
+          target="_blank" rel="noreferrer" data-testid="sub-continuar"
+          style={{ padding: "13px 24px", background: "#16A34A", color: "#fff", border: "none", borderRadius: 11, cursor: "pointer", fontSize: 15, fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
+          Escríbenos por WhatsApp <ArrowRight style={{ width: 17, height: 17 }} />
+        </a>
       </div>
     </div>
   );
 }
-
-function Field({ icon, onEnter, ...props }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 9, border: "1.5px solid #E5E7EB", borderRadius: 10, padding: "11px 13px" }}>
-      {icon}
-      <input {...props} onKeyDown={(e) => e.key === "Enter" && onEnter && onEnter()}
-        style={{ flex: 1, border: "none", outline: "none", fontSize: 14.5, fontWeight: 600, color: "#111827", background: "transparent" }} />
-    </div>
-  );
-}
-const fi = { width: 17, height: 17, color: "#9CA3AF", flexShrink: 0 };
