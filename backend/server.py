@@ -5786,19 +5786,21 @@ async def subsidio_resumen(ruc: str):
     aut_desc = ("Tiene autorización de transporte habilitada y vigente en el MTC." if permiso_mtc
                 else "No se encontró autorización de transporte habilitada en el MTC.")
 
-    # Vehículos habilitados: VIGENCIA del MTC por unidad. Verde solo si TODAS vigentes;
-    # amarillo (PARCIAL) si unas vigentes y otras vencidas; rojo si ninguna vigente.
-    veh_total = len(mtc_unidades)
-    veh_vencidas = sum(1 for u in mtc_unidades if _venc(u.get("vigencia")))
+    # Vehículos habilitados: VIGENCIA del MTC, considerando SOLO las unidades subsidiables
+    # (M2/M3/N1/N2/N3). Las O4 y demás no cuentan porque no aplican al subsidio.
+    # Verde solo si TODAS las subsidiables vigentes; amarillo si unas vencidas; rojo si ninguna.
+    subsid_units = [u for u in mtc_unidades if u["categoria"] in _TOPES_GALONES]
+    veh_total = len(subsid_units)
+    veh_vencidas = sum(1 for u in subsid_units if _venc(u.get("vigencia")))
     veh_vigentes = veh_total - veh_vencidas
     if veh_total == 0:
-        hab_estado, hab_desc = _estado(None), "No se encontraron unidades en el MTC."
+        hab_estado, hab_desc = _estado(None), "No hay unidades de categorías subsidiables (M2, M3, N1, N2, N3)."
     elif veh_vencidas == 0:
-        hab_estado, hab_desc = "CUMPLE", f"Las {veh_vigentes} unidad(es) tienen autorización MTC vigente."
+        hab_estado, hab_desc = "CUMPLE", f"Las {veh_vigentes} unidad(es) subsidiables tienen autorización MTC vigente."
     elif veh_vigentes == 0:
-        hab_estado, hab_desc = "NO_CUMPLE", f"Las {veh_total} unidad(es) tienen la autorización MTC vencida."
+        hab_estado, hab_desc = "NO_CUMPLE", f"Las {veh_total} unidad(es) subsidiables tienen la autorización MTC vencida."
     else:
-        hab_estado, hab_desc = "PARCIAL", f"{veh_vigentes} de {veh_total} unidad(es) con autorización MTC vigente; {veh_vencidas} vencida(s)."
+        hab_estado, hab_desc = "PARCIAL", f"{veh_vigentes} de {veh_total} unidad(es) subsidiables con autorización MTC vigente; {veh_vencidas} vencida(s)."
 
     # Vehículos con TUC habilitado: comparado contra las unidades SUBSIDIABLES (M/N con tope).
     # Verde solo si TODAS las subsidiables están aceptadas; amarillo si unas sí y otras no.
