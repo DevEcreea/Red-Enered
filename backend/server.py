@@ -5629,12 +5629,12 @@ async def subsidio_resumen(ruc: str):
             pass
         return razon, mtc_unidades, permiso_mtc
 
-    # 2) ATU (cuenta maestra): aceptación por placa + semáforo.
+    # 2) ATU (cuenta maestra): solo la aceptación por placa. El semáforo lo armamos nosotros
+    #    (MTC + SUNAT + análisis), así que NO pedimos el semáforo de la ATU → un round-trip menos.
     async def _fetch_atu():
         inscrito = False
         atu_disponible = False
         atu_by_placa = {}
-        semaforo = []
         doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
         if doc:
             session = _atu_unpack(doc)
@@ -5647,17 +5647,25 @@ async def subsidio_resumen(ruc: str):
                 inscrito = not diag.get("sin_habilitaciones")
                 for u in diag.get("unidades", []):
                     atu_by_placa[(u.get("placa") or "").replace("-", "").upper()] = u
-                try:
-                    semaforo = await _atu.consultar_semaforo(session["access_token"], ruc)
-                except Exception:
-                    semaforo = []
             except _atu.AtuError:
                 atu_disponible = False
-        return inscrito, atu_disponible, atu_by_placa, semaforo
+        return inscrito, atu_disponible, atu_by_placa
+
+    # Cada fuente con timeout acotado: si una se cuelga, seguimos con lo que haya (no bloquea todo).
+    async def _guard(coro, default, secs=18):
+        try:
+            return await asyncio.wait_for(coro, timeout=secs)
+        except Exception:
+            return default
 
     # Las 3 fuentes externas corren en PARALELO (antes eran secuenciales → lento en producción).
-    (razon, mtc_unidades, permiso_mtc), (inscrito, atu_disponible, atu_by_placa, semaforo), sunat = \
-        await asyncio.gather(_fetch_mtc(), _fetch_atu(), _sunat_estado(ruc))
+    (razon, mtc_unidades, permiso_mtc), (inscrito, atu_disponible, atu_by_placa), sunat = \
+        await asyncio.gather(
+            _guard(_fetch_mtc(), ("", [], False)),
+            _guard(_fetch_atu(), (False, False, {})),
+            _guard(_sunat_estado(ruc), None, secs=10),
+        )
+    semaforo = []  # el de la ATU ya no se usa; se arma más abajo
 
     # 3) Unidades combinadas: MTC (base) + ATU (tuc/acepta) + motivo + vigencia
     import datetime as _dt
@@ -5734,22 +5742,13 @@ async def subsidio_resumen(ruc: str):
         ruc_activo = (str(sunat.get("estado") or "").upper() == "ACTIVO" and str(sunat.get("condicion") or "").upper() == "HABIDO")
         if not razon:
             razon = sunat.get("nombre") or ""
-    elif atu_disponible:
-        ruc_activo = any((s.get("codigo") == "RUC_ACTIVO" and (s.get("estado") or "").upper() == "CUMPLE") for s in semaforo)
     else:
-        ruc_activo = None
+        ruc_activo = None  # SUNAT no respondió → por verificar
     # Unidades con TUC depende de la ATU (por verificar si no respondió).
     unidades_tuc = (aceptadas > 0) if atu_disponible else None
 
     # Semáforo canónico: SIEMPRE las 4 condiciones que evalúa la ATU (CUMPLE / NO_CUMPLE),
-    # rellenando con nuestras fuentes (SUNAT, MTC, análisis por placa) las que la ATU no devuelva.
-    def _find_sem(*subs):
-        for s in semaforo:
-            blob = ((s.get("codigo") or "") + " " + (s.get("nombre") or "")).upper()
-            if any(k in blob for k in subs):
-                return s
-        return None
-
+    # armadas con nuestras fuentes confiables (SUNAT, MTC, análisis por placa).
     def _estado(b):
         return "POR_VERIFICAR" if b is None else ("CUMPLE" if b else "NO_CUMPLE")
 
