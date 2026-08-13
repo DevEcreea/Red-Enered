@@ -150,6 +150,9 @@ def user_public(u: dict) -> dict:
         "ruc": u.get("ruc", ""),
         "acceso_etapa0": u.get("acceso_etapa0", False),
         "registrado_etapa0": u.get("registrado_etapa0", False),
+        # Multi-empresa: lista de empresas que puede alternar y cuál está activa.
+        "empresas_asignadas": u.get("empresas_asignadas", []),
+        "empresa_activa": u.get("_empresa_activa") or u.get("empresa"),
         "created_at": u.get("created_at"),
         "documentos_completos": u.get("documentos_completos", True),
         "expediente_status": u.get("expediente_status", "confirmed"),
@@ -215,12 +218,25 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
-        # Impersonación: admin_enered puede "actuar como" una empresa (header X-Impersonate-Empresa).
+        # Cambio de empresa (header X-Impersonate-Empresa):
         imp = request.headers.get("X-Impersonate-Empresa")
-        if imp and user.get("role") == "admin_enered":
-            eff = await _impersonate_context(user, imp.strip())
-            if eff:
-                return eff
+        if imp:
+            imp = imp.strip()
+            # a) admin_enered puede actuar como cualquier empresa.
+            if user.get("role") == "admin_enered":
+                eff = await _impersonate_context(user, imp)
+                if eff:
+                    return eff
+            else:
+                # b) Cliente con varias empresas: SOLO puede alternar entre las asignadas.
+                asignadas = user.get("empresas_asignadas") or []
+                match = next((e for e in asignadas if (e or {}).get("empresa") == imp), None)
+                if match:
+                    eff = dict(user)
+                    eff["empresa"] = match.get("empresa")
+                    eff["ruc"] = match.get("ruc", "")
+                    eff["_empresa_activa"] = match.get("empresa")
+                    return eff
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesión expirada")
@@ -319,6 +335,9 @@ class UserUpdate(BaseModel):
     empresa: Optional[str] = None
     password: Optional[str] = None
     permisos: Optional[List[str]] = None
+    # Empresas que este usuario (cliente con varias empresas) puede ver y alternar.
+    # Cada item: {"empresa": "...", "ruc": "..."}.
+    empresas_asignadas: Optional[List[dict]] = None
 
 
 class InvoiceCreate(BaseModel):

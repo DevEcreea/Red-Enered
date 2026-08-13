@@ -500,6 +500,20 @@ export default function Layout({ children }) {
           </button>
 
           <div className="flex items-center gap-3">
+            {/* Selector de empresa: cliente con varias empresas puede alternar sin cerrar sesión */}
+            {Array.isArray(user.empresas_asignadas) && user.empresas_asignadas.length >= 2 && (
+              <select
+                value={user.empresa_activa || user.empresa || ""}
+                onChange={async (e) => { await enterEmpresa(e.target.value); navigate("/subsidio/documentos"); }}
+                title="Cambiar de empresa"
+                data-testid="header-empresa-switch"
+                className="hidden sm:block h-10 px-3 border border-brand/40 bg-brand/5 rounded-lg text-sm font-bold text-brand max-w-[240px] cursor-pointer hover:bg-brand/10"
+              >
+                {user.empresas_asignadas.map((e) => (
+                  <option key={e.ruc || e.empresa} value={e.empresa}>{e.empresa}</option>
+                ))}
+              </select>
+            )}
             <div className="hidden sm:block text-right">
               <div className="text-sm font-bold text-neutral-900 leading-tight truncate max-w-[260px]" data-testid="header-empresa" title={clienteLabel}>
                 {clienteLabel}

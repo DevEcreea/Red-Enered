@@ -4,7 +4,8 @@ import { formatApiError, ROLE_LABEL, formatDate } from "../lib/utils";
 import { Plus, Trash2, Pencil, X, Users as UsersIcon } from "lucide-react";
 import { MODULOS } from "../lib/modulos";
 
-const EMPTY_FORM = { email: "", password: "", name: "", role: "administrador", empresa: "", permisos: null };
+const EMPTY_FORM = { email: "", password: "", name: "", role: "administrador", empresa: "", permisos: null, empresas_asignadas: [] };
+const ROLES_ADMIN = ["admin_enered", "administrador", "logistica", "contabilidad"];
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
@@ -41,7 +42,10 @@ export default function AdminUsers() {
       // permisos solo aplica a admin_enered; null = acceso total (super-admin)
       const permisos = form.role === "admin_enered" ? form.permisos : null;
       if (edit) {
-        const patch = { name: form.name, role: form.role, empresa: form.empresa || null, permisos };
+        // Para clientes (cliente_subsidio) NO tocamos rol/empresa (el backend no acepta ese rol
+        // en el update); solo actualizamos nombre, empresas asignadas y, opcional, contraseña.
+        const patch = { name: form.name, empresas_asignadas: form.empresas_asignadas || [] };
+        if (ROLES_ADMIN.includes(form.role)) { patch.role = form.role; patch.empresa = form.empresa || null; patch.permisos = permisos; }
         if (form.password) patch.password = form.password;
         await api.put(`/users/${edit.id}`, patch);
       } else {
@@ -54,7 +58,7 @@ export default function AdminUsers() {
 
   const openEdit = (u) => {
     setEdit(u); setShowForm(true);
-    setForm({ email: u.email, password: "", name: u.name, role: u.role, empresa: u.empresa || "", permisos: u.permisos ?? null });
+    setForm({ email: u.email, password: "", name: u.name, role: u.role, empresa: u.empresa || "", permisos: u.permisos ?? null, empresas_asignadas: u.empresas_asignadas || [] });
   };
 
   const remove = async (u) => {
@@ -85,16 +89,46 @@ export default function AdminUsers() {
             <input required type="email" disabled={!!edit} placeholder="Correo" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm disabled:bg-neutral-50" />
             <input required={!edit} type="password" placeholder={edit ? "Nueva contraseña (opcional)" : "Contraseña"} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
             <input required placeholder="Nombre completo" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm" />
-            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm">
+            <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} disabled={!!edit && !ROLES_ADMIN.includes(form.role)} className="h-10 px-3 border border-border rounded-md text-sm disabled:bg-neutral-50">
               <option value="admin_enered">Admin ENERED</option>
               <option value="administrador">Administrador</option>
               <option value="logistica">Logística</option>
               <option value="contabilidad">Contabilidad</option>
+              {!ROLES_ADMIN.includes(form.role) && <option value={form.role}>Cliente (subsidio)</option>}
             </select>
             <select value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm md:col-span-2">
               <option value="">— Sin empresa (Admin ENERED) —</option>
               {empresas.map((e) => <option key={e}>{e}</option>)}
             </select>
+
+            {/* Empresas asignadas: para clientes con varias empresas (switch sin cerrar sesión) */}
+            <div className="md:col-span-2 border-t border-border pt-3 mt-1">
+              <div className="text-xs font-bold text-neutral-600 uppercase tracking-wide mb-1">Empresas asignadas (multi-empresa)</div>
+              <div className="text-[11px] text-neutral-400 mb-2">El cliente podrá alternar entre estas empresas desde el selector del header. Agrega el RUC y se autocompleta la razón social.</div>
+              <div className="space-y-2">
+                {(form.empresas_asignadas || []).map((ea, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <input placeholder="RUC (11 dígitos)" value={ea.ruc || ""} maxLength={11}
+                      onChange={(e) => { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], ruc: e.target.value.replace(/\D/g, "") }; setForm({ ...form, empresas_asignadas: arr }); }}
+                      onBlur={async (e) => {
+                        const ruc = e.target.value.replace(/\D/g, "");
+                        if (ruc.length === 11 && !form.empresas_asignadas[i].empresa) {
+                          try { const { data } = await api.get(`/sunat/ruc/${ruc}`); const nom = data?.razon_social || data?.nombre || data?.name;
+                            if (nom) { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], empresa: nom }; setForm({ ...form, empresas_asignadas: arr }); } } catch (_) {}
+                        }
+                      }}
+                      className="w-40 h-9 px-3 border border-border rounded-md text-sm" />
+                    <input placeholder="Razón social" value={ea.empresa || ""}
+                      onChange={(e) => { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], empresa: e.target.value }; setForm({ ...form, empresas_asignadas: arr }); }}
+                      className="flex-1 h-9 px-3 border border-border rounded-md text-sm" />
+                    <button type="button" onClick={() => setForm({ ...form, empresas_asignadas: form.empresas_asignadas.filter((_, j) => j !== i) })}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={() => setForm({ ...form, empresas_asignadas: [...(form.empresas_asignadas || []), { ruc: "", empresa: "" }] })}
+                className="mt-2 text-sm text-brand font-bold flex items-center gap-1"><Plus className="w-4 h-4" /> Agregar empresa</button>
+            </div>
 
             {form.role === "admin_enered" && (
               <div className="md:col-span-2 border-t border-border pt-3 mt-1">
