@@ -15,11 +15,20 @@ const WSP_NUMERO = "51997389536";
  * MÓDULO 0 (Etapa 0) dentro de Mi Flota: potencial del subsidio, requisitos, unidades y
  * semáforo. Para pasar a la Etapa 1 (cargar datos), el transportista escribe por WhatsApp.
  */
+const PASOS_CARGA = [
+  { p: 22, t: "Conectando con SUNAT…", d: "Verificando RUC activo y habido" },
+  { p: 48, t: "Consultando el MTC…", d: "Buscando tus autorizaciones y placas" },
+  { p: 74, t: "Verificando en la plataforma ATU…", d: "Revisando el TUC de cada unidad" },
+  { p: 92, t: "Calculando tu potencial…", d: "Aplicando los topes por categoría" },
+];
+
 export default function Etapa0Card() {
   const { user } = useAuth();
   const ruc = user?.ruc;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [paso, setPaso] = useState(0);
+  const [pct, setPct] = useState(8);
 
   useEffect(() => {
     if (!ruc) { setLoading(false); return; }
@@ -27,21 +36,78 @@ export default function Etapa0Card() {
     api.get("/subsidio/resumen", { params: { ruc } })
       .then(({ data }) => { if (alive) setData(data); })
       .catch(() => {})
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive) { setPct(100); setLoading(false); } });
     return () => { alive = false; };
   }, [ruc]);
 
+  // Avance de la barra por etapas mientras carga (percepción de progreso durante el scrape).
+  useEffect(() => {
+    if (!loading) return;
+    const iv = setInterval(() => {
+      setPaso((k) => {
+        const next = Math.min(k + 1, PASOS_CARGA.length - 1);
+        setPct(PASOS_CARGA[next].p);
+        return next;
+      });
+    }, 1600);
+    setPct(PASOS_CARGA[0].p);
+    return () => clearInterval(iv);
+  }, [loading]);
+
   if (!ruc) return null;
   if (loading) {
+    const info = PASOS_CARGA[paso];
     return (
-      <div style={{ background: "#fff", borderRadius: 16, padding: 30, textAlign: "center", color: "#6b7280", border: "1px solid #EEE" }}>
-        <Loader2 style={{ width: 26, height: 26, animation: "spin 1s linear infinite", color: "#7C3AED" }} />
-        <div style={{ marginTop: 8, fontWeight: 600 }}>Calculando tu Módulo 0…</div>
+      <div style={{ background: "linear-gradient(135deg,#7C3AED 0%,#5B21B6 100%)", borderRadius: 18, padding: 30, color: "#fff", textAlign: "center", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", right: -20, top: -20, opacity: 0.1 }}><Coins style={{ width: 150, height: 150 }} /></div>
+        <Loader2 style={{ width: 30, height: 30, animation: "spin 1s linear infinite", color: "#fff" }} />
+        <div style={{ marginTop: 10, fontWeight: 800, fontSize: 17 }}>{info.t}</div>
+        <div style={{ marginTop: 3, fontSize: 13, color: "#DDD6FE" }}>{info.d}</div>
+        <div style={{ maxWidth: 420, margin: "18px auto 0", background: "rgba(255,255,255,.18)", borderRadius: 999, height: 10, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${pct}%`, background: "#fff", borderRadius: 999, transition: "width .7s ease" }} />
+        </div>
+        <div style={{ marginTop: 7, fontSize: 12, fontWeight: 700, color: "#EDE9FE" }}>{pct}%</div>
+        <div style={{ marginTop: 14, display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap" }}>
+          {PASOS_CARGA.map((x, i) => (
+            <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 999,
+              background: i <= paso ? "rgba(255,255,255,.22)" : "rgba(255,255,255,.08)", color: i <= paso ? "#fff" : "#C4B5FD" }}>
+              {i < paso ? <CheckCircle2 style={{ width: 12, height: 12 }} /> : i === paso ? <Loader2 style={{ width: 12, height: 12, animation: "spin 1s linear infinite" }} /> : null}
+              {x.t.replace("…", "").replace("Conectando con ", "").replace("Consultando el ", "").replace("Verificando en la plataforma ", "").replace("Calculando tu ", "")}
+            </span>
+          ))}
+        </div>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     );
   }
   if (!data) return null;
+
+  // Sin unidades en el MTC: no mostramos ceros que parecen error, sino un aviso claro + soporte.
+  const sinUnidades = (data.subsidio?.total_unidades || 0) === 0 && !((data.requisitos || []).some((r) => r.codigo === "permiso_mtc" && r.cumple));
+  if (sinUnidades) {
+    const wsp = encodeURIComponent(`Hola ENERED, soy ${user?.empresa || ""} (RUC ${ruc}). No aparecen mis unidades en el MTC y quiero que me ayuden a revisar mi caso para el subsidio.`);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ background: "#fff", border: "1px solid #FDE68A", borderLeft: "5px solid #F59E0B", borderRadius: 16, padding: 22 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+            <AlertTriangle style={{ width: 26, height: 26, color: "#B45309", flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 900, fontSize: 17, color: "#92400E" }}>No encontramos tus unidades en el MTC</div>
+              <div style={{ fontSize: 13.5, color: "#78350F", marginTop: 5, lineHeight: 1.5 }}>
+                Con el RUC <b>{ruc}</b> ({user?.empresa}) no aparecen autorizaciones de transporte en el registro que consultamos.
+                Esto suele pasar cuando las unidades están a nombre de <b>otro RUC</b>, o cuando el servicio está en <b>otro tipo de registro</b> del MTC.
+                No te preocupes: lo revisamos contigo directamente.
+              </div>
+              <a href={`https://wa.me/${WSP_NUMERO}?text=${wsp}`} target="_blank" rel="noreferrer"
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 14, background: "#16A34A", color: "#fff", padding: "11px 18px", borderRadius: 10, fontSize: 14, fontWeight: 800, textDecoration: "none" }}>
+                <MessageCircle style={{ width: 17, height: 17 }} /> Escríbenos y revisamos tu caso
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const s = data.subsidio || {};
   const cumplen = (data.unidades || []).filter((u) => u.cumple).length;

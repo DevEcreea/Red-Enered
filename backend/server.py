@@ -5661,8 +5661,8 @@ async def subsidio_resumen(ruc: str):
     # Las 3 fuentes externas corren en PARALELO (antes eran secuenciales → lento en producción).
     (razon, mtc_unidades, permiso_mtc), (inscrito, atu_disponible, atu_by_placa), sunat = \
         await asyncio.gather(
-            _guard(_fetch_mtc(), ("", [], False)),
-            _guard(_fetch_atu(), (False, False, {})),
+            _guard(_fetch_mtc(), ("", [], False), secs=40),   # empresas grandes: muchas autorizaciones
+            _guard(_fetch_atu(), (False, False, {}), secs=25),
             _guard(_sunat_estado(ruc), None, secs=10),
         )
     semaforo = []  # el de la ATU ya no se usa; se arma más abajo

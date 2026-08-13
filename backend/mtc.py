@@ -9,6 +9,7 @@ Devuelve datos estructurados: estado (habilitado), N° de permiso, vigencia y la
 """
 from __future__ import annotations
 import re
+import asyncio
 import html as _html
 from typing import Optional
 
@@ -138,13 +139,23 @@ async def consultar(tipo: str, valor: str) -> dict:
             # ¿mensaje de "no se encontró"?
             return {"tipo": tipo, "valor": valor, "total_autorizaciones": 0, "autorizaciones": []}
 
-        # 3) detalle de cada autorización
+        # 3) detalle de cada autorización — en PARALELO (empresas grandes tienen decenas de
+        #    autorizaciones; secuencial se demora demasiado). Semáforo para no saturar al MTC.
         disp_tokens = _tokens(disp)
-        autorizaciones = []
-        for cod, rc in codes:
+        sem = asyncio.Semaphore(10)
+
+        async def _detalle(cod, rc):
             dd = {**disp_tokens, "hdpartida": cod, "hdruc": rc}
-            r2 = await client.post(DATOS, data=dd, headers={"Referer": DISPLAY})
-            det = _parse_detalle(r2.text)
+            async with sem:
+                r2 = await client.post(DATOS, data=dd, headers={"Referer": DISPLAY})
+            return _parse_detalle(r2.text)
+
+        resultados = await asyncio.gather(*[_detalle(cod, rc) for cod, rc in codes],
+                                          return_exceptions=True)
+        autorizaciones = []
+        for det in resultados:
+            if isinstance(det, Exception):
+                continue
             # descartar autorizaciones vacías (código sin datos)
             nombre = (det.get("razon_social") or "").strip()
             if (nombre and nombre != "-") or det.get("vehiculos"):
