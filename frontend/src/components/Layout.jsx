@@ -263,7 +263,9 @@ export default function Layout({ children }) {
     if (user.role === "admin_enered" && Array.isArray(user.permisos) && i.mkey && !user.permisos.includes(i.mkey)) {
       return false;
     }
-    if (user.role === "cliente_subsidio" && !SUBSIDIO_VISIBLES.includes(i.to)) {
+    // Solo mientras NO se ha registrado (entró por RUC): menú recortado a los 5.
+    // Al registrarse (acceso_etapa0 = false) ve el menú completo (los premium quedan bloqueados).
+    if (user.role === "cliente_subsidio" && user.acceso_etapa0 === true && !SUBSIDIO_VISIBLES.includes(i.to)) {
       return false;
     }
     // Eliminamos la restricción de ocultar items del menú para que todos los clientes

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import {
-  Coins, CheckCircle2, XCircle, AlertTriangle, Loader2, Truck, ShieldCheck, ShieldAlert, MessageCircle,
+  Coins, CheckCircle2, XCircle, AlertTriangle, Loader2, Truck, ShieldCheck, ShieldAlert, MessageCircle, FileText,
 } from "lucide-react";
 
 const fmtSoles = (n) => "S/ " + (Number(n) || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -23,12 +23,35 @@ const PASOS_CARGA = [
 ];
 
 export default function Etapa0Card({ onResumen }) {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const ruc = user?.ruc;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paso, setPaso] = useState(0);
   const [pct, setPct] = useState(8);
+  // Registro (crear usuario ENERED: correo + contraseña) al pie de la Etapa 0
+  const [reg, setReg] = useState({ email: "", pw: "", pw2: "" });
+  const [regErr, setRegErr] = useState("");
+  const [regSaving, setRegSaving] = useState(false);
+  const [regDone, setRegDone] = useState(false);
+
+  const registrar = async () => {
+    setRegErr("");
+    const email = (reg.email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setRegErr("Ingresa un correo válido."); return; }
+    if ((reg.pw || "").length < 8) { setRegErr("La contraseña debe tener al menos 8 caracteres."); return; }
+    if (reg.pw !== reg.pw2) { setRegErr("Las contraseñas no coinciden."); return; }
+    setRegSaving(true);
+    try {
+      const { data: res } = await api.post("/subsidio/registro-etapa0", { email, password: reg.pw });
+      if (res.access_token) localStorage.setItem("enered_token", res.access_token);
+      setRegDone(true);
+      if (res.user && setUser) setUser(res.user);   // acceso_etapa0=false → desbloquea etapas y módulos
+    } catch (e) {
+      setRegErr(e?.response?.data?.detail || "No se pudo completar el registro. Intenta de nuevo.");
+      setRegSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!ruc) { setLoading(false); return; }
@@ -275,6 +298,62 @@ export default function Etapa0Card({ onResumen }) {
             </a>
         </div>
       </div>
+
+      {/* PIE: crear usuario ENERED (correo + contraseña) → adjuntar documentación / Etapa 1 */}
+      {regDone ? (
+        <div style={{ background: "#F0FDF4", border: "1px solid #A7F3D0", borderTop: "4px solid #16A34A", borderRadius: 16, padding: 24, textAlign: "center" }}>
+          <div style={{ width: 46, height: 46, margin: "0 auto", borderRadius: 999, background: "#16A34A", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CheckCircle2 style={{ width: 26, height: 26, color: "#fff" }} />
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 18, color: "#065F46", marginTop: 10 }}>¡Cuenta creada!</div>
+          <div style={{ fontSize: 13.5, color: "#166534", marginTop: 4 }}>
+            Ya puedes avanzar a la <b>Etapa 1</b> y adjuntar tu documentación. Tus módulos quedaron habilitados.
+          </div>
+        </div>
+      ) : (
+      <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderTop: "4px solid #7C3AED", borderRadius: 16, padding: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 10, background: "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <FileText style={{ width: 18, height: 18, color: "#7C3AED" }} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 16, color: "#111827" }}>Adjuntar documentación</div>
+            <div style={{ fontSize: 12.5, color: "#6b7280" }}>Crea tu usuario ENERED para continuar y cargar tu expediente (Etapa 1).</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Correo electrónico</label>
+            <input type="email" value={reg.email} onChange={(e) => setReg({ ...reg, email: e.target.value })} placeholder="tucorreo@empresa.com"
+              style={{ width: "100%", marginTop: 5, padding: "10px 12px", border: "1px solid #D1D5DB", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Contraseña</label>
+            <input type="password" value={reg.pw} onChange={(e) => setReg({ ...reg, pw: e.target.value })} placeholder="Mínimo 8 caracteres"
+              style={{ width: "100%", marginTop: 5, padding: "10px 12px", border: "1px solid #D1D5DB", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: "#374151" }}>Verificar contraseña</label>
+            <input type="password" value={reg.pw2} onChange={(e) => setReg({ ...reg, pw2: e.target.value })} placeholder="Repite la contraseña"
+              onKeyDown={(e) => { if (e.key === "Enter") registrar(); }}
+              style={{ width: "100%", marginTop: 5, padding: "10px 12px", border: "1px solid #D1D5DB", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
+          </div>
+        </div>
+
+        {regErr && <div style={{ marginTop: 10, fontSize: 12.5, color: "#B91C1C", fontWeight: 600 }}>{regErr}</div>}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+          <div style={{ fontSize: 11.5, color: "#9CA3AF" }}>Al continuar, tus datos quedan en tu expediente ENERED y pasas a la Etapa 1.</div>
+          <button onClick={registrar} disabled={regSaving}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, background: regSaving ? "#A78BDA" : "#7C3AED", color: "#fff", border: "none", padding: "12px 22px", borderRadius: 11, fontSize: 14.5, fontWeight: 800, cursor: regSaving ? "default" : "pointer" }}>
+            {regSaving ? <Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> : <CheckCircle2 style={{ width: 17, height: 17 }} />}
+            {regSaving ? "Creando tu cuenta…" : "Crear cuenta y continuar"}
+          </button>
+        </div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+      )}
     </div>
   );
 }

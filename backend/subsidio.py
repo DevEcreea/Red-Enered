@@ -196,6 +196,12 @@ class RegisterPublicoIn(BaseModel):
     password: str = Field(min_length=8)
 
 
+class RegistroEtapa0In(BaseModel):
+    """El cliente que entró por RUC crea su usuario ENERED (correo + contraseña)."""
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+
 class EntrarRucIn(BaseModel):
     ruc: str = Field(min_length=11, max_length=11)
 
@@ -539,6 +545,43 @@ async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
     return {
         "user": {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": "cliente_subsidio",
                  "empresa": u["empresa"], "ruc": ruc, "acceso_etapa0": True,
+                 "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+                 "tipo_cliente": "subsidio"},
+        "access_token": access,
+    }
+
+
+@subsidio_router.post("/subsidio/registro-etapa0")
+async def registro_etapa0(payload: RegistroEtapa0In, request: Request, response: Response):
+    """
+    El cliente que entró por RUC (Etapa 0) crea su usuario ENERED: correo + contraseña.
+    Se guarda en su expediente, se quita el bloqueo de Etapa 0 y avanza a la Etapa 1;
+    quedan visibles/accesibles los módulos regulares (los premium siguen bloqueados).
+    """
+    current = await _get_current_user(request)
+    if current.get("role") != "cliente_subsidio":
+        raise HTTPException(status_code=403, detail="Solo disponible para clientes del subsidio")
+    email = (payload.email or "").strip().lower()
+    # El correo no puede estar usado por otra cuenta
+    dup = await db.users.find_one({"email": email, "id": {"$ne": current["id"]}})
+    if dup:
+        raise HTTPException(status_code=409, detail="Ese correo ya está registrado. Usa otro o inicia sesión.")
+    await db.users.update_one({"id": current["id"]}, {"$set": {
+        "email": email,
+        "password_hash": _hash_pw(payload.password),
+        "acceso_etapa0": False,          # ya registrado → puede avanzar a Etapa 1
+        "registrado_etapa0": True,
+        "registro_etapa0_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    u = await db.users.find_one({"id": current["id"]}, {"_id": 0, "password_hash": 0})
+    # Reemitir tokens con el correo nuevo
+    access = _create_access_token(u["id"], email, "cliente_subsidio", u.get("empresa"))
+    refresh = _create_refresh_token(u["id"])
+    _set_auth_cookies(response, access, refresh)
+    response.headers["X-Access-Token"] = access
+    return {
+        "user": {"id": u["id"], "email": email, "name": u.get("name"), "role": "cliente_subsidio",
+                 "empresa": u.get("empresa"), "ruc": u.get("ruc"), "acceso_etapa0": False,
                  "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
                  "tipo_cliente": "subsidio"},
         "access_token": access,

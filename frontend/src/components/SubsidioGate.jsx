@@ -20,9 +20,13 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   //    Incluidos: Mi Panel (Dashboard), Combustible, Gestión de Gastos (Cuenta),
   //    Vehículos, Documentación. (Mi Flota no usa Gated, siempre accesible.)
   if (esSubsidio) {
-    // El cliente de subsidio entra por su RUC y ve su Mi Flota (Módulo 0). Ve TODOS los
-    // módulos en el menú, pero NO puede ingresar a ninguno: solo su Panel/Mi Flota.
-    const MODULOS_CLIENTE = ["Dashboard"];
+    // Antes de registrarse (entró por RUC, acceso_etapa0=true): solo su Panel/Mi Flota; el resto,
+    // visible pero bloqueado. Al registrarse (crea correo+contraseña): se habilitan los módulos
+    // regulares del expediente; los premium (Monitoreo, Analytics, etc.) siguen bloqueados.
+    const noRegistrado = user.acceso_etapa0 === true;
+    const MODULOS_CLIENTE = noRegistrado
+      ? ["Dashboard"]
+      : ["Dashboard", "Combustible", "Cuenta", "Vehículos", "Documentación"];
     if (MODULOS_CLIENTE.includes(titulo)) return children;
     return (
       <ModuloBloqueado
