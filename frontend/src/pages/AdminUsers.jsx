@@ -10,31 +10,23 @@ const ROLES_ADMIN = ["admin_enered", "administrador", "logistica", "contabilidad
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
   const [empresas, setEmpresas] = useState([]);
+  const [empresasFull, setEmpresasFull] = useState([]); // [{empresa, ruc}] para el selector multi-empresa
   const [showForm, setShowForm] = useState(false);
   const [edit, setEdit] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [err, setErr] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [a, b] = await Promise.all([api.get("/users"), api.get("/empresas")]);
-        setUsers(a.data);
-        setEmpresas(b.data);
-      } catch (err) {
-        console.error("Error loading AdminUsers:", err);
-      }
-    })();
-  }, []);
-
   const load = async () => {
     try {
-      const [a, b] = await Promise.all([api.get("/users"), api.get("/empresas")]);
+      const [a, b, c] = await Promise.all([api.get("/users"), api.get("/empresas"), api.get("/empresas-config").catch(() => ({ data: [] }))]);
       setUsers(a.data); setEmpresas(b.data);
+      setEmpresasFull((c.data || []).map((e) => ({ empresa: e.empresa, ruc: e.ruc || "" })));
     } catch (err) {
       console.error("Error loading AdminUsers data:", err);
     }
   };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   const submit = async (e) => {
     e.preventDefault(); setErr("");
@@ -104,30 +96,28 @@ export default function AdminUsers() {
             {/* Empresas asignadas: para clientes con varias empresas (switch sin cerrar sesión) */}
             <div className="md:col-span-2 border-t border-border pt-3 mt-1">
               <div className="text-xs font-bold text-neutral-600 uppercase tracking-wide mb-1">Empresas asignadas (multi-empresa)</div>
-              <div className="text-[11px] text-neutral-400 mb-2">El cliente podrá alternar entre estas empresas desde el selector del header. Agrega el RUC y se autocompleta la razón social.</div>
+              <div className="text-[11px] text-neutral-400 mb-2">El cliente podrá alternar entre estas empresas desde el selector del header. Elige de tus empresas creadas en “Empresas &amp; Servicios”.</div>
               <div className="space-y-2">
-                {(form.empresas_asignadas || []).map((ea, i) => (
-                  <div key={i} className="flex gap-2 items-center">
-                    <input placeholder="RUC (11 dígitos)" value={ea.ruc || ""} maxLength={11}
-                      onChange={(e) => { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], ruc: e.target.value.replace(/\D/g, "") }; setForm({ ...form, empresas_asignadas: arr }); }}
-                      onBlur={async (e) => {
-                        const ruc = e.target.value.replace(/\D/g, "");
-                        if (ruc.length === 11 && !form.empresas_asignadas[i].empresa) {
-                          try { const { data } = await api.get(`/sunat/ruc/${ruc}`); const nom = data?.razon_social || data?.nombre || data?.name;
-                            if (nom) { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], empresa: nom }; setForm({ ...form, empresas_asignadas: arr }); } } catch (_) {}
-                        }
-                      }}
-                      className="w-40 h-9 px-3 border border-border rounded-md text-sm" />
-                    <input placeholder="Razón social" value={ea.empresa || ""}
-                      onChange={(e) => { const arr = [...form.empresas_asignadas]; arr[i] = { ...arr[i], empresa: e.target.value }; setForm({ ...form, empresas_asignadas: arr }); }}
-                      className="flex-1 h-9 px-3 border border-border rounded-md text-sm" />
-                    <button type="button" onClick={() => setForm({ ...form, empresas_asignadas: form.empresas_asignadas.filter((_, j) => j !== i) })}
-                      className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                ))}
+                {(form.empresas_asignadas || []).map((ea, i) => {
+                  const yaElegidas = (form.empresas_asignadas || []).filter((_, j) => j !== i).map((x) => x.empresa);
+                  const opciones = empresasFull.filter((e) => e.empresa === ea.empresa || !yaElegidas.includes(e.empresa));
+                  return (
+                    <div key={i} className="flex gap-2 items-center">
+                      <select value={ea.empresa || ""}
+                        onChange={(e) => { const sel = empresasFull.find((x) => x.empresa === e.target.value); const arr = [...form.empresas_asignadas]; arr[i] = { empresa: sel?.empresa || "", ruc: sel?.ruc || "" }; setForm({ ...form, empresas_asignadas: arr }); }}
+                        className="flex-1 h-9 px-3 border border-border rounded-md text-sm">
+                        <option value="">— Elige una empresa —</option>
+                        {opciones.map((e) => <option key={e.empresa} value={e.empresa}>{e.empresa}{e.ruc ? ` · ${e.ruc}` : ""}</option>)}
+                      </select>
+                      <button type="button" onClick={() => setForm({ ...form, empresas_asignadas: form.empresas_asignadas.filter((_, j) => j !== i) })}
+                        className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  );
+                })}
               </div>
               <button type="button" onClick={() => setForm({ ...form, empresas_asignadas: [...(form.empresas_asignadas || []), { ruc: "", empresa: "" }] })}
                 className="mt-2 text-sm text-brand font-bold flex items-center gap-1"><Plus className="w-4 h-4" /> Agregar empresa</button>
+              {empresasFull.length === 0 && <div className="mt-2 text-[11px] text-amber-600">No hay empresas creadas aún. Créalas en “Empresas &amp; Servicios” primero.</div>}
             </div>
 
             {form.role === "admin_enered" && (
