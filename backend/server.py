@@ -5558,6 +5558,7 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
 # Tope de galones máximos a reclamar por categoría de unidad (DU 004). × factor = monto.
 _TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
 _FACTOR_SUBSIDIO = 4  # galones máximos × 4 = monto máximo a reclamar
+_RESUMEN_CACHE = {}   # ruc -> (timestamp, payload, ttl) para /subsidio/resumen
 
 
 def _detalle_ruc(ruc_activo, sunat):
@@ -5595,53 +5596,68 @@ async def subsidio_resumen(ruc: str):
     if not re.fullmatch(r"\d{11}", ruc):
         raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
 
-    # 1) MTC: unidades + categorías + razón social (fuente de "todas tus unidades")
-    #    OJO: un mismo RUC puede tener varias autorizaciones y la MISMA placa repetida.
-    #    Deduplicamos por placa (placa única) para no inflar el subsidio.
-    razon = ""
-    mtc_unidades = []
-    permiso_mtc = False
-    _placas_vistas = set()
-    try:
-        m = await _mtc.consultar("ruc", ruc)
-        for a in m.get("autorizaciones", []):
-            if not razon:
-                razon = a.get("razon_social", "") or ""
-            if a.get("habilitado"):
-                permiso_mtc = True
-            for v in a.get("vehiculos", []):
-                pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
-                if not pn or pn in _placas_vistas:
-                    continue
-                _placas_vistas.add(pn)
-                mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
-                                     "vigencia": a.get("vigente_hasta"), "numero_autorizacion": a.get("codigo") or v.get("constancia")})
-    except Exception:
-        pass
+    # Caché por RUC: MTC/ATU/SUNAT no cambian de un momento a otro. Evita rehacer el scrape
+    # lento en cada carga. TTL corto si la ATU no respondió (para reintentar pronto).
+    import time as _time
+    _now = _time.time()
+    _hit = _RESUMEN_CACHE.get(ruc)
+    if _hit and (_now - _hit[0]) < _hit[2]:
+        return _hit[1]
 
-    # 2) ATU (cuenta maestra): aceptación por placa + semáforo
-    inscrito = False
-    atu_disponible = False
-    atu_by_placa = {}
-    semaforo = []
-    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
-    if doc:
-        session = _atu_unpack(doc)
+    # 1) MTC: unidades + categorías + razón social (fuente de "todas tus unidades").
+    #    OJO: un mismo RUC puede tener varias autorizaciones y la MISMA placa repetida → dedup.
+    async def _fetch_mtc():
+        razon = ""
+        mtc_unidades = []
+        permiso_mtc = False
+        vistas = set()
         try:
-            diag, actualizada = await _atu.diagnosticar_con_sesion(session, ruc)
-            if actualizada.get("access_token") != session.get("access_token"):
-                await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
-                session = actualizada
-            atu_disponible = True
-            inscrito = not diag.get("sin_habilitaciones")
-            for u in diag.get("unidades", []):
-                atu_by_placa[(u.get("placa") or "").replace("-", "").upper()] = u
+            m = await _mtc.consultar("ruc", ruc)
+            for a in m.get("autorizaciones", []):
+                if not razon:
+                    razon = a.get("razon_social", "") or ""
+                if a.get("habilitado"):
+                    permiso_mtc = True
+                for v in a.get("vehiculos", []):
+                    pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+                    if not pn or pn in vistas:
+                        continue
+                    vistas.add(pn)
+                    mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
+                                         "vigencia": a.get("vigente_hasta"), "numero_autorizacion": a.get("codigo") or v.get("constancia")})
+        except Exception:
+            pass
+        return razon, mtc_unidades, permiso_mtc
+
+    # 2) ATU (cuenta maestra): aceptación por placa + semáforo.
+    async def _fetch_atu():
+        inscrito = False
+        atu_disponible = False
+        atu_by_placa = {}
+        semaforo = []
+        doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+        if doc:
+            session = _atu_unpack(doc)
             try:
-                semaforo = await _atu.consultar_semaforo(session["access_token"], ruc)
-            except Exception:
-                semaforo = []
-        except _atu.AtuError:
-            atu_disponible = False
+                diag, actualizada = await _atu.diagnosticar_con_sesion(session, ruc)
+                if actualizada.get("access_token") != session.get("access_token"):
+                    await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
+                    session = actualizada
+                atu_disponible = True
+                inscrito = not diag.get("sin_habilitaciones")
+                for u in diag.get("unidades", []):
+                    atu_by_placa[(u.get("placa") or "").replace("-", "").upper()] = u
+                try:
+                    semaforo = await _atu.consultar_semaforo(session["access_token"], ruc)
+                except Exception:
+                    semaforo = []
+            except _atu.AtuError:
+                atu_disponible = False
+        return inscrito, atu_disponible, atu_by_placa, semaforo
+
+    # Las 3 fuentes externas corren en PARALELO (antes eran secuenciales → lento en producción).
+    (razon, mtc_unidades, permiso_mtc), (inscrito, atu_disponible, atu_by_placa, semaforo), sunat = \
+        await asyncio.gather(_fetch_mtc(), _fetch_atu(), _sunat_estado(ruc))
 
     # 3) Unidades combinadas: MTC (base) + ATU (tuc/acepta) + motivo + vigencia
     import datetime as _dt
@@ -5713,7 +5729,7 @@ async def subsidio_resumen(ruc: str):
     aceptadas = sum(1 for u in unidades if u["cumple"])
 
     # RUC activo y habido: se saca de SUNAT (público, confiable) — no depende de la ATU.
-    sunat = await _sunat_estado(ruc)
+    # (sunat ya se obtuvo en paralelo arriba)
     if sunat:
         ruc_activo = (str(sunat.get("estado") or "").upper() == "ACTIVO" and str(sunat.get("condicion") or "").upper() == "HABIDO")
         if not razon:
@@ -5805,7 +5821,7 @@ async def subsidio_resumen(ruc: str):
     else:
         cumple_subsidio = all(r["cumple"] for r in requisitos)
 
-    return {
+    payload = {
         "ruc": ruc,
         "razon_social": razon,
         "inscrito": inscrito,
@@ -5824,6 +5840,9 @@ async def subsidio_resumen(ruc: str):
         "unidades": unidades,
         "semaforo": semaforo,
     }
+    # Guardar en caché: 15 min si la ATU respondió; 60 s si no (para reintentar pronto).
+    _RESUMEN_CACHE[ruc] = (_now, payload, 900 if atu_disponible else 60)
+    return payload
 
 
 async def _atu_guardian():
