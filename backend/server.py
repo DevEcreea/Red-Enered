@@ -5839,8 +5839,11 @@ async def subsidio_resumen(ruc: str):
         "unidades": unidades,
         "semaforo": semaforo,
     }
-    # Guardar en caché: 15 min si la ATU respondió; 60 s si no (para reintentar pronto).
-    _RESUMEN_CACHE[ruc] = (_now, payload, 900 if atu_disponible else 60)
+    # Guardar en caché: 15 min SOLO si el resultado es "bueno" (MTC trajo unidades y la ATU
+    # respondió). Si el MTC vino vacío (posible truncación/lentitud), 60 s para reintentar pronto
+    # y no dejar pegado un "0 unidades" falso.
+    _bueno = bool(mtc_unidades) and atu_disponible
+    _RESUMEN_CACHE[ruc] = (_now, payload, 900 if _bueno else 60)
     return payload
 
 

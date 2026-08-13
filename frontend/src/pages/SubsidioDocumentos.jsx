@@ -79,13 +79,8 @@ export default function SubsidioDocumentos() {
     try {
       const { data } = await api.get("/subsidio/dashboard");
       setData(data);
-      // Ahorro estimado = máximo del subsidio calculado en Etapa 0 (MTC × topes por categoría).
-      if (user?.ruc) {
-        try {
-          const { data: res } = await api.get(`/subsidio/resumen?ruc=${user.ruc}`);
-          setEstimadoResumen(res?.subsidio?.total_monto ?? null);
-        } catch (_) { /* si falla, se usa el ahorro_estimado del dashboard */ }
-      }
+      // Nota: el ahorro estimado lo trae Etapa0Card (una sola llamada a /subsidio/resumen) y nos
+      // lo reporta por onResumen → evita pedir el resumen dos veces en la primera carga.
       // Auto-jump to first incomplete stage on first load (salvo entrada solo-RUC → queda en Etapa 0)
       if (loading && user?.acceso_etapa0 !== true) {
         const next = pickNextEtapa(data);
@@ -258,7 +253,7 @@ export default function SubsidioDocumentos() {
 
       {/* CONTENIDO de la etapa activa */}
       {activeEtapa === "etapa0" ? (
-        <Etapa0Card />
+        <Etapa0Card onResumen={(res) => setEstimadoResumen(res?.subsidio?.total_monto ?? null)} />
       ) : (
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
         {activeEtapa === "empresa" && (

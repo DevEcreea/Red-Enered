@@ -22,7 +22,7 @@ const PASOS_CARGA = [
   { p: 92, t: "Calculando tu potencial…", d: "Aplicando los topes por categoría" },
 ];
 
-export default function Etapa0Card() {
+export default function Etapa0Card({ onResumen }) {
   const { user } = useAuth();
   const ruc = user?.ruc;
   const [data, setData] = useState(null);
@@ -34,10 +34,11 @@ export default function Etapa0Card() {
     if (!ruc) { setLoading(false); return; }
     let alive = true;
     api.get("/subsidio/resumen", { params: { ruc } })
-      .then(({ data }) => { if (alive) setData(data); })
+      .then(({ data }) => { if (alive) { setData(data); if (onResumen) onResumen(data); } })
       .catch(() => {})
       .finally(() => { if (alive) { setPct(100); setLoading(false); } });
     return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ruc]);
 
   // Avance de la barra por etapas mientras carga (percepción de progreso durante el scrape).
