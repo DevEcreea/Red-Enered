@@ -310,7 +310,7 @@ export default function Etapa0Card({ onResumen }) {
             Ya puedes avanzar a la <b>Etapa 1</b> y adjuntar tu documentación. Tus módulos quedaron habilitados.
           </div>
         </div>
-      ) : user?.acceso_etapa0 === true ? (
+      ) : (user?.registrado_etapa0 !== true) ? (
       <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderTop: "4px solid #7C3AED", borderRadius: 16, padding: 22 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
           <div style={{ width: 34, height: 34, borderRadius: 10, background: "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center" }}>

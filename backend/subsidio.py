@@ -544,7 +544,9 @@ async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
     response.headers["X-Access-Token"] = access
     return {
         "user": {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": "cliente_subsidio",
-                 "empresa": u["empresa"], "ruc": ruc, "acceso_etapa0": True,
+                 "empresa": u["empresa"], "ruc": ruc,
+                 "acceso_etapa0": u.get("acceso_etapa0", True),          # valor real (registrado → False)
+                 "registrado_etapa0": u.get("registrado_etapa0", False),
                  "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
                  "tipo_cliente": "subsidio"},
         "access_token": access,
@@ -582,6 +584,7 @@ async def registro_etapa0(payload: RegistroEtapa0In, request: Request, response:
     return {
         "user": {"id": u["id"], "email": email, "name": u.get("name"), "role": "cliente_subsidio",
                  "empresa": u.get("empresa"), "ruc": u.get("ruc"), "acceso_etapa0": False,
+                 "registrado_etapa0": True,
                  "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
                  "tipo_cliente": "subsidio"},
         "access_token": access,
