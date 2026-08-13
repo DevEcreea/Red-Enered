@@ -33,6 +33,10 @@ import AnalyticsNeumaticos from "./pages/analytics/Neumaticos";
 import AnalyticsSeguridadVial from "./pages/analytics/SeguridadVial";
 import AnalyticsChecklist from "./pages/analytics/Checklist";
 import Monitoreo from "./pages/Monitoreo";
+import ConsultaMTC from "./pages/ConsultaMTC";
+import DiagnosticoATU from "./pages/DiagnosticoATU";
+import AdminConexionATU from "./pages/AdminConexionATU";
+import SubsidioPublico from "./pages/SubsidioPublico";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -114,6 +118,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
+          <Route path="/subsidio" element={<SubsidioPublico />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
           <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
           <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
@@ -139,6 +144,8 @@ function App() {
           <Route path="/control" element={<Navigate to="/flotas" replace />} />
           <Route path="/seguridad" element={<Gated titulo="Seguridad"><Seguridad /></Gated>} />
           <Route path="/monitoreo" element={<Gated titulo="Monitoreo"><Monitoreo /></Gated>} />
+          <Route path="/mtc" element={<Gated titulo="Consulta MTC" roles={["admin_enered"]}><ConsultaMTC /></Gated>} />
+          <Route path="/atu" element={<Gated titulo="Diagnóstico ATU" roles={["admin_enered"]}><DiagnosticoATU /></Gated>} />
           <Route path="/capacitacion" element={<Gated titulo="Capacitación"><Capacitacion /></Gated>} />
           <Route path="/documentacion" element={<Gated titulo="Documentación"><Documentacion /></Gated>} />
           <Route path="/mantenimiento" element={<Gated titulo="Mantenimiento"><Mantenimiento /></Gated>} />
@@ -158,6 +165,7 @@ function App() {
           <Route path="/admin/empresas" element={<Shell roles={["admin_enered"]}><AdminEmpresas /></Shell>} />
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
+          <Route path="/admin/atu" element={<Shell roles={["admin_enered"]}><AdminConexionATU /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
           <Route path="*" element={<RootRedirect />} />
         </Routes>

@@ -15,7 +15,7 @@ import autoTable from "jspdf-autotable";
 import PdfViewerModal from "../components/PdfViewerModal";
 import { AbonoModal } from "./AbonoModal";
 
-const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
+const WA_LINK = "https://wa.me/51997389536";
 
 const ESTADO_BADGE = {
   // Nuevos

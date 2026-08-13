@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, GraduationCap,
+  LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, ShieldAlert, GraduationCap,
   LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
   FileText, Wrench, Disc, AlertTriangle,
   Wallet, Calendar, Ticket, ClipboardCheck, Car, Route, ChevronDown, ChevronLeft, ChevronRight,
@@ -13,7 +13,7 @@ import { ROLE_LABEL } from "../lib/utils";
 import EmayFooter from "./EmayFooter";
 
 const LOGO_IMG = "/assets/enered-logo.png";
-const WA_LINK = "https://wa.me/message/VDUNDBHSQ47SC1";
+const WA_LINK = "https://wa.me/51997389536";
 
 const ICON_BASE = "/assets/icons";
 
@@ -43,10 +43,14 @@ const ADMIN_ITEMS = [
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload", mkey: "datos" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin", mkey: "subsidio" },
   { to: "/admin/bitacora", label: "Bitácora", icon: FileText, testid: "nav-bitacora", mkey: "bitacora" },
+  { to: "/mtc", label: "Consulta MTC", icon: ShieldCheck, testid: "nav-mtc", mkey: "mtc" },
+  { to: "/atu", label: "Diagnóstico ATU", icon: ShieldAlert, testid: "nav-atu", mkey: "atu" },
+  { to: "/admin/atu", label: "Conexión ATU", icon: ShieldAlert, testid: "nav-admin-atu", mkey: "atu_conexion" },
 ];
 
 const ROUTE_TITLES = {
   "/dashboard": "Dashboard",
+  "/mtc": "Consulta MTC · DGTT",
   "/analitica": "Analytics BI",
   "/monitoreo": "Monitoreo",
   "/flotas": "Combustible",
@@ -65,6 +69,7 @@ const ROUTE_TITLES = {
   "/admin/empresas": "Empresas & Servicios",
   "/admin/subsidio": "Subsidio · Expedientes",
   "/admin/bitacora": "Bitácora",
+  "/admin/atu": "Conexión ATU · Cuenta maestra",
   "/admin/upload": "Datos",
   "/admin/qr": "QR",
 };
@@ -247,10 +252,18 @@ export default function Layout({ children }) {
 
   if (!user) return null;
 
+  // Cliente de subsidio (entra por enered.netlify.app/subsidio con su RUC): solo ve su Mi Flota
+  // y los módulos del expediente. El resto del menú NO aparece. Estos aparecen pero bloqueados
+  // (salvo Mi Flota, que es su vista de aterrizaje / Etapa 0).
+  const SUBSIDIO_VISIBLES = ["/subsidio/documentos", "/flotas", "/facturacion", "/vehiculos", "/documentacion"];
+
   const items = MENU.filter((i) => {
     // Permisos por módulo (equipo ENERED): si el admin tiene una lista de permisos,
     // se ocultan los módulos no incluidos. Super-admin (permisos null) ve todo.
     if (user.role === "admin_enered" && Array.isArray(user.permisos) && i.mkey && !user.permisos.includes(i.mkey)) {
+      return false;
+    }
+    if (user.role === "cliente_subsidio" && !SUBSIDIO_VISIBLES.includes(i.to)) {
       return false;
     }
     // Eliminamos la restricción de ocultar items del menú para que todos los clientes
@@ -512,7 +525,7 @@ export default function Layout({ children }) {
 
       {/* Botón flotante de soporte por WhatsApp — visible en todos los módulos */}
       <a
-        href={`https://wa.me/51972228870?text=${encodeURIComponent("Hola ENERED 👋, necesito soporte con la plataforma.")}`}
+        href={`https://wa.me/51997389536?text=${encodeURIComponent("Hola ENERED 👋, necesito soporte con la plataforma.")}`}
         target="_blank"
         rel="noreferrer"
         title="Soporte por WhatsApp"

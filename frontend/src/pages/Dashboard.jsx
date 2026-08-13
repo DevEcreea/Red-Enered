@@ -15,7 +15,7 @@ import TrackerSubsidio from "../components/TrackerSubsidio";
 import ValidacionPendiente from "../components/ValidacionPendiente";
 
 const MAPS_LINK = "https://maps.app.goo.gl/LZpyBqYs54LazZtV7";
-const UPGRADE_WA = "https://wa.me/51900000000?text=Hola%2C%20quiero%20mejorar%20mi%20plan%20ENERED";
+const UPGRADE_WA = "https://wa.me/51997389536?text=Hola%2C%20quiero%20mejorar%20mi%20plan%20ENERED";
 
 /* ============================================================
    Locked KPI Card — blurred data + small "Mejorar Plan" overlay + Premium tooltip on hover

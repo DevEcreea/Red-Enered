@@ -13,13 +13,13 @@ export default function ModuloBloqueado({
 
   const abrirWhatsApp = () => {
     window.open(
-      "https://wa.me/51972228870?text=Hola, quiero activar el demo de 30 días del módulo " + (titulo || ""),
+      "https://wa.me/51997389536?text=Hola, quiero activar el demo de 30 días del módulo " + (titulo || ""),
       "_blank"
     );
   };
   const agendarConfig = () => {
     window.open(
-      "https://wa.me/51972228870?text=Hola, quiero agendar la configuración del módulo " + (titulo || ""),
+      "https://wa.me/51997389536?text=Hola, quiero agendar la configuración del módulo " + (titulo || ""),
       "_blank"
     );
   };

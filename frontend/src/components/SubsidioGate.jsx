@@ -20,14 +20,15 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   //    Incluidos: Mi Panel (Dashboard), Combustible, Gestión de Gastos (Cuenta),
   //    Vehículos, Documentación. (Mi Flota no usa Gated, siempre accesible.)
   if (esSubsidio) {
-    const MODULOS_CLIENTE = ["Dashboard", "Combustible", "Cuenta", "Gestión Gastos", "Vehículos", "Documentación"];
+    // El cliente de subsidio entra por su RUC y ve su Mi Flota (Módulo 0). Ve TODOS los
+    // módulos en el menú, pero NO puede ingresar a ninguno: solo su Panel/Mi Flota.
+    const MODULOS_CLIENTE = ["Dashboard"];
     if (MODULOS_CLIENTE.includes(titulo)) return children;
-    // El resto de módulos quedan visibles pero bloqueados (upsell a demo).
     return (
       <ModuloBloqueado
         variant="demo"
         titulo={titulo}
-        descripcion="Este módulo no está incluido en tu plan actual. Descubre todo el potencial de ENERED agendando una demostración gratuita."
+        descripcion="Este módulo estará disponible cuando avances con tu expediente del subsidio. Escríbenos por WhatsApp para activarlo."
       />
     );
   }

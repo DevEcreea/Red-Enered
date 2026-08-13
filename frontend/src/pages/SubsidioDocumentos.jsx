@@ -4,11 +4,12 @@ import {
   Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle,
   Trash2, Plus, Building2, Truck, Fuel,
   Banknote, FileText, Save, ScanLine, ShieldCheck,
-  Send, Lock, FileCheck2, PartyPopper,
+  Send, Lock, FileCheck2, PartyPopper, Coins,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
+import Etapa0Card from "../components/Etapa0Card";
 
 // --- Subcomponente para cada factura editable ---
 function InvoiceRow({ item, deleteRow }) {
@@ -32,6 +33,7 @@ function InvoiceRow({ item, deleteRow }) {
 }
 
 const ETAPAS = [
+  { id: "etapa0",       n: 0, label: "Tu potencial del subsidio", icon: Coins,     short: "Tu potencial", hint: "Máximo a reclamar" },
   { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
   { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF o imagen · OCR" },
@@ -43,8 +45,10 @@ const TARGET_DATE = new Date("2026-09-28T23:59:59");
 
 export default function SubsidioDocumentos() {
   const navigate = useNavigate();
-  const { setUser } = useAuth();
+  const { user, setUser } = useAuth();
+  const bloqueaEtapas = user?.acceso_etapa0 === true;  // entró solo por RUC → Etapa 1+ bloqueadas
   const [data, setData] = useState(null);
+  const [estimadoResumen, setEstimadoResumen] = useState(null);  // total_monto del /subsidio/resumen (Etapa 0)
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const pad = (num) => String(num).padStart(2, '0');
@@ -67,7 +71,7 @@ export default function SubsidioDocumentos() {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
-  const [activeEtapa, setActiveEtapa] = useState("empresa");
+  const [activeEtapa, setActiveEtapa] = useState("etapa0");
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [createdDeclaracion, setCreatedDeclaracion] = useState(null);
 
@@ -75,8 +79,15 @@ export default function SubsidioDocumentos() {
     try {
       const { data } = await api.get("/subsidio/dashboard");
       setData(data);
-      // Auto-jump to first incomplete stage on first load
-      if (loading) {
+      // Ahorro estimado = máximo del subsidio calculado en Etapa 0 (MTC × topes por categoría).
+      if (user?.ruc) {
+        try {
+          const { data: res } = await api.get(`/subsidio/resumen?ruc=${user.ruc}`);
+          setEstimadoResumen(res?.subsidio?.total_monto ?? null);
+        } catch (_) { /* si falla, se usa el ahorro_estimado del dashboard */ }
+      }
+      // Auto-jump to first incomplete stage on first load (salvo entrada solo-RUC → queda en Etapa 0)
+      if (loading && user?.acceso_etapa0 !== true) {
         const next = pickNextEtapa(data);
         if (next) setActiveEtapa(next);
       }
@@ -142,7 +153,7 @@ export default function SubsidioDocumentos() {
           <div className="flex items-center gap-3">
             <div className="px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-emerald-700">Ahorro estimado</div>
-              <div className="font-cabinet font-black text-xl text-emerald-700">S/ {Number(ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
+              <div className="font-cabinet font-black text-xl text-emerald-700">S/ {Number(estimadoResumen ?? ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
             </div>
             <div className="px-4 py-2.5 bg-brand/10 border border-brand/30 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Ahorro reconocido</div>
@@ -193,12 +204,13 @@ export default function SubsidioDocumentos() {
         </div>
 
         {/* Línea de etapas */}
-        <div className="grid grid-cols-4 gap-2 mb-3">
+        <div className="grid grid-cols-5 gap-2 mb-3">
           {ETAPAS.map((e) => {
             const Ic = e.icon;
             const active = activeEtapa === e.id;
             const done = isComplete(e.id) || (e.id === "declaracion" && enviado);
-            const canVisit = true;
+            // Si entró solo por RUC, solo puede ver Etapa 0; el resto queda bloqueado.
+            const canVisit = e.id === "etapa0" || !bloqueaEtapas;
             return (
               <button
                 key={e.id}
@@ -216,7 +228,7 @@ export default function SubsidioDocumentos() {
                   <span className={`w-6 h-6 rounded-md flex items-center justify-center ${
                     done ? "bg-emerald-100 text-emerald-700" : active ? "bg-brand text-white" : "bg-neutral-100 text-neutral-500"
                   }`}>
-                    {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Ic className="w-3.5 h-3.5" />}
+                    {done ? <CheckCircle2 className="w-3.5 h-3.5" /> : !canVisit ? <Lock className="w-3.5 h-3.5" /> : <Ic className="w-3.5 h-3.5" />}
                   </span>
                 </div>
                 <div className="font-bold text-[13px] text-neutral-900 leading-tight">{e.short}</div>
@@ -245,6 +257,9 @@ export default function SubsidioDocumentos() {
       </div>
 
       {/* CONTENIDO de la etapa activa */}
+      {activeEtapa === "etapa0" ? (
+        <Etapa0Card />
+      ) : (
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
         {activeEtapa === "empresa" && (
           <EmpresaEtapa items={checklist.empresa} bank={bank_account} onChange={load} />
@@ -300,6 +315,7 @@ export default function SubsidioDocumentos() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -76,7 +76,7 @@ export default function DashboardSubsidioView() {
   // No se ha cargado ninguna factura todavía.
   const sinFacturas = hasNoData && pending_drafts === 0 && invoicesConfirmed === 0;
   // WhatsApp para acelerar la validación.
-  const WA_VALIDACION = `https://wa.me/51972228870?text=${encodeURIComponent("Hola ENERED, cargué mis facturas de combustible y quisiera acelerar la validación para ver mis resultados.")}`;
+  const WA_VALIDACION = `https://wa.me/51997389536?text=${encodeURIComponent("Hola ENERED, cargué mis facturas de combustible y quisiera acelerar la validación para ver mis resultados.")}`;
 
   const donutData = useMemo(() => {
     if (!top_estaciones || top_estaciones.length === 0) {
@@ -547,7 +547,7 @@ export default function DashboardSubsidioView() {
 
         <div className="flex flex-col items-center md:items-end flex-shrink-0 relative z-10 w-full md:w-auto">
           <button
-            onClick={() => window.open("https://wa.me/51972228870?text=Hola,%20quiero%20agendar%20mi%20activación%20de%20unidades%20en%20ENERED", "_blank")}
+            onClick={() => window.open("https://wa.me/51997389536?text=Hola,%20quiero%20agendar%20mi%20activación%20de%20unidades%20en%20ENERED", "_blank")}
             className="bg-white hover:bg-neutral-100 text-[#6100C2] font-cabinet font-black px-5 py-2.5 rounded-2xl shadow-lg transition-all flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] w-full md:w-auto justify-center text-sm"
           >
             <span>📅</span> Agendar mi activación &gt;

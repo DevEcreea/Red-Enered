@@ -7,6 +7,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os
 import io
 import re
+import asyncio
 import uuid
 import random
 import secrets
@@ -24,6 +25,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
 
 import servicios as _svc
+import mtc as _mtc
+import atu as _atu
 from storage import save_object, download_response
 
 # ---------- Config ----------
@@ -144,6 +147,8 @@ def user_public(u: dict) -> dict:
         "name": u.get("name", ""),
         "role": u["role"],
         "empresa": u.get("empresa"),
+        "ruc": u.get("ruc", ""),
+        "acceso_etapa0": u.get("acceso_etapa0", False),
         "created_at": u.get("created_at"),
         "documentos_completos": u.get("documentos_completos", True),
         "expediente_status": u.get("expediente_status", "confirmed"),
@@ -5328,6 +5333,522 @@ async def wialon_fuel_graph(body: WialonFuelGraphIn, user: dict = Depends(get_cu
     }
 
 
+# ---------- MTC/DGTT: consulta pública de transporte de mercancías ----------
+@api.get("/mtc/consulta")
+async def mtc_consulta(tipo: str, valor: str, user: dict = Depends(get_current_user)):
+    """
+    Consulta la habilitación de transporte de mercancías en el MTC (DGTT).
+    tipo ∈ {ruc, placa, partida, constancia}. Devuelve estado (habilitado), N° de
+    permiso, vigencia y las unidades/placas autorizadas.
+    """
+    try:
+        return await _mtc.consultar(tipo, valor)
+    except _mtc.MtcError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar el MTC: {str(e)}")
+
+
+# ---------- ATU: diagnóstico de subsidio (TUC no reconocidos) ----------
+class AtuDiagnosticoIn(BaseModel):
+    ruc: Optional[str] = None
+    token: Optional[str] = None       # access_token de sesión ATU (opcional)
+    data: Optional[dict] = None       # respuesta cruda de la ATU pegada (opcional)
+
+
+@api.post("/atu/diagnostico")
+async def atu_diagnostico(body: AtuDiagnosticoIn, user: dict = Depends(get_current_user)):
+    """
+    Diagnóstico ATU: detecta unidades habilitadas sin TUC reconocido (que pierden subsidio).
+    Acepta el JSON de la ATU pegado (data) o consulta en vivo con (token + ruc).
+    """
+    try:
+        if body.data is not None:
+            return _atu.diagnosticar_desde_json(body.data)
+        if body.token and body.ruc:
+            return await _atu.consultar_habilitaciones(body.token, body.ruc)
+        raise _atu.AtuError("Envía el JSON de la ATU (data) o bien token + ruc.")
+    except _atu.AtuError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"No se pudo procesar el diagnóstico ATU: {str(e)}")
+
+
+class AtuConectarIn(BaseModel):
+    ruc: str
+    access_token: str
+    refresh_token: Optional[str] = None
+
+
+def _atu_pack(session: dict) -> dict:
+    """Cifra los tokens de sesión ATU para guardarlos."""
+    return {
+        "access_token": _svc.encrypt_wialon_token(session["access_token"]),
+        "refresh_token": _svc.encrypt_wialon_token(session["refresh_token"]) if session.get("refresh_token") else None,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _atu_unpack(doc: dict) -> dict:
+    return {
+        "access_token": _svc.decrypt_wialon_token(doc["access_token"]),
+        "refresh_token": _svc.decrypt_wialon_token(doc["refresh_token"]) if doc.get("refresh_token") else None,
+    }
+
+
+# La sesión ATU maestra de ENERED se guarda con esta clave (una sola sesión sirve para todos los RUCs)
+_ATU_MASTER_KEY = "__MASTER__"
+
+
+def _jwt_exp(token: str):
+    """Lee el 'exp' (segundos epoch) de un JWT sin validar la firma."""
+    try:
+        import base64 as _b64, json as _j
+        p = token.split(".")[1]
+        p += "=" * (-len(p) % 4)
+        return _j.loads(_b64.urlsafe_b64decode(p)).get("exp")
+    except Exception:
+        return None
+
+
+class AtuMaestraIn(BaseModel):
+    access_token: str
+    refresh_token: Optional[str] = None
+
+
+@api.post("/atu/maestra")
+async def atu_maestra_conectar(body: AtuMaestraIn, user: dict = Depends(require_roles("admin_enered"))):
+    """Conecta la sesión ATU MAESTRA de ENERED (una sola cuenta sirve para consultar cualquier RUC)."""
+    acc = (body.access_token or "").strip()
+    ref = (body.refresh_token or "").strip()
+    if acc.count(".") != 2:
+        raise HTTPException(status_code=400, detail="El access_token no parece válido (revisa que lo copiaste completo).")
+    if ref and ref.count(".") != 2:
+        raise HTTPException(status_code=400, detail="El refresh_token no parece válido (cópialo completo).")
+    if not ref:
+        raise HTTPException(status_code=400, detail="Falta el refresh_token — es necesario para mantener viva la sesión. Cópialo también.")
+    doc = _atu_pack({"access_token": acc, "refresh_token": ref})
+    doc["conectado_por"] = user.get("email")
+    await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": {**doc, "ruc": _ATU_MASTER_KEY}}, upsert=True)
+    return {"ok": True}
+
+
+@api.get("/atu/maestra")
+async def atu_maestra_estado(user: dict = Depends(get_current_user)):
+    """Estado de la cuenta maestra: conectada y cuántos minutos de vida le quedan a la sesión."""
+    import time as _t
+    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+    if not doc:
+        return {"conectada": False}
+    sess = _atu_unpack(doc)
+    exp_acc = _jwt_exp(sess.get("access_token"))
+    exp_ref = _jwt_exp(sess.get("refresh_token")) if sess.get("refresh_token") else None
+    ahora = _t.time()
+    return {
+        "conectada": True,
+        "actualizado": doc.get("updated_at"),
+        "min_access": round((exp_acc - ahora) / 60) if exp_acc else None,
+        "min_refresh": round((exp_ref - ahora) / 60) if exp_ref else None,
+        "tiene_refresh": bool(sess.get("refresh_token")),
+    }
+
+
+@api.get("/atu/analisis")
+async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
+    """
+    Análisis por RUC usando la cuenta ATU MAESTRA de ENERED (auto-renueva la sesión si expiró).
+    Detecta placas sin TUC y cruza con el MTC. Si el RUC no está inscrito en el subsidio, lo indica.
+    """
+    ruc = (ruc or "").strip()
+    if not re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
+    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+    if not doc:
+        return {"ruc": ruc, "conectado": False, "sin_maestra": True}
+    session = _atu_unpack(doc)
+    try:
+        diag, actualizada = await _atu.diagnosticar_con_sesion(session, ruc)
+    except _atu.AtuError as e:
+        return {"ruc": ruc, "conectado": True, "maestra_vencida": True, "error": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error consultando ATU: {str(e)}")
+    # guardar la sesión renovada si cambió (auto-refresh)
+    if actualizada.get("access_token") != session.get("access_token"):
+        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
+    # ---- Vista unificada por placa: TODA la flota (MTC) + si la ATU la acepta o no + motivo ----
+    import datetime as _dt
+
+    def _norm_placa(p):
+        return (p or "").replace("-", "").replace(" ", "").upper()
+
+    def _vencida(vig):
+        mm = re.match(r"(\d{2})/(\d{2})/(\d{4})", str(vig or ""))
+        if not mm:
+            return False
+        try:
+            return _dt.date(int(mm.group(3)), int(mm.group(2)), int(mm.group(1))) < _dt.date.today()
+        except Exception:
+            return False
+
+    inscrito = not diag.get("sin_habilitaciones")
+    atu_by_placa = {}
+    if inscrito:
+        for u in diag.get("unidades", []):
+            atu_by_placa[_norm_placa(u.get("placa"))] = u
+
+    # Flota completa desde el MTC (fuente de "todas tus placas") + vigencia por autorización
+    mtc_vehiculos = []
+    try:
+        m = await _mtc.consultar("ruc", ruc)
+        for a in m.get("autorizaciones", []):
+            for v in a.get("vehiculos", []):
+                if v.get("placa"):
+                    mtc_vehiculos.append((v, a))
+    except Exception:
+        pass
+
+    unidades = []
+    vistas = set()
+    for v, a in mtc_vehiculos:
+        pn = _norm_placa(v.get("placa"))
+        vistas.add(pn)
+        au = atu_by_placa.get(pn)
+        aceptada = bool(au) and au.get("tuc_estado") == "ok"
+        vig = a.get("vigente_hasta")
+        # La ATU no da un motivo por placa (estadoValidacionAutorizacionNombre viene vacío),
+        # así que usamos el mismo motivo salvo que la autorización esté vencida en el MTC.
+        if aceptada:
+            motivo = None
+        elif _vencida(vig):
+            motivo = f"Autorización vencida ({vig})"
+        else:
+            motivo = "La ATU no reconoce su TUC (regularizable)"
+        unidades.append({
+            "placa": v.get("placa"),
+            "categoria": v.get("categoria") or (au.get("categoria") if au else None),
+            "tuc": (au.get("tuc") if au else None),
+            "aceptada": aceptada,
+            "motivo": motivo,
+            "numero_autorizacion": (au.get("numero_autorizacion") if au else None) or a.get("codigo") or v.get("constancia"),
+            "vigencia": vig,
+        })
+    # Placas que la ATU tiene pero no aparecen en el MTC (raras)
+    for pn, au in atu_by_placa.items():
+        if pn in vistas:
+            continue
+        aceptada = au.get("tuc_estado") == "ok"
+        unidades.append({
+            "placa": au.get("placa"), "categoria": au.get("categoria"),
+            "tuc": au.get("tuc"), "aceptada": aceptada,
+            "motivo": None if aceptada else "La ATU no reconoce su TUC (regularizable)",
+            "numero_autorizacion": au.get("numero_autorizacion"), "vigencia": None,
+        })
+
+    unidades.sort(key=lambda u: (u["aceptada"], u.get("placa") or ""))
+    aceptadas = sum(1 for u in unidades if u["aceptada"])
+    return {
+        "ruc": ruc, "conectado": True, "inscrito": inscrito,
+        "total_unidades": len(unidades),
+        "aceptadas": aceptadas,
+        "no_aceptadas": len(unidades) - aceptadas,
+        "unidades": unidades,
+    }
+
+
+# Tope de galones máximos a reclamar por categoría de unidad (DU 004). × factor = monto.
+_TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
+_FACTOR_SUBSIDIO = 4  # galones máximos × 4 = monto máximo a reclamar
+
+
+def _detalle_ruc(ruc_activo, sunat):
+    if ruc_activo:
+        return "El RUC figura ACTIVO y HABIDO en SUNAT."
+    if ruc_activo is False:
+        if sunat:
+            return f"En SUNAT figura: {sunat.get('estado')} / {sunat.get('condicion')}."
+        return "El RUC no figura activo/habido."
+    return "No se pudo verificar en este momento."
+
+
+async def _sunat_estado(ruc: str):
+    """Consulta pública de SUNAT (estado ACTIVO/BAJA y condición HABIDO/NO HABIDO)."""
+    try:
+        import httpx as _hx
+        async with _hx.AsyncClient(timeout=12.0, verify=False,
+                                   headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
+            r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
+            if r.status_code != 200:
+                return None
+            d = r.json()
+            return {"estado": d.get("estado"), "condicion": d.get("condicion"), "nombre": d.get("nombre")}
+    except Exception:
+        return None
+
+
+@api.get("/subsidio/resumen")
+async def subsidio_resumen(ruc: str):
+    """
+    Etapa 0 pública: con solo el RUC devuelve el máximo a reclamar del subsidio (por categoría
+    de unidad, desde el MTC), las unidades con su cumple/no-cumple en la ATU, y el semáforo ATU.
+    """
+    ruc = (ruc or "").strip()
+    if not re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
+
+    # 1) MTC: unidades + categorías + razón social (fuente de "todas tus unidades")
+    #    OJO: un mismo RUC puede tener varias autorizaciones y la MISMA placa repetida.
+    #    Deduplicamos por placa (placa única) para no inflar el subsidio.
+    razon = ""
+    mtc_unidades = []
+    permiso_mtc = False
+    _placas_vistas = set()
+    try:
+        m = await _mtc.consultar("ruc", ruc)
+        for a in m.get("autorizaciones", []):
+            if not razon:
+                razon = a.get("razon_social", "") or ""
+            if a.get("habilitado"):
+                permiso_mtc = True
+            for v in a.get("vehiculos", []):
+                pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+                if not pn or pn in _placas_vistas:
+                    continue
+                _placas_vistas.add(pn)
+                mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
+                                     "vigencia": a.get("vigente_hasta"), "numero_autorizacion": a.get("codigo") or v.get("constancia")})
+    except Exception:
+        pass
+
+    # 2) ATU (cuenta maestra): aceptación por placa + semáforo
+    inscrito = False
+    atu_disponible = False
+    atu_by_placa = {}
+    semaforo = []
+    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+    if doc:
+        session = _atu_unpack(doc)
+        try:
+            diag, actualizada = await _atu.diagnosticar_con_sesion(session, ruc)
+            if actualizada.get("access_token") != session.get("access_token"):
+                await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
+                session = actualizada
+            atu_disponible = True
+            inscrito = not diag.get("sin_habilitaciones")
+            for u in diag.get("unidades", []):
+                atu_by_placa[(u.get("placa") or "").replace("-", "").upper()] = u
+            try:
+                semaforo = await _atu.consultar_semaforo(session["access_token"], ruc)
+            except Exception:
+                semaforo = []
+        except _atu.AtuError:
+            atu_disponible = False
+
+    # 3) Unidades combinadas: MTC (base) + ATU (tuc/acepta) + motivo + vigencia
+    import datetime as _dt
+
+    def _venc(vig):
+        mm = re.match(r"(\d{2})/(\d{2})/(\d{4})", str(vig or ""))
+        if not mm:
+            return False
+        try:
+            return _dt.date(int(mm.group(3)), int(mm.group(2)), int(mm.group(1))) < _dt.date.today()
+        except Exception:
+            return False
+
+    unidades = []
+    for u in mtc_unidades:
+        pn = u["placa"].replace("-", "").upper()
+        au = atu_by_placa.get(pn)
+        cat = u["categoria"]
+        cat_ok = cat in _TOPES_GALONES
+        # Solo M2, M3, N1, N2, N3 reciben subsidio. Otras categorías (O4, etc.) no califican.
+        cumple = cat_ok and bool(au) and au.get("tuc_estado") == "ok"
+        vig = u.get("vigencia")
+        if cumple:
+            estado, motivo = "aceptada", None
+        elif not cat_ok:
+            estado = "no_subsidiable"
+            motivo = (f"Categoría {cat} no recibe subsidio (solo M2, M3, N1, N2, N3)"
+                      if cat else "Sin categoría registrada en el MTC (no subsidiable)")
+        elif _venc(vig):
+            estado, motivo = "vencida", f"Autorización del MTC vencida ({vig})"
+        elif not atu_disponible:
+            # La ATU no respondió: NO afirmamos que rechace el TUC, queda pendiente.
+            estado, motivo = "por_verificar", "Pendiente de validación en la ATU"
+        elif au:
+            estado, motivo = "no_aceptada", "La ATU no reconoce su TUC (regularizable)"
+        else:
+            estado, motivo = "no_aceptada", "No figura habilitada en la ATU (regularizable)"
+        unidades.append({
+            "placa": u["placa"], "categoria": cat, "cumple": cumple, "estado": estado,
+            "tuc": (au.get("tuc") if au else None), "motivo": motivo,
+            "vigencia": vig, "numero_autorizacion": u.get("numero_autorizacion"),
+        })
+    # Orden: aceptadas primero, luego por verificar, luego el resto.
+    _peso = {"aceptada": 0, "por_verificar": 1, "vencida": 2, "no_aceptada": 3, "no_subsidiable": 4}
+    unidades.sort(key=lambda x: (_peso.get(x["estado"], 9), x.get("placa") or ""))
+
+    # 4) Subsidio máximo por categoría (solo categorías con tope). Las demás no aplican.
+    por_cat = {}
+    no_aplican = {}
+    total_galones = 0.0
+    for u in mtc_unidades:
+        tope = _TOPES_GALONES.get(u["categoria"])
+        if not tope:
+            cat = u["categoria"] or "(sin categoría)"
+            no_aplican[cat] = no_aplican.get(cat, 0) + 1
+            continue
+        d = por_cat.setdefault(u["categoria"], {"categoria": u["categoria"], "unidades": 0, "tope": tope})
+        d["unidades"] += 1
+        total_galones += tope
+    por_categoria = [{
+        **v,
+        "galones": round(v["tope"] * v["unidades"], 2),
+        "monto": round(v["tope"] * v["unidades"] * _FACTOR_SUBSIDIO, 2),
+    } for v in por_cat.values()]
+    categorias_no_aplican = [{"categoria": k, "unidades": v}
+                             for k, v in sorted(no_aplican.items(), key=lambda x: -x[1])]
+
+    # 5) Requisitos para calificar al subsidio (cumple=True/False, o None = por verificar)
+    aceptadas = sum(1 for u in unidades if u["cumple"])
+
+    # RUC activo y habido: se saca de SUNAT (público, confiable) — no depende de la ATU.
+    sunat = await _sunat_estado(ruc)
+    if sunat:
+        ruc_activo = (str(sunat.get("estado") or "").upper() == "ACTIVO" and str(sunat.get("condicion") or "").upper() == "HABIDO")
+        if not razon:
+            razon = sunat.get("nombre") or ""
+    elif atu_disponible:
+        ruc_activo = any((s.get("codigo") == "RUC_ACTIVO" and (s.get("estado") or "").upper() == "CUMPLE") for s in semaforo)
+    else:
+        ruc_activo = None
+    # Unidades con TUC depende de la ATU (por verificar si no respondió).
+    unidades_tuc = (aceptadas > 0) if atu_disponible else None
+
+    # Semáforo canónico: SIEMPRE las 4 condiciones que evalúa la ATU (CUMPLE / NO_CUMPLE),
+    # rellenando con nuestras fuentes (SUNAT, MTC, análisis por placa) las que la ATU no devuelva.
+    def _find_sem(*subs):
+        for s in semaforo:
+            blob = ((s.get("codigo") or "") + " " + (s.get("nombre") or "")).upper()
+            if any(k in blob for k in subs):
+                return s
+        return None
+
+    def _estado(b):
+        return "POR_VERIFICAR" if b is None else ("CUMPLE" if b else "NO_CUMPLE")
+
+    # Autorización de transporte vigente: se basa en el PERMISO DEL MTC (fuente real de la
+    # habilitación), NO en el semáforo de la ATU (que puede marcar NO_CUMPLE por su propio
+    # trámite y contradecir a "Vehículos habilitados"). Si el MTC muestra permiso habilitado,
+    # el transportista SÍ tiene autorización de transporte.
+    aut_estado = _estado(permiso_mtc)
+    aut_desc = ("Tiene autorización de transporte habilitada y vigente en el MTC." if permiso_mtc
+                else "No se encontró autorización de transporte habilitada en el MTC.")
+
+    # Vehículos habilitados: VIGENCIA del MTC por unidad. Verde solo si TODAS vigentes;
+    # amarillo (PARCIAL) si unas vigentes y otras vencidas; rojo si ninguna vigente.
+    veh_total = len(mtc_unidades)
+    veh_vencidas = sum(1 for u in mtc_unidades if _venc(u.get("vigencia")))
+    veh_vigentes = veh_total - veh_vencidas
+    if veh_total == 0:
+        hab_estado, hab_desc = _estado(None), "No se encontraron unidades en el MTC."
+    elif veh_vencidas == 0:
+        hab_estado, hab_desc = "CUMPLE", f"Las {veh_vigentes} unidad(es) tienen autorización MTC vigente."
+    elif veh_vigentes == 0:
+        hab_estado, hab_desc = "NO_CUMPLE", f"Las {veh_total} unidad(es) tienen la autorización MTC vencida."
+    else:
+        hab_estado, hab_desc = "PARCIAL", f"{veh_vigentes} de {veh_total} unidad(es) con autorización MTC vigente; {veh_vencidas} vencida(s)."
+
+    # Vehículos con TUC habilitado: comparado contra las unidades SUBSIDIABLES (M/N con tope).
+    # Verde solo si TODAS las subsidiables están aceptadas; amarillo si unas sí y otras no.
+    subsid_total = sum(1 for u in mtc_unidades if u["categoria"] in _TOPES_GALONES)
+    if not atu_disponible:
+        tuc_estado = "POR_VERIFICAR"
+        tuc_desc = "La plataforma de la ATU es quien valida este punto y hoy no responde."
+    elif aceptadas == 0:
+        tuc_estado = "NO_CUMPLE"
+        tuc_desc = "La plataforma de la ATU no reconoce el TUC de tus unidades."
+    elif aceptadas < subsid_total:
+        tuc_estado = "PARCIAL"
+        tuc_desc = f"Solo {aceptadas} de {subsid_total} unidad(es) tienen TUC habilitado en la ATU; el resto debe regularizarse."
+    else:
+        tuc_estado = "CUMPLE"
+        tuc_desc = f"Las {aceptadas} unidad(es) subsidiables tienen TUC habilitado en la ATU."
+
+    semaforo = [
+        {"codigo": "RUC_ACTIVO", "nombre": "RUC activo y habido",
+         "estado": _estado(ruc_activo),
+         "descripcion": _detalle_ruc(ruc_activo, sunat)},
+        {"codigo": "AUTORIZACION_VIGENTE", "nombre": "Autorización de transporte vigente",
+         "estado": aut_estado, "descripcion": aut_desc},
+        {"codigo": "VEHICULOS_HABILITADOS", "nombre": "Vehículos habilitados",
+         "estado": hab_estado, "descripcion": hab_desc},
+        {"codigo": "VEHICULOS_TUC", "nombre": "Vehículos con TUC habilitado",
+         "estado": tuc_estado, "descripcion": tuc_desc},
+    ]
+    requisitos = [
+        {"codigo": "permiso_mtc", "nombre": "Permiso del MTC",
+         "cumple": permiso_mtc,
+         "detalle": "Tiene autorización de transporte habilitada en el MTC." if permiso_mtc else "No se encontró autorización de transporte habilitada en el MTC."},
+        {"codigo": "ruc_activo_habido", "nombre": "RUC activo y habido",
+         "cumple": ruc_activo,
+         "detalle": _detalle_ruc(ruc_activo, sunat)},
+        {"codigo": "unidades_tuc", "nombre": "Unidades con TUC y habilitación vehicular",
+         "cumple": unidades_tuc,
+         "detalle": (f"{aceptadas} unidad(es) con TUC reconocido por la ATU." if unidades_tuc
+                     else "Ninguna unidad tiene TUC reconocido por la ATU todavía." if unidades_tuc is False
+                     else "No se pudo verificar en la ATU en este momento.")},
+    ]
+    # Cumple solo si todos son True; si alguno es None → None (por verificar)
+    if any(r["cumple"] is None for r in requisitos):
+        cumple_subsidio = None
+    else:
+        cumple_subsidio = all(r["cumple"] for r in requisitos)
+
+    return {
+        "ruc": ruc,
+        "razon_social": razon,
+        "inscrito": inscrito,
+        "atu_disponible": atu_disponible,
+        "requisitos": requisitos,
+        "cumple_subsidio": cumple_subsidio,
+        "subsidio": {
+            "por_categoria": por_categoria,
+            "categorias_no_aplican": categorias_no_aplican,
+            "total_unidades": len(mtc_unidades),
+            "unidades_con_subsidio": sum(v["unidades"] for v in por_cat.values()),
+            "total_galones": round(total_galones, 2),
+            "total_monto": round(total_galones * _FACTOR_SUBSIDIO, 2),
+            "factor": _FACTOR_SUBSIDIO,
+        },
+        "unidades": unidades,
+        "semaforo": semaforo,
+    }
+
+
+async def _atu_guardian():
+    """
+    Guardián de sesión ATU: renueva la cuenta maestra cada ~13 min (el access dura 15).
+    Así la sesión nunca expira mientras el refresh_token siga vivo.
+    """
+    while True:
+        try:
+            await asyncio.sleep(780)  # 13 minutos
+            doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+            if not doc:
+                continue
+            sess = _atu_unpack(doc)
+            if not sess.get("refresh_token"):
+                continue
+            nuevos = await _atu.refresh_session(sess["refresh_token"])
+            await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(nuevos)})
+            logger.info("ATU guardián: sesión maestra renovada OK")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("ATU guardián: no se pudo renovar (%s)", str(e)[:100])
+
+
 # ---------- Admin: eliminar empresa con cascada ----------
 @api.delete("/admin/empresas/{empresa}")
 async def delete_empresa(empresa: str, user: dict = Depends(require_roles("admin_enered"))):
@@ -6061,6 +6582,13 @@ async def startup():
         print(f"DELETED MANUAL RECORDS! {res1.deleted_count} + {res2.deleted_count}")
     except Exception as e:
         print("DELETE ERR", e)
+
+    # Guardián de sesión ATU (auto-renueva la cuenta maestra cada ~13 min)
+    try:
+        asyncio.create_task(_atu_guardian())
+        logger.info("ATU guardián iniciado")
+    except Exception as e:
+        print("ATU guardián no arrancó:", e)
 
     try:
         await db.users.create_index("email", unique=True)

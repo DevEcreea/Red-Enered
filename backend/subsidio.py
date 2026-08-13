@@ -187,6 +187,19 @@ class RegisterFromCalculator(BaseModel):
     password: str = Field(min_length=8)
 
 
+class RegisterPublicoIn(BaseModel):
+    ruc: str = Field(min_length=11, max_length=11)
+    razon_social: str
+    contacto: str
+    telefono: str
+    email: EmailStr
+    password: str = Field(min_length=8)
+
+
+class EntrarRucIn(BaseModel):
+    ruc: str = Field(min_length=11, max_length=11)
+
+
 class BankAccountIn(BaseModel):
     es_banco_nacion: bool
     banco: str
@@ -424,6 +437,112 @@ async def register_from_calculator(payload: RegisterFromCalculator, response: Re
     }
     pub["tipo_cliente"] = "subsidio"
     return {"user": pub, "access_token": access}
+
+
+@subsidio_router.post("/subsidio/registro-publico")
+async def register_publico(payload: RegisterPublicoIn, response: Response):
+    """
+    Registro desde la landing pública /subsidio (después de ver la Etapa 0).
+    El transportista crea su propia contraseña y queda logueado como cliente_subsidio.
+    """
+    email = payload.email.lower().strip()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="Ya existe una cuenta con este correo")
+
+    empresa_name = (payload.razon_social or "").strip() or f"RUC {payload.ruc}"
+    existing_emp = await db.empresas_config.find_one({"empresa": empresa_name})
+    if not existing_emp:
+        await db.empresas_config.insert_one({
+            "id": str(uuid.uuid4()),
+            "empresa": empresa_name,
+            "ruc": payload.ruc,
+            "plan": "subsidio",
+            "tipo_cliente": "subsidio",
+            "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+            "linea_credito": 0, "unidades_contratadas": 0, "dias_credito": 0,
+            "canal_origen": "landing_subsidio",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id, "email": email, "name": payload.contacto,
+        "password_hash": _hash_pw(payload.password),
+        "role": "cliente_subsidio", "empresa": empresa_name, "ruc": payload.ruc,
+        "contacto": payload.contacto, "telefono": payload.telefono,
+        "documentos_completos": False,
+        "canal_origen": "landing_subsidio",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.users.insert_one(user_doc)
+    user_doc.pop("_id", None)
+
+    access = _create_access_token(user_id, email, "cliente_subsidio", empresa_name)
+    refresh = _create_refresh_token(user_id)
+    _set_auth_cookies(response, access, refresh)
+    response.headers["X-Access-Token"] = access
+
+    pub = {k: v for k, v in user_doc.items() if k != "password_hash"}
+    pub["servicios"] = {"plataforma": False, "combustible": False, "gps": False, "subsidio": True}
+    pub["tipo_cliente"] = "subsidio"
+    return {"user": pub, "access_token": access}
+
+
+async def _sunat_nombre(ruc: str) -> str:
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False,
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
+            r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
+            if r.status_code == 200:
+                return (r.json().get("nombre") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+@subsidio_router.post("/subsidio/entrar")
+async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
+    """
+    Entrada a la plataforma con SOLO el RUC (Etapa 0). Encuentra o crea una cuenta
+    liviana de cliente_subsidio y lo deja logueado en Mi Flota. La contraseña se crea
+    después, cuando pase a la Etapa 1.
+    """
+    ruc = (payload.ruc or "").strip()
+    u = await db.users.find_one({"ruc": ruc, "role": "cliente_subsidio"})
+    if not u:
+        empresa_name = (await _sunat_nombre(ruc)) or f"RUC {ruc}"
+        if not await db.empresas_config.find_one({"empresa": empresa_name}):
+            await db.empresas_config.insert_one({
+                "id": str(uuid.uuid4()), "empresa": empresa_name, "ruc": ruc,
+                "plan": "subsidio", "tipo_cliente": "subsidio",
+                "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+                "linea_credito": 0, "unidades_contratadas": 0, "dias_credito": 0,
+                "canal_origen": "landing_subsidio",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        uid = str(uuid.uuid4())
+        u = {
+            "id": uid, "email": f"{ruc}@subsidio.enered.pe", "name": empresa_name,
+            "password_hash": _hash_pw(uuid.uuid4().hex),  # sin contraseña usable aún
+            "role": "cliente_subsidio", "empresa": empresa_name, "ruc": ruc,
+            "documentos_completos": False, "acceso_etapa0": True,
+            "canal_origen": "landing_subsidio",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.users.insert_one(u)
+    u.pop("_id", None)
+
+    access = _create_access_token(u["id"], u["email"], "cliente_subsidio", u["empresa"])
+    refresh = _create_refresh_token(u["id"])
+    _set_auth_cookies(response, access, refresh)
+    response.headers["X-Access-Token"] = access
+    return {
+        "user": {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": "cliente_subsidio",
+                 "empresa": u["empresa"], "ruc": ruc, "acceso_etapa0": True,
+                 "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+                 "tipo_cliente": "subsidio"},
+        "access_token": access,
+    }
 
 
 # ============================================================================
