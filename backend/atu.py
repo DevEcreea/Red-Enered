@@ -32,20 +32,23 @@ _ATU_HDRS = {
     "Referer": "https://soluciones.atu.gob.pe/",
 }
 
-# Un TUC válido tiene forma T-###### (6 dígitos). Malformado => truncado/incompleto.
-_TUC_RE = re.compile(r"^T-\d{6}$", re.IGNORECASE)
-
-
 class AtuError(Exception):
     pass
 
 
 def _tuc_estado(tuc: Optional[str]) -> str:
-    if not tuc or not str(tuc).strip():
-        return "sin_tuc"          # tuc=null → la ATU no reconoce la unidad
-    if not _TUC_RE.match(str(tuc).strip()):
-        return "tuc_malformado"   # tuc incompleto/truncado (ej. "T-5284")
-    return "ok"
+    """
+    Un TUC válido de la ATU es un número de al menos 6 dígitos (p.ej. '26000478'),
+    con o sin prefijo 'T-'. Si la ATU devuelve un TUC completo, la unidad SÍ está
+    reconocida. Solo es problema cuando viene vacío (sin_tuc) o claramente truncado.
+    """
+    s = str(tuc or "").strip()
+    if not s:
+        return "sin_tuc"                 # tuc=null → la ATU no reconoce la unidad
+    digitos = re.sub(r"\D", "", s)       # cuenta solo los dígitos (ignora 'T-', espacios)
+    if len(digitos) >= 6:
+        return "ok"                      # TUC completo → reconocido
+    return "tuc_malformado"              # incompleto/truncado (ej. 'T-5284' → 4 dígitos)
 
 
 def diagnosticar(lista: list, ruc: str = "") -> dict:
