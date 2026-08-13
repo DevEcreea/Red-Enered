@@ -10,9 +10,13 @@ Dos vías de entrada:
 """
 from __future__ import annotations
 import re
+import os
 from typing import Optional
 
 import httpx
+
+# Proxy opcional para llegar a la ATU (usa ATU_PROXY, o cae al MTC_PROXY si no se define).
+_ATU_PROXY = os.getenv("ATU_PROXY") or os.getenv("MTC_PROXY") or None
 
 API_BASE = "https://api.atu.gob.pe/api_comprobante"
 IAM_BASE = "https://api.atu.gob.pe/api_iam"
@@ -113,7 +117,7 @@ async def consultar_habilitaciones(token: str, ruc: str) -> dict:
         "Authorization": f"Bearer {token}",
     }
     cookies = {"access_token": token}
-    async with httpx.AsyncClient(timeout=30.0, verify=False, headers=headers, cookies=cookies) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=False, headers=headers, cookies=cookies, proxy=_ATU_PROXY) as client:
         # OJO: el endpoint es POST, con el ruc como parámetro de query (no en el body).
         r = await client.post(HABILITACIONES, params={"ruc": ruc}, content=b"")
         if r.status_code in (401, 403):
@@ -137,7 +141,7 @@ async def consultar_semaforo(token: str, ruc: str) -> list:
     """Trae el semáforo de condiciones de la ATU (activo/habido, autorización, TUC…)."""
     headers = {**_ATU_HDRS, "Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=25.0, verify=False, headers=headers,
-                                 cookies={"access_token": token}) as client:
+                                 cookies={"access_token": token}, proxy=_ATU_PROXY) as client:
         r = await client.get(SEMAFORO, params={"ruc": ruc})
         if r.status_code in (401, 403):
             raise AtuError("La ATU rechazó el token.")
@@ -155,7 +159,7 @@ async def refresh_session(refresh_token: str) -> dict:
     if not refresh_token:
         raise AtuError("Falta el refresh_token")
     hdrs = {**_ATU_HDRS, "Cookie": f"refresh_token={refresh_token}"}
-    async with httpx.AsyncClient(timeout=30.0, verify=False, headers=hdrs) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=False, headers=hdrs, proxy=_ATU_PROXY) as client:
         r = await client.post(REFRESH, content=b"")
         if r.status_code not in (200, 204):
             raise AtuError("La sesión ATU expiró; hay que volver a conectar la cuenta.")

@@ -9,11 +9,19 @@ Devuelve datos estructurados: estado (habilitado), N° de permiso, vigencia y la
 """
 from __future__ import annotations
 import re
+import os
 import asyncio
 import html as _html
 from typing import Optional
 
 import httpx
+
+# Proxy opcional para llegar al MTC desde hosts cuya IP el MTC bloquea (p.ej. datacenters).
+# Configurar en el entorno: MTC_PROXY=http://usuario:pass@host:puerto
+_MTC_PROXY = os.getenv("MTC_PROXY") or None
+# Conexión con timeout corto (si el MTC bloquea la IP, falla en ~8s en vez de colgarse),
+# pero lectura amplia para bajar el HTML de empresas grandes (cientos de vehículos).
+_MTC_TIMEOUT = httpx.Timeout(connect=8.0, read=40.0, write=15.0, pool=8.0)
 
 BASE = "https://www.mtc.gob.pe/tramitesenlinea/tweb_tLinea/tw_consultadgtt/"
 FORM = BASE + "Frm_rep_intra_mercancia.aspx"
@@ -121,8 +129,8 @@ async def consultar(tipo: str, valor: str) -> dict:
     _validar(tipo, valor)
     opc = OPCIONES[tipo]
 
-    async with httpx.AsyncClient(timeout=45.0, verify=False, follow_redirects=True,
-                                 headers={"User-Agent": UA}) as client:
+    async with httpx.AsyncClient(timeout=_MTC_TIMEOUT, verify=False, follow_redirects=True,
+                                 headers={"User-Agent": UA}, proxy=_MTC_PROXY) as client:
         # 1) tokens del formulario
         r0 = await client.get(FORM)
         payload = {
