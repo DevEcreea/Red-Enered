@@ -33,7 +33,7 @@ function InvoiceRow({ item, deleteRow }) {
 }
 
 const ETAPAS = [
-  { id: "etapa0",       n: 0, label: "Tu potencial del subsidio", icon: Coins,     short: "Tu potencial", hint: "Máximo a reclamar" },
+  { id: "etapa0",       n: 0, label: "Diagnóstico subsidio", icon: Coins,     short: "Diagnóstico subsidio", hint: "Análisis por RUC" },
   { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
   { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF o imagen · OCR" },

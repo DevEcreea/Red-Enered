@@ -135,7 +135,7 @@ export default function Etapa0Card({ onResumen }) {
         <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 22, alignItems: "start", position: "relative" }}>
           {/* Izquierda: monto y categorías */}
           <div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.18)", padding: "3px 11px", borderRadius: 999, fontSize: 11, fontWeight: 800, letterSpacing: ".05em" }}>MÓDULO 0 · TU POTENCIAL</div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.18)", padding: "3px 11px", borderRadius: 999, fontSize: 11, fontWeight: 800, letterSpacing: ".05em" }}>MÓDULO 0 · DIAGNÓSTICO SUBSIDIO</div>
             <div style={{ fontSize: 13.5, color: "#DDD6FE", marginTop: 12 }}>Máximo del subsidio que puedes reclamar</div>
             <div style={{ fontSize: 40, fontWeight: 800, lineHeight: 1.05, marginTop: 2 }}>{fmtSoles(s.total_monto)}</div>
             <div style={{ fontSize: 13, color: "#DDD6FE", marginTop: 5 }}>Hasta <b style={{ color: "#fff" }}>{fmtNum(s.total_galones)} galones</b> · {s.unidades_con_subsidio} de {s.total_unidades} unidades</div>
