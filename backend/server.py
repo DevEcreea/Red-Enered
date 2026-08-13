@@ -5586,6 +5586,28 @@ async def _sunat_estado(ruc: str):
         return None
 
 
+@api.get("/subsidio/diag-red")
+async def subsidio_diag_red():
+    """Diagnóstico: ¿desde este host se puede llegar al MTC / ATU / SUNAT? (temporal)"""
+    import time as _t, httpx as _hx
+    targets = {
+        "mtc": "https://www.mtc.gob.pe/tramitesenlinea/tweb_tLinea/tw_consultadgtt/Frm_rep_intra_mercancia.aspx",
+        "atu": "https://api.atu.gob.pe/",
+        "sunat": "https://api.apis.net.pe/v1/ruc?numero=20131312955",
+    }
+    out = {}
+    for k, url in targets.items():
+        t = _t.time()
+        try:
+            async with _hx.AsyncClient(timeout=12.0, verify=False,
+                                       headers={"User-Agent": "Mozilla/5.0"}) as c:
+                r = await c.get(url)
+            out[k] = {"ok": True, "status": r.status_code, "ms": int((_t.time() - t) * 1000), "bytes": len(r.content)}
+        except Exception as e:
+            out[k] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:100]}", "ms": int((_t.time() - t) * 1000)}
+    return out
+
+
 @api.get("/subsidio/resumen")
 async def subsidio_resumen(ruc: str):
     """
