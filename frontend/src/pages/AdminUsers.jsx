@@ -94,7 +94,7 @@ export default function AdminUsers() {
               <option value="administrador">Administrador</option>
               <option value="logistica">Logística</option>
               <option value="contabilidad">Contabilidad</option>
-              {!ROLES_ADMIN.includes(form.role) && <option value={form.role}>Cliente (subsidio)</option>}
+              <option value="cliente_subsidio">Cliente (subsidio · multi-empresa)</option>
             </select>
             <select value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} className="h-10 px-3 border border-border rounded-md text-sm md:col-span-2">
               <option value="">— Sin empresa (Admin ENERED) —</option>

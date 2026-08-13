@@ -322,11 +322,14 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
-    role: Literal["admin_enered", "administrador", "logistica", "contabilidad"]
+    role: Literal["admin_enered", "administrador", "logistica", "contabilidad", "cliente_subsidio"]
     empresa: Optional[str] = None
+    ruc: Optional[str] = None
     # Módulos permitidos para miembros del equipo ENERED (admin_enered).
     # None/ausente = acceso total (super-admin). Lista = solo esos módulos.
     permisos: Optional[List[str]] = None
+    # Cliente con varias empresas: lista de {empresa, ruc} que podrá alternar.
+    empresas_asignadas: Optional[List[dict]] = None
 
 
 class UserUpdate(BaseModel):
@@ -881,16 +884,28 @@ async def create_user(data: UserCreate, user: dict = Depends(require_permiso("us
     email = data.email.lower().strip()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Correo ya registrado")
+    asignadas = data.empresas_asignadas or []
+    # Cliente multi-empresa: empresa/ruc principal = el primero de la lista si no vino explícito.
+    empresa = data.empresa or (asignadas[0].get("empresa") if asignadas else None)
+    ruc = data.ruc or (asignadas[0].get("ruc") if asignadas else None)
     doc = {
         "id": str(uuid.uuid4()),
         "email": email,
         "name": data.name,
         "role": data.role,
-        "empresa": data.empresa,
+        "empresa": empresa,
         "permisos": data.permisos,  # None = acceso total; lista = módulos permitidos
         "password_hash": hash_password(data.password),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if data.role == "cliente_subsidio":
+        doc["ruc"] = ruc or ""
+        doc["empresas_asignadas"] = asignadas
+        doc["acceso_etapa0"] = False        # creado por admin → ya habilitado (no arranca en Etapa 0 bloqueado)
+        doc["registrado_etapa0"] = True
+        doc["tipo_cliente"] = "subsidio"
+    elif asignadas:
+        doc["empresas_asignadas"] = asignadas
     await db.users.insert_one(doc)
     doc.pop("password_hash", None)
     doc.pop("_id", None)
