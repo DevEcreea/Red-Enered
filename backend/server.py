@@ -5589,17 +5589,21 @@ async def _sunat_estado(ruc: str):
 @api.get("/subsidio/diag-red")
 async def subsidio_diag_red():
     """Diagnóstico: ¿desde este host se puede llegar al MTC / ATU / SUNAT? (temporal)"""
-    import time as _t, httpx as _hx
+    import os as _os, time as _t, httpx as _hx
+    MTC_URL = "https://www.mtc.gob.pe/tramitesenlinea/tweb_tLinea/tw_consultadgtt/Frm_rep_intra_mercancia.aspx"
     targets = {
-        "mtc": "https://www.mtc.gob.pe/tramitesenlinea/tweb_tLinea/tw_consultadgtt/Frm_rep_intra_mercancia.aspx",
-        "atu": "https://api.atu.gob.pe/",
-        "sunat": "https://api.apis.net.pe/v1/ruc?numero=20131312955",
+        "mtc_directo": (MTC_URL, None),
+        "atu": ("https://api.atu.gob.pe/", None),
+        "sunat": ("https://api.apis.net.pe/v1/ruc?numero=20131312955", None),
     }
-    out = {}
-    for k, url in targets.items():
+    proxy = _os.getenv("MTC_PROXY") or None
+    if proxy:
+        targets["mtc_via_proxy"] = (MTC_URL, proxy)
+    out = {"proxy_configurado": bool(proxy)}
+    for k, (url, px) in targets.items():
         t = _t.time()
         try:
-            async with _hx.AsyncClient(timeout=12.0, verify=False,
+            async with _hx.AsyncClient(timeout=15.0, verify=False, proxy=px,
                                        headers={"User-Agent": "Mozilla/5.0"}) as c:
                 r = await c.get(url)
             out[k] = {"ok": True, "status": r.status_code, "ms": int((_t.time() - t) * 1000), "bytes": len(r.content)}
