@@ -717,6 +717,50 @@ async def upsert_estacion_enered(
     )
     return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio, "cliente": cliente}
 
+
+@api.get("/precios/publico")
+async def precios_publico(combustible: Optional[str] = None):
+    """PÚBLICO (sin login): precios por estación de la Red ENERED, para la página /precios."""
+    docs = await db.estaciones_enered.find({"activa": {"$ne": False}}, {"_id": 0}).to_list(500)
+    nombres = [d.get("nombre_facilito") for d in docs if d.get("nombre_facilito")]
+    pizarra_map = {}
+    if nombres:
+        async for p in db.precios_facilito.find(
+            {"establecimiento": {"$in": nombres}},
+            {"_id": 0, "establecimiento": 1, "combustible": 1, "precio_venta": 1, "precio_pizarra": 1}):
+            key = (p.get("establecimiento", ""), (p.get("combustible") or "").upper())
+            piz = p.get("precio_pizarra") or p.get("precio_venta")
+            if piz:
+                pizarra_map[key] = float(piz)
+
+    out = []
+    for d in docs:
+        precio = (d.get("precios_cliente") or {}).get("GENERAL") or d.get("precio_enered")
+        try:
+            precio = float(precio)
+        except Exception:
+            continue
+        if not precio:
+            continue
+        comb = d.get("combustible") or ""
+        if combustible and combustible.strip().upper() not in comb.upper():
+            continue
+        piz = pizarra_map.get((d.get("nombre_facilito", ""), comb.upper()))
+        out.append({
+            "estacion": d.get("nombre_facilito"), "combustible": comb,
+            "precio_enered": round(precio, 2),
+            "precio_pizarra": round(piz, 2) if piz else None,
+            "ahorro": round(piz - precio, 2) if (piz and piz > precio) else None,
+            "departamento": d.get("departamento") or "", "provincia": d.get("provincia") or "",
+            "distrito": d.get("distrito") or "",
+            "acepta_factura": bool(d.get("acepta_factura", True)),
+            "acepta_tarjeta": bool(d.get("acepta_tarjeta", True)),
+        })
+    out.sort(key=lambda x: (x["combustible"], x["precio_enered"]))
+    combustibles = sorted({o["combustible"] for o in out if o["combustible"]})
+    return {"estaciones": out, "total": len(out), "combustibles": combustibles}
+
+
 app.include_router(api)
 
 

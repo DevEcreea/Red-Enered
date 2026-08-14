@@ -37,6 +37,7 @@ import ConsultaMTC from "./pages/ConsultaMTC";
 import DiagnosticoATU from "./pages/DiagnosticoATU";
 import AdminConexionATU from "./pages/AdminConexionATU";
 import SubsidioPublico from "./pages/SubsidioPublico";
+import PreciosPublico from "./pages/PreciosPublico";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -118,6 +119,7 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
           <Route path="/subsidio" element={<SubsidioPublico />} />
+          <Route path="/precios" element={<PreciosPublico />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
           <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
           <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
