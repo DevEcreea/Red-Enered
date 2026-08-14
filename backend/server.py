@@ -720,45 +720,57 @@ async def upsert_estacion_enered(
 
 @api.get("/precios/publico")
 async def precios_publico(combustible: Optional[str] = None):
-    """PÚBLICO (sin login): precios por estación de la Red ENERED, para la página /precios."""
-    docs = await db.estaciones_enered.find({"activa": {"$ne": False}}, {"_id": 0}).to_list(500)
-    nombres = [d.get("nombre_facilito") for d in docs if d.get("nombre_facilito")]
-    pizarra_map = {}
-    if nombres:
-        async for p in db.precios_facilito.find(
-            {"establecimiento": {"$in": nombres}},
-            {"_id": 0, "establecimiento": 1, "combustible": 1, "precio_venta": 1, "precio_pizarra": 1}):
-            key = (p.get("establecimiento", ""), (p.get("combustible") or "").upper())
-            piz = p.get("precio_pizarra") or p.get("precio_venta")
-            if piz:
-                pizarra_map[key] = float(piz)
+    """PÚBLICO (sin login): TODOS los precios de Facilito (mercado), marcando las estaciones
+    de la Red ENERED con su precio especial (mismo cruce que el módulo admin)."""
+    query = {}
+    if combustible:
+        query["combustible"] = {"$regex": combustible.strip(), "$options": "i"}
+    rows = await db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(1200).to_list(1200)
 
+    # Cruce con estaciones ENERED (mismo criterio que /precios: nombre + combustible normalizado, con fallback difuso).
+    enered_map = {}
+    async for e in db.estaciones_enered.find({"activa": {"$ne": False}}, {"_id": 0}):
+        key_name = (e.get("nombre_facilito") or "").strip().upper()
+        key_comb = normalizar_combustible(e.get("combustible") or "")
+        if key_comb:
+            enered_map[(key_name, key_comb)] = e
+        enered_map[key_name] = e
+
+    REDES = {"REPSOL", "PRIMAX", "PETROPERU", "SHELL", "MOBIL", "PECSA", "TERPEL", "COESTI"}
     out = []
-    for d in docs:
-        precio = (d.get("precios_cliente") or {}).get("GENERAL") or d.get("precio_enered")
-        try:
-            precio = float(precio)
-        except Exception:
-            continue
-        if not precio:
-            continue
-        comb = d.get("combustible") or ""
-        if combustible and combustible.strip().upper() not in comb.upper():
-            continue
-        piz = pizarra_map.get((d.get("nombre_facilito", ""), comb.upper()))
+    for p in rows:
+        comb_norm = normalizar_combustible(p.get("combustible"))
+        nombre_est = (p.get("establecimiento") or p.get("estacion") or "").strip().upper()
+        info = enered_map.get((nombre_est, comb_norm))
+        if not info:
+            for k, val in enered_map.items():
+                if isinstance(k, tuple) and k[1] == comb_norm and (k[0] in nombre_est or nombre_est in k[0]):
+                    info = val
+                    break
+        piz = float(p.get("precio_venta") or p.get("precio_pizarra") or 0) or None
+        precio_e = None
+        if info:
+            pc = info.get("precios_cliente") or {}
+            precio_e = float(pc.get("GENERAL") or info.get("precio_enered") or 0) or None
         out.append({
-            "estacion": d.get("nombre_facilito"), "combustible": comb,
-            "precio_enered": round(precio, 2),
+            "estacion": p.get("establecimiento") or p.get("estacion") or "", "combustible": comb_norm,
             "precio_pizarra": round(piz, 2) if piz else None,
-            "ahorro": round(piz - precio, 2) if (piz and piz > precio) else None,
-            "departamento": d.get("departamento") or "", "provincia": d.get("provincia") or "",
-            "distrito": d.get("distrito") or "",
-            "acepta_factura": bool(d.get("acepta_factura", True)),
-            "acepta_tarjeta": bool(d.get("acepta_tarjeta", True)),
+            "precio_enered": round(precio_e, 2) if precio_e else None,
+            "es_enered": bool(precio_e),
+            "ahorro": round(piz - precio_e, 2) if (piz and precio_e and piz > precio_e) else None,
+            "departamento": p.get("departamento") or "", "provincia": p.get("provincia") or "",
+            "distrito": p.get("distrito") or p.get("ciudad") or "", "direccion": p.get("direccion") or "",
+            "calidad": (5 if precio_e else (4 if any(r in nombre_est for r in REDES) else 2)),
         })
-    out.sort(key=lambda x: (x["combustible"], x["precio_enered"]))
-    combustibles = sorted({o["combustible"] for o in out if o["combustible"]})
-    return {"estaciones": out, "total": len(out), "combustibles": combustibles}
+    # Dedup por (estación, dirección, combustible)
+    seen, dedup = set(), []
+    for o in out:
+        k = (o["estacion"].upper(), (o["direccion"] or "")[:20].upper(), o["combustible"].upper())
+        if k not in seen:
+            seen.add(k); dedup.append(o)
+    dedup.sort(key=lambda x: (not x["es_enered"], x.get("precio_enered") or x.get("precio_pizarra") or 9999))
+    combustibles = sorted({o["combustible"] for o in dedup if o["combustible"]})
+    return {"estaciones": dedup, "total": len(dedup), "enered": sum(1 for o in dedup if o["es_enered"]), "combustibles": combustibles}
 
 
 app.include_router(api)
