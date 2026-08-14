@@ -1,5 +1,7 @@
 import React, { useState } from "react";
+import { Navigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import {
   Search, Loader2, Truck, ShieldCheck, XCircle, CheckCircle2,
   AlertTriangle, Building2, ArrowRight, Coins,
@@ -9,10 +11,15 @@ const fmtSoles = (n) => "S/ " + (Number(n) || 0).toLocaleString("es-PE", { minim
 const fmtNum = (n) => (Number(n) || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function SubsidioPublico() {
+  const { user, checking } = useAuth();
   const [ruc, setRuc] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
+
+  // Un cliente ya logueado no debe ver la landing pública: va a su Mi Flota.
+  if (checking) return null;
+  if (user && user.role === "cliente_subsidio") return <Navigate to="/subsidio/documentos" replace />;
 
   async function consultar() {
     const r = ruc.trim();
