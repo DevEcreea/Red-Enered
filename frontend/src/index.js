@@ -9,3 +9,10 @@ root.render(
     <App />
   </>,
 );
+
+// PWA: registra el service worker para que la app sea instalable en celular/escritorio.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
