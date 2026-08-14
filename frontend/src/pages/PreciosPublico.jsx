@@ -14,8 +14,16 @@ export default function PreciosPublico() {
   const [comb, setComb] = useState("");
   const [q, setQ] = useState("");
   const [soloEnered, setSoloEnered] = useState(false);
+  const [dep, setDep] = useState("");
+  const [prov, setProv] = useState("");
+  const [dist, setDist] = useState("");
   const [page, setPage] = useState(1);
   const pageSize = 25;
+
+  const uniq = (arr) => [...new Set(arr.map((x) => (x || "").trim()).filter(Boolean))].sort();
+  const departamentos = useMemo(() => uniq(data.map((e) => e.departamento)), [data]);
+  const provincias = useMemo(() => uniq(data.filter((e) => !dep || e.departamento === dep).map((e) => e.provincia)), [data, dep]);
+  const distritos = useMemo(() => uniq(data.filter((e) => (!dep || e.departamento === dep) && (!prov || e.provincia === prov)).map((e) => e.distrito)), [data, dep, prov]);
 
   useEffect(() => {
     let alive = true;
@@ -30,14 +38,17 @@ export default function PreciosPublico() {
   const filtradas = useMemo(() => data.filter((e) => {
     if (soloEnered && !e.es_enered) return false;
     if (comb && e.combustible !== comb) return false;
+    if (dep && e.departamento !== dep) return false;
+    if (prov && e.provincia !== prov) return false;
+    if (dist && e.distrito !== dist) return false;
     if (q) {
       const t = q.toLowerCase();
       if (!`${e.estacion} ${e.departamento} ${e.provincia} ${e.distrito} ${e.direccion}`.toLowerCase().includes(t)) return false;
     }
     return true;
-  }), [data, comb, q, soloEnered]);
+  }), [data, comb, q, soloEnered, dep, prov, dist]);
 
-  useEffect(() => { setPage(1); }, [comb, q, soloEnered]);
+  useEffect(() => { setPage(1); }, [comb, q, soloEnered, dep, prov, dist]);
   const totalPages = Math.max(1, Math.ceil(filtradas.length / pageSize));
   const pageRows = filtradas.slice((page - 1) * pageSize, page * pageSize);
   const ciudad = (e) => [e.distrito, e.provincia, e.departamento].filter(Boolean)[0] || "—";
@@ -77,11 +88,30 @@ export default function PreciosPublico() {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar estación o ciudad…"
               style={{ width: "100%", padding: "10px 12px 10px 34px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, boxSizing: "border-box" }} />
           </div>
+          <select value={dep} onChange={(e) => { setDep(e.target.value); setProv(""); setDist(""); }}
+            style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 150 }}>
+            <option value="">Todo departamento</option>
+            {departamentos.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={prov} onChange={(e) => { setProv(e.target.value); setDist(""); }} disabled={!provincias.length}
+            style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 150, opacity: provincias.length ? 1 : 0.5 }}>
+            <option value="">Toda provincia</option>
+            {provincias.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={dist} onChange={(e) => setDist(e.target.value)} disabled={!distritos.length}
+            style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 150, opacity: distritos.length ? 1 : 0.5 }}>
+            <option value="">Todo distrito</option>
+            {distritos.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
           <select value={comb} onChange={(e) => setComb(e.target.value)}
-            style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 190 }}>
+            style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 14, fontWeight: 600, color: "#374151", minWidth: 170 }}>
             <option value="">Todos los combustibles</option>
             {combustibles.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          {(dep || prov || dist || comb || q || soloEnered) && (
+            <button onClick={() => { setDep(""); setProv(""); setDist(""); setComb(""); setQ(""); setSoloEnered(false); }}
+              style={{ padding: "10px 12px", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 13, fontWeight: 700, color: "#6b7280", background: "#fff", cursor: "pointer" }}>Limpiar</button>
+          )}
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#5B21B6", cursor: "pointer" }}>
             <input type="checkbox" checked={soloEnered} onChange={(e) => setSoloEnered(e.target.checked)} style={{ accentColor: "#7C3AED", width: 15, height: 15 }} />
             Solo Red ENERED
