@@ -22,9 +22,9 @@ const PASOS_CARGA = [
   { p: 92, t: "Calculando tu potencial…", d: "Aplicando los topes por categoría" },
 ];
 
-export default function Etapa0Card({ onResumen }) {
+export default function Etapa0Card({ onResumen, ruc: rucProp }) {
   const { user } = useAuth();
-  const ruc = user?.ruc;
+  const ruc = rucProp || user?.ruc;   // rucProp: uso público en /subsidio (sin login)
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [paso, setPaso] = useState(0);
@@ -86,7 +86,7 @@ export default function Etapa0Card({ onResumen }) {
   // Sin unidades en el MTC: no mostramos ceros que parecen error, sino un aviso claro + soporte.
   const sinUnidades = (data.subsidio?.total_unidades || 0) === 0 && !((data.requisitos || []).some((r) => r.codigo === "permiso_mtc" && r.cumple));
   if (sinUnidades) {
-    const wsp = encodeURIComponent(`Hola ENERED, soy ${user?.empresa || ""} (RUC ${ruc}). No aparecen mis unidades en el MTC y quiero que me ayuden a revisar mi caso para el subsidio.`);
+    const wsp = encodeURIComponent(`Hola ENERED, soy ${user?.empresa || data?.razon_social || ""} (RUC ${ruc}). No aparecen mis unidades en el MTC y quiero que me ayuden a revisar mi caso para el subsidio.`);
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ background: "#fff", border: "1px solid #FDE68A", borderLeft: "5px solid #F59E0B", borderRadius: 16, padding: 22 }}>
@@ -95,7 +95,7 @@ export default function Etapa0Card({ onResumen }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 900, fontSize: 17, color: "#92400E" }}>No encontramos tus unidades en el MTC</div>
               <div style={{ fontSize: 13.5, color: "#78350F", marginTop: 5, lineHeight: 1.5 }}>
-                Con el RUC <b>{ruc}</b> ({user?.empresa}) no aparecen autorizaciones de transporte en el registro que consultamos.
+                Con el RUC <b>{ruc}</b> ({user?.empresa || data?.razon_social}) no aparecen autorizaciones de transporte en el registro que consultamos.
                 Esto suele pasar cuando las unidades están a nombre de <b>otro RUC</b>, o cuando el servicio está en <b>otro tipo de registro</b> del MTC.
                 No te preocupes: lo revisamos contigo directamente.
               </div>
@@ -123,8 +123,8 @@ export default function Etapa0Card({ onResumen }) {
       }));
   const wspMsg = encodeURIComponent(
     data.inscrito
-      ? `Hola ENERED, soy ${user?.empresa || ""} (RUC ${ruc}). Ya estoy inscrito en la ATU y quiero armar mi expediente para reclamar mi subsidio (hasta ${fmtSoles(s.total_monto)}).`
-      : `Hola ENERED, soy ${user?.empresa || ""} (RUC ${ruc}). Aún NO estoy inscrito en la ATU y quiero registrarme y armar mi expediente para reclamar mi subsidio (hasta ${fmtSoles(s.total_monto)}).`
+      ? `Hola ENERED, soy ${user?.empresa || data?.razon_social || ""} (RUC ${ruc}). Ya estoy inscrito en la ATU y quiero armar mi expediente para reclamar mi subsidio (hasta ${fmtSoles(s.total_monto)}).`
+      : `Hola ENERED, soy ${user?.empresa || data?.razon_social || ""} (RUC ${ruc}). Aún NO estoy inscrito en la ATU y quiero registrarme y armar mi expediente para reclamar mi subsidio (hasta ${fmtSoles(s.total_monto)}).`
   );
 
   return (
