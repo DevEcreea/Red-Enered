@@ -725,7 +725,7 @@ async def precios_publico(combustible: Optional[str] = None):
     query = {}
     if combustible:
         query["combustible"] = {"$regex": combustible.strip(), "$options": "i"}
-    rows = await db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(1200).to_list(1200)
+    rows = await db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(6000).to_list(6000)
 
     # Cruce con estaciones ENERED (mismo criterio que /precios: nombre + combustible normalizado, con fallback difuso).
     enered_map = {}
@@ -761,6 +761,8 @@ async def precios_publico(combustible: Optional[str] = None):
             "departamento": p.get("departamento") or "", "provincia": p.get("provincia") or "",
             "distrito": p.get("distrito") or p.get("ciudad") or "", "direccion": p.get("direccion") or "",
             "calidad": (5 if precio_e else (4 if any(r in nombre_est for r in REDES) else 2)),
+            "acepta_factura": bool(precio_e or p.get("acepta_factura")),
+            "acepta_tarjeta": bool(precio_e or p.get("acepta_tarjeta")),
         })
     # Dedup por (estación, dirección, combustible)
     seen, dedup = set(), []
