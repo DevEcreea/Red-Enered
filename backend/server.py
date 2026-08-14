@@ -764,10 +764,11 @@ async def precios_publico(combustible: Optional[str] = None):
             "acepta_factura": bool(precio_e or p.get("acepta_factura")),
             "acepta_tarjeta": bool(precio_e or p.get("acepta_tarjeta")),
         })
-    # Dedup por (estación, dirección, combustible)
+    # Dedup por (estación, dirección COMPLETA, distrito, combustible). Antes usaba dirección[:20]
+    # y colapsaba sedes distintas de una misma cadena (mismo prefijo de dirección) → grifos perdidos.
     seen, dedup = set(), []
     for o in out:
-        k = (o["estacion"].upper(), (o["direccion"] or "")[:20].upper(), o["combustible"].upper())
+        k = (o["estacion"].upper(), (o["direccion"] or "").strip().upper(), (o["distrito"] or "").upper(), o["combustible"].upper())
         if k not in seen:
             seen.add(k); dedup.append(o)
     dedup.sort(key=lambda x: (not x["es_enered"], x.get("precio_enered") or x.get("precio_pizarra") or 9999))
