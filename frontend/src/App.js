@@ -89,12 +89,11 @@ function DashboardRouter() {
   return <Dashboard />;
 }
 
-/** Redirección raíz: cliente solo-subsidio → Panel Subsidio; el resto → Dashboard. */
+/** Redirección raíz: cliente de subsidio → Mi Flota (su vista principal); el resto → Dashboard. */
 function RootRedirect() {
   const { user } = useAuth();
-  const s = user?.servicios || {};
-  if (user?.role === "cliente_subsidio" && !s.plataforma && !s.combustible && !s.gps) {
-    return <Navigate to="/dashboard-subsidio" replace />;
+  if (user?.role === "cliente_subsidio") {
+    return <Navigate to="/subsidio/documentos" replace />;
   }
   return <Navigate to="/dashboard" replace />;
 }
