@@ -96,6 +96,37 @@ def _create_refresh_token(user_id: str) -> str:
     return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
+def _create_guest_token(ruc: str, empresa: str) -> str:
+    """Token de sesión INVITADA para el diagnóstico (/subsidio): lleva el RUC, NO persiste usuario."""
+    payload = {
+        "type": "guest_subsidio", "ruc": ruc, "empresa": empresa,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=8),
+    }
+    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def _guest_user_from_payload(payload: dict) -> dict:
+    """Usuario sintético (no existe en BD) para una sesión invitada del subsidio."""
+    ruc = payload.get("ruc", "")
+    empresa = payload.get("empresa") or f"RUC {ruc}"
+    return {
+        "id": f"guest:{ruc}", "email": f"{ruc}@invitado.subsidio", "name": empresa,
+        "role": "cliente_subsidio", "empresa": empresa, "ruc": ruc,
+        "acceso_etapa0": True, "registrado_etapa0": False, "es_guest": True,
+        "documentos_completos": False, "permisos": None, "tipo_cliente": "subsidio",
+    }
+
+
+def _guest_public(u: dict) -> dict:
+    return {
+        "id": u["id"], "email": u["email"], "name": u.get("name"), "role": "cliente_subsidio",
+        "empresa": u.get("empresa"), "ruc": u.get("ruc"),
+        "acceso_etapa0": True, "registrado_etapa0": False, "es_guest": True,
+        "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+        "tipo_cliente": "subsidio", "empresas_asignadas": [], "empresa_activa": u.get("empresa"),
+    }
+
+
 def _set_auth_cookies(response: Response, access: str, refresh: str):
     response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none",
                         max_age=60 * 60 * 8, path="/")
@@ -115,6 +146,8 @@ async def _get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") == "guest_subsidio":
+            return _guest_user_from_payload(payload)   # sesión invitada: no existe en BD
         if payload.get("type") != "access":
             raise HTTPException(status_code=401, detail="Token inválido")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
@@ -509,48 +542,22 @@ async def _sunat_nombre(ruc: str) -> str:
 @subsidio_router.post("/subsidio/entrar")
 async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
     """
-    Entrada a la plataforma con SOLO el RUC (Etapa 0). Encuentra o crea una cuenta
-    liviana de cliente_subsidio y lo deja logueado en Mi Flota. La contraseña se crea
-    después, cuando pase a la Etapa 1.
+    Entrada a la plataforma con SOLO el RUC (Etapa 0), como SESIÓN INVITADA:
+    NO crea ningún usuario ni empresa en la BD (evita ensuciar la plataforma por cada
+    búsqueda). Emite un token temporal que lleva el RUC; el cliente ve su Mi Flota con
+    la Etapa 0 y los 5 módulos (bloqueados). La cuenta real se crea desde el admin.
     """
     ruc = (payload.ruc or "").strip()
-    u = await db.users.find_one({"ruc": ruc, "role": "cliente_subsidio"})
-    if not u:
-        empresa_name = (await _sunat_nombre(ruc)) or f"RUC {ruc}"
-        if not await db.empresas_config.find_one({"empresa": empresa_name}):
-            await db.empresas_config.insert_one({
-                "id": str(uuid.uuid4()), "empresa": empresa_name, "ruc": ruc,
-                "plan": "subsidio", "tipo_cliente": "subsidio",
-                "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
-                "linea_credito": 0, "unidades_contratadas": 0, "dias_credito": 0,
-                "canal_origen": "landing_subsidio",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-        uid = str(uuid.uuid4())
-        u = {
-            "id": uid, "email": f"{ruc}@subsidio.enered.pe", "name": empresa_name,
-            "password_hash": _hash_pw(uuid.uuid4().hex),  # sin contraseña usable aún
-            "role": "cliente_subsidio", "empresa": empresa_name, "ruc": ruc,
-            "documentos_completos": False, "acceso_etapa0": True,
-            "canal_origen": "landing_subsidio",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        await db.users.insert_one(u)
-    u.pop("_id", None)
-
-    access = _create_access_token(u["id"], u["email"], "cliente_subsidio", u["empresa"])
-    refresh = _create_refresh_token(u["id"])
-    _set_auth_cookies(response, access, refresh)
-    response.headers["X-Access-Token"] = access
-    return {
-        "user": {"id": u["id"], "email": u["email"], "name": u.get("name"), "role": "cliente_subsidio",
-                 "empresa": u["empresa"], "ruc": ruc,
-                 "acceso_etapa0": u.get("acceso_etapa0", True),          # valor real (registrado → False)
-                 "registrado_etapa0": u.get("registrado_etapa0", False),
-                 "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
-                 "tipo_cliente": "subsidio"},
-        "access_token": access,
-    }
+    if not _re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
+    empresa_name = (await _sunat_nombre(ruc)) or f"RUC {ruc}"
+    token = _create_guest_token(ruc, empresa_name)
+    # Cookie de acceso (sin refresh: la sesión invitada dura 8h y no se renueva).
+    response.set_cookie("access_token", token, httponly=True, secure=True, samesite="none",
+                        max_age=8 * 3600, path="/")
+    response.headers["X-Access-Token"] = token
+    return {"user": _guest_public(_guest_user_from_payload({"ruc": ruc, "empresa": empresa_name})),
+            "access_token": token}
 
 
 @subsidio_router.post("/subsidio/registro-etapa0")

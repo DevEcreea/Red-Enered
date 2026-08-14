@@ -150,6 +150,7 @@ def user_public(u: dict) -> dict:
         "ruc": u.get("ruc", ""),
         "acceso_etapa0": u.get("acceso_etapa0", False),
         "registrado_etapa0": u.get("registrado_etapa0", False),
+        "es_guest": u.get("es_guest", False),
         # Multi-empresa: lista de empresas que puede alternar y cuál está activa.
         "empresas_asignadas": u.get("empresas_asignadas", []),
         "empresa_activa": u.get("_empresa_activa") or u.get("empresa"),
@@ -167,6 +168,12 @@ def user_public(u: dict) -> dict:
 async def user_public_with_servicios(u: dict) -> dict:
     """Igual que user_public pero enriquecido con servicios de la empresa."""
     base = user_public(u)
+    # Sesión invitada del subsidio: solo subsidio, sin plataforma (sidebar recortado a 5 módulos).
+    if u.get("es_guest"):
+        base["servicios"] = {"plataforma": False, "combustible": False, "gps": False, "subsidio": True}
+        base["tipo_cliente"] = "subsidio"
+        base["wialon_configurado"] = False
+        return base
     # admin_enered no está atado a una empresa; tiene todos los servicios habilitados por default
     if u.get("role") == "admin_enered":
         base["servicios"] = {"plataforma": True, "combustible": True, "gps": True, "subsidio": True}
@@ -213,6 +220,14 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="No autenticado")
     try:
         payload = jwt.decode(token, get_jwt_secret(), algorithms=[JWT_ALGORITHM])
+        if payload.get("type") == "guest_subsidio":
+            # Sesión invitada del subsidio (no existe en BD): usuario sintético.
+            _rc = payload.get("ruc", "")
+            _emp = payload.get("empresa") or f"RUC {_rc}"
+            return {"id": f"guest:{_rc}", "email": f"{_rc}@invitado.subsidio", "name": _emp,
+                    "role": "cliente_subsidio", "empresa": _emp, "ruc": _rc,
+                    "acceso_etapa0": True, "registrado_etapa0": False, "es_guest": True,
+                    "documentos_completos": False, "permisos": None}
         if payload.get("type") != "access":
             raise HTTPException(status_code=401, detail="Token inválido")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
