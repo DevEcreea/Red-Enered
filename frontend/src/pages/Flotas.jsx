@@ -14,6 +14,7 @@ import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/
 import PdfViewerModal from "../components/PdfViewerModal";
 import * as XLSX from "xlsx";
 import TabPrecios from "../components/TabPrecios";
+import { exportarReporteEnered } from "../lib/reporteConsumo";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const HEADER_BG = "#241B4A";
@@ -439,40 +440,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
             <Download
               style={{ width:18,height:18,cursor:"pointer",color:"#8B3DFF" }}
               title="Descargar Excel"
-              onClick={() => {
-                const data = filteredRows.map(r => {
-                  const km = r.KILOMETRAJE ? parseFloat(r.KILOMETRAJE) : 0;
-                  const galones = parseFloat(r.CANTIDAD_GL || 0);
-                  const importe = parseFloat(r.IMPORTE_TOTAL || 0);
-                  const precio = galones > 0 ? importe / galones : 0;
-                  const ahorro = parseFloat(r.AHORRO || 0);
-                  const fecha = new Date(r.FECHA_TRANSACCION).toLocaleString("es-PE", {
-                    day: "2-digit", month: "2-digit", year: "numeric",
-                    hour: "2-digit", minute: "2-digit", hour12: false
-                  });
-
-                  const baseRow = {
-                    "Placa": r.PLACA || "—",
-                    ...(isAdmin ? { "Empresa": r.EMPRESA || "—" } : {}),
-                    "Fecha y Hora": fecha,
-                    "Red": r._origen === "subsidio" ? (r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor Externo") : "Enered",
-                    "Ciudad / Estación": `${r.CIUDAD||""} / ${r.ESTACION||""}`,
-                    "Kilometraje": km ? `${km} km` : "—",
-                    "Producto": r.COMBUSTIBLE || r.PRODUCTO || "—",
-                    "Galones": galones > 0 ? galones.toFixed(2) : "—",
-                    "Precio (S/)": precio > 0 ? precio.toFixed(2) : "—",
-                    "Importe (S/)": importe > 0 ? importe.toFixed(2) : "—",
-                    "Ahorro (S/)": (showAhorro && ahorro > 0) ? ahorro.toFixed(2) : "0.00",
-                    "Factura/Doc": r.NUMERO_DOCUMENTO || "—",
-                    "Conductor": r.CONDUCTOR || "—"
-                  };
-                  return baseRow;
-                });
-                const ws = XLSX.utils.json_to_sheet(data);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "Consumos");
-                XLSX.writeFile(wb, "Consumos_Combustible.xlsx");
-              }}
+              onClick={() => { exportarReporteEnered(filteredRows, { isAdmin, showAhorro }); }}
             />
             {!showAhorro && (
               <button
