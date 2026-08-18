@@ -540,24 +540,34 @@ async def _sunat_nombre(ruc: str) -> str:
     return ""
 
 
+_FICHA_CACHE = {}  # ruc -> (timestamp, ficha) — evita pegarle a SUNAT en cada carga del dashboard
+
+
 async def _sunat_ficha(ruc: str) -> Optional[dict]:
     """
     Consulta pública de SUNAT para validar la Ficha RUC sin que el cliente suba nada.
     Devuelve {nombre, estado, condicion, direccion, activo_habido} o None si no responde.
+    Con caché en memoria (10 min): el estado del RUC no cambia de un minuto a otro.
     """
     ruc = (ruc or "").strip()
     if not _re.fullmatch(r"\d{11}", ruc):
         return None
+    import time as _t
+    _hit = _FICHA_CACHE.get(ruc)
+    if _hit and (_t.time() - _hit[0]) < 600:
+        return _hit[1]
     try:
         async with httpx.AsyncClient(timeout=12.0, verify=False,
                                      headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
             r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
             if r.status_code in (404, 422):
                 # El RUC no existe en SUNAT (distinto de "el servicio no responde").
-                return {"ruc": ruc, "nombre": "", "estado": "NO EXISTE", "condicion": "",
-                        "direccion": "", "activo_habido": False, "no_encontrado": True,
-                        "verificado_en": datetime.now(timezone.utc).isoformat(),
-                        "fuente": "SUNAT (consulta pública)"}
+                ficha = {"ruc": ruc, "nombre": "", "estado": "NO EXISTE", "condicion": "",
+                         "direccion": "", "activo_habido": False, "no_encontrado": True,
+                         "verificado_en": datetime.now(timezone.utc).isoformat(),
+                         "fuente": "SUNAT (consulta pública)"}
+                _FICHA_CACHE[ruc] = (_t.time(), ficha)
+                return ficha
             if r.status_code != 200:
                 return None
             d = r.json()
@@ -569,7 +579,7 @@ async def _sunat_ficha(ruc: str) -> Optional[dict]:
     ubicacion = " / ".join([p for p in [(d.get("distrito") or "").strip(),
                                         (d.get("provincia") or "").strip(),
                                         (d.get("departamento") or "").strip()] if p])
-    return {
+    ficha = {
         "ruc": ruc,
         "nombre": (d.get("nombre") or "").strip(),
         "estado": estado,
@@ -584,6 +594,8 @@ async def _sunat_ficha(ruc: str) -> Optional[dict]:
         "verificado_en": datetime.now(timezone.utc).isoformat(),
         "fuente": "SUNAT (consulta pública)",
     }
+    _FICHA_CACHE[ruc] = (_t.time(), ficha)
+    return ficha
 
 
 @subsidio_router.post("/subsidio/entrar")
@@ -622,13 +634,42 @@ async def registro_etapa0(payload: RegistroEtapa0In, request: Request, response:
     dup = await db.users.find_one({"email": email, "id": {"$ne": current["id"]}})
     if dup:
         raise HTTPException(status_code=409, detail="Ese correo ya está registrado. Usa otro o inicia sesión.")
-    await db.users.update_one({"id": current["id"]}, {"$set": {
-        "email": email,
-        "password_hash": _hash_pw(payload.password),
-        "acceso_etapa0": False,          # ya registrado → puede avanzar a Etapa 1
-        "registrado_etapa0": True,
-        "registro_etapa0_at": datetime.now(timezone.utc).isoformat(),
-    }})
+
+    if current.get("es_guest"):
+        # Sesión invitada (entró solo con su RUC): el usuario NO existe todavía → se crea aquí.
+        # Si ese RUC ya tiene una cuenta creada, no se pisa: que inicie sesión con su correo.
+        ruc = current.get("ruc") or ""
+        ya = await db.users.find_one({"ruc": ruc, "role": "cliente_subsidio", "es_guest": {"$ne": True}})
+        if ya:
+            raise HTTPException(status_code=409,
+                                detail=f"Este RUC ya tiene una cuenta ENERED ({ya.get('email')}). Inicia sesión con ese correo.")
+        nuevo = {
+            "id": str(uuid.uuid4()),
+            "email": email,
+            "password_hash": _hash_pw(payload.password),
+            "name": current.get("empresa") or f"RUC {ruc}",
+            "role": "cliente_subsidio",
+            "empresa": current.get("empresa") or f"RUC {ruc}",
+            "ruc": ruc,
+            "tipo_cliente": "subsidio",
+            "servicios": {"plataforma": False, "combustible": False, "gps": False, "subsidio": True},
+            "acceso_etapa0": False,          # ya registrado → puede avanzar a Etapa 1
+            "registrado_etapa0": True,
+            "registro_etapa0_at": datetime.now(timezone.utc).isoformat(),
+            "documentos_completos": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "origen": "registro_etapa0_invitado",
+        }
+        await db.users.insert_one(nuevo)
+        current = {"id": nuevo["id"]}
+    else:
+        await db.users.update_one({"id": current["id"]}, {"$set": {
+            "email": email,
+            "password_hash": _hash_pw(payload.password),
+            "acceso_etapa0": False,          # ya registrado → puede avanzar a Etapa 1
+            "registrado_etapa0": True,
+            "registro_etapa0_at": datetime.now(timezone.utc).isoformat(),
+        }})
     u = await db.users.find_one({"id": current["id"]}, {"_id": 0, "password_hash": 0})
     # Reemitir tokens con el correo nuevo
     access = _create_access_token(u["id"], email, "cliente_subsidio", u.get("empresa"))

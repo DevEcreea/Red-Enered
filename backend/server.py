@@ -5751,18 +5751,22 @@ def _detalle_ruc(ruc_activo, sunat):
 
 
 async def _sunat_estado(ruc: str):
-    """Consulta pública de SUNAT (estado ACTIVO/BAJA y condición HABIDO/NO HABIDO)."""
-    try:
-        import httpx as _hx
-        async with _hx.AsyncClient(timeout=12.0, verify=False,
-                                   headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
-            r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
-            if r.status_code != 200:
-                return None
-            d = r.json()
-            return {"estado": d.get("estado"), "condicion": d.get("condicion"), "nombre": d.get("nombre")}
-    except Exception:
-        return None
+    """Consulta pública de SUNAT (estado ACTIVO/BAJA y condición HABIDO/NO HABIDO).
+    Reintenta una vez: la API pública a veces tarda o devuelve un error transitorio."""
+    import httpx as _hx
+    for intento in range(2):
+        try:
+            async with _hx.AsyncClient(timeout=6.0, verify=False,
+                                       headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
+                r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
+                if r.status_code != 200:
+                    continue
+                d = r.json()
+                return {"estado": d.get("estado"), "condicion": d.get("condicion"), "nombre": d.get("nombre")}
+        except Exception:
+            if intento == 0:
+                await asyncio.sleep(0.5)
+    return None
 
 
 @api.get("/subsidio/diag-red")
@@ -5792,10 +5796,11 @@ async def subsidio_diag_red():
 
 
 @api.get("/subsidio/resumen")
-async def subsidio_resumen(ruc: str):
+async def subsidio_resumen(ruc: str, refresh: int = 0):
     """
     Etapa 0 pública: con solo el RUC devuelve el máximo a reclamar del subsidio (por categoría
     de unidad, desde el MTC), las unidades con su cumple/no-cumple en la ATU, y el semáforo ATU.
+    Con refresh=1 se salta el caché (lo usa el frontend para re-verificar fuentes pendientes).
     """
     ruc = (ruc or "").strip()
     if not re.fullmatch(r"\d{11}", ruc):
@@ -5806,7 +5811,7 @@ async def subsidio_resumen(ruc: str):
     import time as _time
     _now = _time.time()
     _hit = _RESUMEN_CACHE.get(ruc)
-    if _hit and (_now - _hit[0]) < _hit[2]:
+    if _hit and (_now - _hit[0]) < _hit[2] and not refresh:
         return _hit[1]
 
     # 1) MTC: unidades + categorías + razón social (fuente de "todas tus unidades").
@@ -5868,7 +5873,7 @@ async def subsidio_resumen(ruc: str):
         await asyncio.gather(
             _guard(_fetch_mtc(), ("", [], False), secs=40),   # empresas grandes: muchas autorizaciones
             _guard(_fetch_atu(), (False, False, {}), secs=25),
-            _guard(_sunat_estado(ruc), None, secs=10),
+            _guard(_sunat_estado(ruc), None, secs=14),
         )
     semaforo = []  # el de la ATU ya no se usa; se arma más abajo
 
@@ -6046,10 +6051,10 @@ async def subsidio_resumen(ruc: str):
         "unidades": unidades,
         "semaforo": semaforo,
     }
-    # Guardar en caché: 15 min SOLO si el resultado es "bueno" (MTC trajo unidades y la ATU
-    # respondió). Si el MTC vino vacío (posible truncación/lentitud), 60 s para reintentar pronto
-    # y no dejar pegado un "0 unidades" falso.
-    _bueno = bool(mtc_unidades) and atu_disponible
+    # Guardar en caché: 15 min SOLO si el resultado es "bueno" (MTC trajo unidades, la ATU
+    # respondió Y SUNAT respondió). Si alguna fuente falló, 60 s para reintentar pronto y no
+    # dejar pegado un "0 unidades" o un "RUC por verificar" falsos.
+    _bueno = bool(mtc_unidades) and atu_disponible and (sunat is not None)
     _RESUMEN_CACHE[ruc] = (_now, payload, 900 if _bueno else 60)
     return payload
 

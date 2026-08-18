@@ -305,7 +305,12 @@ export default function SubsidioDocumentos() {
 
       {/* CONTENIDO de la etapa activa */}
       {activeEtapa === "etapa0" ? (
-        <Etapa0Card onResumen={(res) => setEstimadoResumen(res?.subsidio?.total_monto ?? null)} />
+        <>
+          <Etapa0Card onResumen={(res) => setEstimadoResumen(res?.subsidio?.total_monto ?? null)} />
+          {(user?.es_guest || user?.acceso_etapa0 === true) && !user?.registrado_etapa0 && (
+            <RegistroEtapa0Card user={user} setUser={setUser} onDone={load} />
+          )}
+        </>
       ) : (
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
         {activeEtapa === "empresa" && (
@@ -564,6 +569,85 @@ function BankAccountCard({ bank, evidencia = [], onSaved }) {
         </button>
       </div>
       <style>{FIELD_CSS}</style>
+    </div>
+  );
+}
+
+/* ============================================================ */
+/* Etapa 0 — Crear usuario ENERED (debajo del diagnóstico)       */
+/* ============================================================ */
+function RegistroEtapa0Card({ user, setUser, onDone }) {
+  const [email, setEmail] = useState("");
+  const [pass, setPass] = useState("");
+  const [pass2, setPass2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const registrar = async () => {
+    setErr("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setErr("Escribe un correo válido"); return; }
+    if (pass.length < 8) { setErr("La contraseña debe tener al menos 8 caracteres"); return; }
+    if (pass !== pass2) { setErr("Las contraseñas no coinciden"); return; }
+    setBusy(true);
+    try {
+      const { data } = await api.post("/subsidio/registro-etapa0", { email, password: pass });
+      if (data.access_token) localStorage.setItem("enered_token", data.access_token);
+      if (data.user) setUser?.(data.user);
+      onDone?.();
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "No se pudo crear tu usuario. Intenta de nuevo.");
+      setBusy(false);
+    }
+  };
+
+  const inp = "w-full h-11 px-4 border border-neutral-300 rounded-xl text-sm focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10";
+  return (
+    <div className="mt-5 bg-white border-2 border-brand/25 rounded-2xl p-6 shadow-sm relative overflow-hidden" data-testid="registro-etapa0">
+      <div className="absolute -right-8 -top-8 opacity-[0.05]"><ShieldCheck className="w-40 h-40 text-brand" /></div>
+      <div className="relative">
+        <div className="text-[11px] font-bold uppercase tracking-widest text-brand">Guarda tu diagnóstico</div>
+        <h3 className="font-cabinet font-black text-xl text-neutral-900 mt-1">Crea tu usuario ENERED y sigue con tu expediente</h3>
+        <p className="text-sm text-neutral-500 mt-1 max-w-2xl">
+          Con tu correo y una contraseña desbloqueas las siguientes etapas: subir tus documentos,
+          tus facturas de combustible y dejar tu expediente listo para la ATU.
+        </p>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-3xl">
+          <div>
+            <label className="block text-[11px] font-bold text-neutral-600 mb-1">Tu correo</label>
+            <input type="email" className={inp} value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="tucorreo@empresa.com" autoComplete="email" data-testid="reg-e0-email" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-neutral-600 mb-1">Contraseña (mín. 8)</label>
+            <input type="password" className={inp} value={pass} onChange={(e) => setPass(e.target.value)}
+              placeholder="••••••••" autoComplete="new-password" data-testid="reg-e0-pass" />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold text-neutral-600 mb-1">Repite la contraseña</label>
+            <input type="password" className={inp} value={pass2} onChange={(e) => setPass2(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && registrar()} placeholder="••••••••" autoComplete="new-password" data-testid="reg-e0-pass2" />
+          </div>
+        </div>
+
+        {err && (
+          <div className="mt-3 text-sm text-red-600 font-semibold flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4" /> {err}
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center gap-4 flex-wrap">
+          <button onClick={registrar} disabled={busy}
+            className="btn-brand px-6 py-3 rounded-xl text-sm font-bold flex items-center gap-2 disabled:opacity-60"
+            data-testid="reg-e0-submit">
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {busy ? "Creando tu cuenta…" : "Crear mi usuario y continuar"}
+          </button>
+          <div className="text-xs text-neutral-400">
+            Tu empresa: <b className="text-neutral-600">{user?.empresa}</b> · RUC {user?.ruc}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

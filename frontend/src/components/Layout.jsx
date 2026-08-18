@@ -22,6 +22,8 @@ const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contab
 const MENU = [
   {
     label: "Subsidios", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-subsidios",
+    // Clic en el grupo → abre directo el DU-004 (el 007 aún no está activo); la flecha despliega.
+    clickTo: "/subsidio/documentos",
     submenu: [
       { to: "/subsidio/documentos", label: "DU - 004", testid: "nav-du004" },
       { to: "/subsidio/du007", label: "DU - 007 🔒", testid: "nav-du007" },
@@ -89,6 +91,7 @@ const ROUTE_TITLES = {
 function SidebarLink({ item, onClick, isCollapsed }) {
   const Ic = item.icon;
   const location = useLocation();
+  const navigate = useNavigate();
   const [expanded, setExpanded] = React.useState(false);
   const hasSubmenu = item.submenu && item.submenu.length > 0;
   const isSubmenuActive = hasSubmenu && item.submenu.some(sub => location.pathname === sub.to);
@@ -125,7 +128,9 @@ function SidebarLink({ item, onClick, isCollapsed }) {
         </span>
       )}
       {hasSubmenu && (
-        <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-opacity duration-300 ${
+        <ChevronDown
+          onClick={item.clickTo ? (e) => { e.stopPropagation(); setExpanded(!expanded); } : undefined}
+          className={`w-4 h-4 flex-shrink-0 transition-opacity duration-300 ${
           isCollapsed ? "opacity-0 pointer-events-none" : "opacity-100"
         } ${expanded ? "rotate-180" : ""} ${active || isSubmenuActive ? "text-cyan-300" : "text-white/70"}`} />
       )}
@@ -146,7 +151,12 @@ function SidebarLink({ item, onClick, isCollapsed }) {
     return (
       <div>
         <button
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => {
+            // Con clickTo, el clic en el grupo navega directo (p. ej. Subsidios → DU-004);
+            // la flecha es la que despliega/contrae. Sin clickTo, el clic solo despliega.
+            if (item.clickTo) { setExpanded(true); navigate(item.clickTo); onClick?.(); }
+            else setExpanded(!expanded);
+          }}
           data-testid={item.testid}
           className={`${baseCls} w-full ${isSubmenuActive ? "bg-white/15" : "hover:bg-white/10"}`}
         >
@@ -362,7 +372,7 @@ export default function Layout({ children }) {
 
       <nav className="flex-1 px-3 py-2 flex flex-col space-y-1.5 overflow-y-auto overflow-x-hidden" data-testid="sidebar-nav">
         {items.map((item) => (
-          <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
+          <SidebarLink key={item.to || item.label} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
         ))}
 
         {isAdmin && (
