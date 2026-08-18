@@ -718,6 +718,76 @@ async def upsert_estacion_enered(
     return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio, "cliente": cliente}
 
 
+@api.get("/admin/sire/compras")
+async def admin_sire_compras(periodo: str = "202606", user: dict = Depends(require_roles("admin_enered"))):
+    """
+    Trae del API SIRE (SUNAT) todos los comprobantes que le emitieron al cliente conectado
+    (credenciales en .env) y marca cuáles son de grifos inscritos en OSINERGMIN.
+    Solo lectura — nunca se llama aceptar/reemplazar propuesta.
+    """
+    import os as _os
+    from dotenv import dotenv_values as _dv
+    from services import sire as _sire
+    # Releer el .env en cada consulta (permite conectar un cliente sin reiniciar el backend)
+    _envf = _dv(ROOT_DIR / ".env") if (ROOT_DIR / ".env").exists() else {}
+    creds = {k: (_envf.get(f"SIRE_{k.upper()}") or _os.getenv(f"SIRE_{k.upper()}") or "").strip()
+             for k in ("client_id", "client_secret", "ruc", "usuario", "clave")}
+    faltan = [k for k, v in creds.items() if not v]
+    if faltan:
+        raise HTTPException(status_code=400,
+                            detail=f"Faltan credenciales SIRE en el .env: {', '.join('SIRE_'+f.upper() for f in faltan)}")
+    try:
+        data = await _sire.compras_periodo(**creds, periodo=periodo)
+    except _sire.SireError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # Cruce con el padrón de grifos (OSINERGMIN) → identificar facturas de combustible
+    rucs = {c["ruc_emisor"] for c in data["comprobantes"]}
+    grifos = {}
+    if rucs:
+        async for g in db.grifos_osinergmin.find({"ruc": {"$in": list(rucs)}},
+                                                 {"_id": 0, "ruc": 1, "razon_social": 1, "distrito": 1,
+                                                  "provincia": 1, "departamento": 1}):
+            grifos.setdefault(g["ruc"], g)
+    # Rubro del emisor: grifos por padrón OSINERGMIN; el resto por el nombre (heurística).
+    _RUBROS = [
+        ("Combustible", r"GRIFO|ESTACION DE SERVICIO|COMBUSTIBLE|PETROL|COESTI|PRIMAX|REPSOL|SERVICENTRO|GASOCENTRO"),
+        ("Llantas", r"LLANTA|NEUMATIC|REENCAUCH"),
+        ("Repuestos / Mantenimiento", r"REPUESTO|AUTOMOTRIZ|AUTOPART|MOTORS?|FRENOS|LUBRICANT|TALLER|MECANIC|DIESEL PARTS"),
+        ("Seguros", r"SEGURO|RIMAC|PACIFICO|MAPFRE|LA POSITIVA|INTERSEGURO"),
+        ("Financiero", r"BANCO|CAJA |FINANCIER|LEASING|FACTORING|SCOTIA|INTERBANK|BBVA|BCP\b"),
+        ("Telecom", r"TELEFON|CLARO|ENTEL|MOVISTAR|BITEL|AMERICA MOVIL|WIN\b"),
+        ("Peajes / Concesiones", r"PEAJE|RUTAS DE|COVI|CONCESION|AUTOPISTA|LAMSAC|DEVIANDES"),
+        ("Luz / Agua", r"ELECTR|ENEL|LUZ DEL SUR|HIDRANDINA|ELECTRONORTE|SEDALIB|SEDAPAL|AGUA"),
+        ("Transporte / Logística", r"TRANSPORTE|LOGISTIC|CARGO|COURIER"),
+    ]
+    def _rubro(c):
+        if c["es_grifo"]:
+            return "Combustible"
+        n = (c.get("razon_social") or "").upper()
+        for nombre, patron in _RUBROS:
+            if re.search(patron, n):
+                return nombre
+        return "Otros"
+
+    for c in data["comprobantes"]:
+        g = grifos.get(c["ruc_emisor"])
+        c["es_grifo"] = bool(g)
+        if g:
+            c["grifo"] = g
+        c["rubro"] = _rubro(c)
+    data["de_grifos"] = sum(1 for c in data["comprobantes"] if c["es_grifo"])
+    # Resumen por rubro (cantidad y monto) para los chips del frontend
+    _rs = {}
+    for c in data["comprobantes"]:
+        d = _rs.setdefault(c["rubro"], {"rubro": c["rubro"], "cantidad": 0, "total": 0.0})
+        d["cantidad"] += 1
+        d["total"] += c.get("total") or 0
+    data["rubros"] = sorted(_rs.values(), key=lambda x: -x["total"])
+    data["ruc_cliente"] = creds["ruc"]
+    return data
+
+
 @api.get("/precios/publico")
 async def precios_publico(combustible: Optional[str] = None):
     """PÚBLICO (sin login): TODOS los precios de Facilito (mercado), marcando las estaciones

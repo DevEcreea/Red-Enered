@@ -20,11 +20,18 @@ Analiza la imagen de la factura adjunta y devuelve EXCLUSIVAMENTE un JSON válid
 {
   "fecha": "YYYY-MM-DD" (extrae la Fecha de Emisión, usa SIEMPRE formato YYYY-MM-DD. Ej: 2026-04-21),
   "fecha_vencimiento": "YYYY-MM-DD" (extrae la Fecha de Vencimiento si la hay, sino usa la de emisión),
+  "hora": "HH:MM" (hora de la transacción si aparece, sino null),
+  "ruc_emisor": "RUC de quien EMITE la factura: el grifo/estación (11 dígitos)",
   "ruc_cliente": "RUC del cliente/receptor (11 dígitos, obligatorio)",
-  "placa": "Placa del vehículo (formato ABC-123)",
+  "estacion": "Nombre comercial del grifo o estación de servicio que emite",
+  "ciudad": "Ciudad o distrito del grifo",
+  "placa": "Placa del vehículo (formato ABC-123). Búscala en la descripción del ítem, glosa u observaciones. Si no aparece, null",
   "producto": "Nombre del combustible (ej: DIESEL B5 S-50, GASOHOL REGULAR, etc)",
+  "galones": número decimal (CANTIDAD de combustible en GALONES. Es la cantidad/unidades del ítem, normalmente con unidad GLL o GAL. Ej: 172.487. OBLIGATORIO si aparece),
+  "precio_unitario": número decimal (Precio por galón, sin IGV o con IGV según figure. Ej: 24.86),
   "importe_total": número decimal (Total a pagar, sin IGV aparte, solo el TOTAL final. Ej: 1540.50),
-  "numero_documento": "Serie-Correlativo exacto (ej: F003-00000219)"
+  "numero_documento": "Serie-Correlativo exacto (ej: F003-00000219)",
+  "confianza": número entre 0 y 1 (qué tan seguro estás de la extracción)
 }
 
 REGLAS ESTRICTAS:
@@ -32,6 +39,8 @@ REGLAS ESTRICTAS:
 - El importe_total DEBE ser un número decimal con punto, NO con coma, sin símbolo de moneda.
 - Respeta estrictamente el formato YYYY-MM-DD en las fechas (AÑO-MES-DIA).
 - numero_documento debe conservar los ceros a la izquierda (ej: F003-00000219).
+- galones y precio_unitario son números decimales con punto, sin unidades ni símbolos.
+- No confundas ruc_emisor (el grifo que emite) con ruc_cliente (el transportista que compra).
 - Si un dato no existe, devuelve null.
 """
 

@@ -10,33 +10,85 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
 import Etapa0Card from "../components/Etapa0Card";
+import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 
-// --- Subcomponente para cada factura editable ---
+// --- Factura subida: muestra lo que ENERED leyó del comprobante y su validación ---
+const ESTADO_FACTURA = {
+  CONFORME:  { txt: "CONFORME",  cls: "bg-emerald-600 text-white", card: "border-emerald-200 bg-emerald-50/40" },
+  OBSERVADA: { txt: "OBSERVADA", cls: "bg-amber-500 text-white",   card: "border-amber-200 bg-amber-50/40" },
+  RECHAZADA: { txt: "RECHAZADA", cls: "bg-red-600 text-white",     card: "border-red-200 bg-red-50/40" },
+};
+
 function InvoiceRow({ item, deleteRow }) {
-  // El cliente solo sube el archivo; ENERED valida y completa los datos después.
+  const est = ESTADO_FACTURA[item.validacion_estado] || null;
+  const motivos = item.validacion?.motivos || [];
+  const fmtGal = (g) => g ? `${Number(g).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 3 })} gal` : null;
+  const fmtSol = (n) => n ? `S/ ${Number(n).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+  const fecha = item.fecha ? new Date(item.fecha + "T00:00:00").toLocaleDateString("es-PE") : null;
+  const datos = [
+    item.numero_documento && { l: "Comprobante", v: item.numero_documento, fuerte: true },
+    fecha && { l: "Emisión", v: fecha },
+    item.placa && { l: "Placa", v: item.placa, fuerte: true },
+    fmtGal(item.galones) && { l: "Volumen", v: fmtGal(item.galones), fuerte: true },
+    item.producto && { l: "Producto", v: String(item.producto).slice(0, 26) },
+    fmtSol(item.importe_total) && { l: "Total", v: fmtSol(item.importe_total) },
+    item.estacion && { l: "Grifo", v: String(item.estacion).slice(0, 28) },
+    item.ruc_emisor && { l: "RUC grifo", v: item.ruc_emisor },
+  ].filter(Boolean);
+
   return (
-    <div className="bg-white border border-neutral-200 rounded-xl p-3.5 shadow-sm mb-3 flex items-center justify-between gap-3">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center flex-shrink-0">
-          <FileText className="w-4 h-4 text-brand" />
+    <div className={`bg-white border rounded-xl p-3.5 shadow-sm mb-3 ${est?.card || "border-neutral-200"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-brand/10 flex items-center justify-center flex-shrink-0">
+            <FileText className="w-4 h-4 text-brand" />
+          </div>
+          <div className="min-w-0">
+            <span className="block font-medium text-sm text-neutral-800 truncate" title={item.factura_filename}>{item.factura_filename}</span>
+            {datos.length === 0 && (
+              <span className="text-[11px] text-neutral-500">Subida ✓ · ENERED está leyendo el comprobante…</span>
+            )}
+          </div>
         </div>
-        <div className="min-w-0">
-          <span className="block font-medium text-sm text-neutral-800 truncate" title={item.factura_filename}>{item.factura_filename}</span>
-          <span className="text-[11px] text-emerald-600 font-medium">Subida ✓ · ENERED validará los datos</span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {est && <span className={`text-[10px] font-black px-2 py-1 rounded-full ${est.cls}`}>{est.txt}</span>}
+          <button onClick={() => deleteRow(item.id)} className="text-neutral-400 hover:text-red-500" title="Eliminar archivo">
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
-      <button onClick={() => deleteRow(item.id)} className="text-neutral-400 hover:text-red-500 flex-shrink-0" title="Eliminar archivo">
-        <Trash2 className="w-4 h-4" />
-      </button>
+
+      {/* Datos leídos del comprobante */}
+      {datos.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] pl-12">
+          {datos.map((d) => (
+            <span key={d.l}>
+              <span className="text-neutral-400">{d.l} </span>
+              <span className={d.fuerte ? "font-bold text-neutral-900" : "text-neutral-700"}>{d.v}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Qué hay que corregir */}
+      {motivos.length > 0 && (
+        <ul className="mt-2 pl-12 space-y-0.5">
+          {motivos.slice(0, 3).map((m, i) => (
+            <li key={i} className="text-[11px] text-amber-800 flex items-start gap-1.5">
+              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />{m}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
 
 const ETAPAS = [
   { id: "etapa0",       n: 0, label: "Diagnóstico subsidio", icon: Coins,     short: "Diagnóstico subsidio", hint: "Análisis por RUC" },
-  { id: "empresa",      n: 1, label: "Documentos de la empresa", icon: Building2,  short: "Empresa",      hint: "Solo PDF" },
-  { id: "flota",        n: 2, label: "Documentos de flota",      icon: Truck,      short: "Flota",        hint: "PDF, PNG o JPG" },
-  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "PDF o imagen · OCR" },
+  { id: "empresa",      n: 1, label: "Verificación empresa",     icon: Building2,  short: "Verificación empresa", hint: "Solo PDF" },
+  { id: "flota",        n: 2, label: "Verificación flota",       icon: Truck,      short: "Verificación flota",   hint: "PDF, PNG o JPG" },
+  { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF" },
   { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
 ];
 
@@ -142,10 +194,10 @@ export default function SubsidioDocumentos() {
         <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
           <div>
             <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Asistente de subsidio · DU 004-2026</span>
-            <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Mi Flota</h2>
+            <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Subsidio DU-004</h2>
             <p className="text-neutral-500 mt-1 max-w-2xl text-sm">Completa las 5 etapas para enviar tu expediente a la ATU.</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
             <div className="px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
               <div className="text-[10px] uppercase tracking-widest font-bold text-emerald-700">Ahorro estimado</div>
               <div className="font-cabinet font-black text-xl text-emerald-700">S/ {Number(estimadoResumen ?? ahorro_estimado).toLocaleString("es-PE", { maximumFractionDigits: 0 })}</div>
@@ -199,7 +251,7 @@ export default function SubsidioDocumentos() {
         </div>
 
         {/* Línea de etapas */}
-        <div className="grid grid-cols-5 gap-2 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3">
           {ETAPAS.map((e) => {
             const Ic = e.icon;
             const active = activeEtapa === e.id;
@@ -257,7 +309,7 @@ export default function SubsidioDocumentos() {
       ) : (
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
         {activeEtapa === "empresa" && (
-          <EmpresaEtapa items={checklist.empresa} bank={bank_account} onChange={load} />
+          <EmpresaEtapa items={checklist.empresa} bank={bank_account} evidenciaCci={data.evidencia_cci || []} onChange={load} />
         )}
         {activeEtapa === "flota" && (
           <FlotaEtapa items={checklist.flota} vehicles={vehicles} onChange={load} />
@@ -355,7 +407,7 @@ function pickNextEtapa(data) {
 /* ============================================================ */
 /* Etapa 1 — Empresa (PDF only) + cuenta bancaria + nota seguridad */
 /* ============================================================ */
-function EmpresaEtapa({ items, bank, onChange }) {
+function EmpresaEtapa({ items, bank, evidenciaCci = [], onChange }) {
   const hints = {
     ficha_ruc: "PDF descargado de SUNAT",
     resolucion_autorizacion: "MTC / Gobierno Regional / Municipalidad · Art. 3.4.1",
@@ -370,13 +422,75 @@ function EmpresaEtapa({ items, bank, onChange }) {
             <DocItem key={it.categoria} item={it} hint={hints[it.categoria]} onChange={onChange} accept=".pdf" acceptLabel="PDF" />
           ))}
         </div>
-        <BankAccountCard bank={bank} onSaved={onChange} />
+        <BankAccountCard bank={bank} evidencia={evidenciaCci} onSaved={onChange} />
       </div>
     </div>
   );
 }
 
-function BankAccountCard({ bank, onSaved }) {
+/** Evidencia que respalda la cuenta: captura del banco / constancia con el CCI visible. */
+function EvidenciaCCI({ files = [], onChange, esBN }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const subir = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true); setErr("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("categoria", "evidencia_cci");
+      await api.post("/subsidio/documents", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      onChange?.();
+    } catch (e2) {
+      setErr(e2?.response?.data?.detail || "No se pudo subir el archivo");
+    } finally { setBusy(false); e.target.value = ""; }
+  };
+
+  const borrar = async (id) => {
+    if (!window.confirm("¿Eliminar esta evidencia?")) return;
+    setBusy(true);
+    try { await api.delete(`/subsidio/documents/${id}`); onChange?.(); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-4 bg-white border border-neutral-200 rounded-lg p-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="font-bold text-sm text-neutral-900 flex items-center gap-2">
+            <FileText className="w-4 h-4 text-brand" /> Evidencia de la cuenta
+            {files.length > 0 && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+          </div>
+          <p className="text-xs text-neutral-500 mt-0.5">
+            {esBN
+              ? "Captura o constancia del Banco de la Nación donde se vea tu número de cuenta."
+              : "Captura o constancia del banco donde se vea el CCI y el titular."}
+          </p>
+        </div>
+        <label className="px-3 py-1.5 border border-neutral-300 bg-white rounded-lg text-xs font-bold cursor-pointer hover:bg-neutral-50 flex items-center gap-1.5 flex-shrink-0">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+          {files.length > 0 ? "Agregar otra" : "Subir evidencia"}
+          <input type="file" hidden onChange={subir} accept="application/pdf,image/*" />
+        </label>
+      </div>
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {files.map((f) => (
+            <li key={f.id} className="flex items-center justify-between bg-neutral-50 rounded-lg px-3 py-1.5 text-xs">
+              <span className="truncate flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-neutral-400" />{f.filename}</span>
+              <button onClick={() => borrar(f.id)} disabled={busy} className="text-neutral-400 hover:text-red-500" aria-label="Eliminar"><Trash2 className="w-3.5 h-3.5" /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {err && <div className="mt-2 text-xs text-red-600">{err}</div>}
+    </div>
+  );
+}
+
+function BankAccountCard({ bank, evidencia = [], onSaved }) {
   const [ba, setBa] = useState(() => bank || { es_banco_nacion: true, banco: "Banco de la Nación", tipo_cuenta: "ahorros", numero_cuenta: "", moneda: "PEN", cci: "" });
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -419,16 +533,19 @@ function BankAccountCard({ bank, onSaved }) {
           <input className="field-input" value={ba.numero_cuenta} onChange={(e) => setBa({ ...ba, numero_cuenta: e.target.value })} data-testid="bank-numero" />
         </Field>
         <Field label="Moneda">
-          <select className="field-input" value={ba.moneda} onChange={(e) => setBa({ ...ba, moneda: e.target.value })}>
-            <option value="PEN">PEN (Soles)</option><option value="USD">USD (Dólares)</option>
-          </select>
+          <input className="field-input bg-neutral-100 text-neutral-600" value="PEN (Soles)" disabled readOnly />
+          <p className="text-[11px] text-neutral-400 mt-1">El subsidio se abona solo en soles. No se aceptan cuentas en dólares.</p>
         </Field>
         {!ba.es_banco_nacion && (
           <Field label="CCI (20 dígitos)" full>
-            <input className="field-input" value={ba.cci || ""} onChange={(e) => setBa({ ...ba, cci: e.target.value })} />
+            <input className="field-input" value={ba.cci || ""} maxLength={20} inputMode="numeric"
+              onChange={(e) => setBa({ ...ba, cci: e.target.value.replace(/\D/g, "") })} data-testid="bank-cci" />
           </Field>
         )}
       </div>
+
+      {/* Evidencia del CCI: captura o constancia del banco que respalda la cuenta */}
+      <EvidenciaCCI files={evidencia} onChange={onSaved} esBN={ba.es_banco_nacion} />
 
       {/* Nota de seguridad bancaria */}
       <div className="mt-4 bg-violet-50 border border-violet-200 rounded-lg p-3 flex gap-2 text-xs text-violet-900">
@@ -649,13 +766,16 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           </div>
           <label className={`px-4 py-2.5 ${uploading ? "bg-neutral-300" : "bg-brand hover:bg-brand-hover"} text-white font-bold rounded-lg flex items-center gap-2 cursor-pointer text-sm`} data-testid="combustible-upload">
             {uploading ? (<><Loader2 className="w-4 h-4 animate-spin" /> Procesando {uploadProgress.done}/{uploadProgress.total}…</>) : (<><Upload className="w-4 h-4" /> {items.length === 0 ? "Subir facturas" : "Adjuntar más"}</>)}
-            <input ref={fileRef} type="file" hidden multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
+            <input ref={fileRef} type="file" hidden multiple accept="application/pdf,.pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
           </label>
         </div>
         {uploading && uploadProgress.total > 0 && (
           <div className="mt-3 h-2 bg-neutral-100 rounded-full overflow-hidden"><div className="h-full bg-brand transition-all" style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} /></div>
         )}
       </div>
+
+      {/* Carga masiva por plantilla (formato ENERED, compatible con la ATU) */}
+      <CargaMasiva onDone={(r) => { setSuccess(`Se guardaron ${r.guardadas} comprobante(s)${r.omitidas ? ` · ${r.omitidas} omitido(s) por errores` : ""}.`); load(); onAnyChange?.(); }} />
 
       {items.length === 0 ? (
         confirmedCount > 0 ? (
@@ -689,17 +809,8 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
               <strong>Tienes {items.length} factura(s) en borrador pendiente(s) de envío.</strong> Haz clic en "Enviar reporte" para registrarlas.
             </div>
           </div>
-          <div className="space-y-2 mt-4">
-            <h4 className="font-cabinet font-bold text-sm text-neutral-700">Comprobantes subidos:</h4>
-            <div>
-              {items.map((it) => (
-                <InvoiceRow
-                  key={it.id}
-                  item={it}
-                  deleteRow={deleteRow}
-                />
-              ))}
-            </div>
+          <div className="mt-4">
+            <ComprobantesTabla items={items} vehicles={vehicles} onChange={load} />
           </div>
         </>
       )}
@@ -711,7 +822,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
       <div className="mt-4 flex items-center justify-end gap-3 flex-wrap">
         <label className="px-4 py-2 border border-neutral-300 bg-white rounded-lg text-sm font-bold flex items-center gap-1.5 cursor-pointer hover:bg-neutral-50" data-testid="combustible-add-more">
           <Plus className="w-4 h-4" /> Adjuntar más
-          <input type="file" hidden multiple accept="image/*,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" onChange={handleUpload} disabled={uploading} />
+          <input type="file" hidden multiple accept="application/pdf,.pdf" onChange={handleUpload} disabled={uploading} />
         </label>
         <button onClick={enviarReporte} disabled={confirming || items.length === 0}
           className="px-5 py-2 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm flex items-center gap-1.5 disabled:opacity-50"
@@ -873,6 +984,75 @@ function DocItem({ item, onChange, hint, accept, acceptLabel }) {
     try { await api.delete(`/subsidio/documents/${docId}`); onChange?.(); }
     finally { setBusy(false); }
   };
+  // Documento que ENERED verifica en línea (SUNAT/MTC) COMO APOYO. El adjunto sigue siendo obligatorio.
+  if (item.auto_validado) {
+    const ok = item.validado;      // resultado de la verificación en línea
+    const subido = item.uploaded;  // el archivo adjunto (obligatorio)
+    const s = item.sunat;          // Ficha RUC (SUNAT)
+    const m = item.mtc;            // Habilitación vehicular por placa (MTC)
+    const a = item.autorizacion;   // Autorización del transportista (MTC)
+    return (
+      <div className={`border rounded-xl p-4 ${subido ? "bg-neutral-50 border-neutral-200" : "bg-white border-neutral-200"}`}>
+        <div className="flex items-start gap-3">
+          <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${subido ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+            {subido ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          </span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-bold text-neutral-900 text-sm">{item.placa ? item.label.split(" — ")[0] : item.label}</div>
+                <div className="text-xs text-neutral-500 mt-0.5 line-clamp-1">{item.detalle}</div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className={`text-[10px] font-black px-2 py-1 rounded-full whitespace-nowrap ${ok ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>
+                  {ok ? `✓ ${(m || a) ? "MTC" : "SUNAT"}` : "POR VERIFICAR"}
+                </span>
+                <label className="px-3 py-1.5 border border-neutral-300 bg-white rounded-lg text-xs font-bold cursor-pointer hover:bg-neutral-50 flex items-center gap-1.5">
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                  {subido ? "Reemplazar" : "Subir"}
+                  <input type="file" hidden onChange={handleUpload} accept={accept} />
+                </label>
+              </div>
+            </div>
+            {item.files?.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {item.files.map((f) => (
+                  <li key={f.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 text-xs border border-neutral-100">
+                    <span className="truncate flex items-center gap-2"><FileText className="w-3.5 h-3.5 text-neutral-400" />{f.filename}</span>
+                    <button onClick={() => handleDelete(f.id)} disabled={busy} className="text-neutral-400 hover:text-red-500" aria-label="Eliminar"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {err && <div className="mt-2 text-xs text-red-600">{err}</div>}
+
+            {/* Datos verificados en línea — en una sola línea compacta */}
+            {(s || m || (a && a.encontrada)) && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-neutral-600">
+                {s && <>
+                  <span className="font-semibold text-neutral-800 truncate max-w-[240px]">{s.nombre}</span>
+                  <span><b className={s.estado === "ACTIVO" ? "text-emerald-700" : "text-red-600"}>{s.estado}</b>
+                    {s.condicion && <> · <b className={s.condicion === "HABIDO" ? "text-emerald-700" : "text-red-600"}>{s.condicion}</b></>}</span>
+                  {s.ubicacion && <span className="text-neutral-400 truncate max-w-[220px]">{s.ubicacion}</span>}
+                </>}
+                {m && <>
+                  <span><span className="text-neutral-400">Constancia</span> <b>{m.constancia || "—"}</b></span>
+                  <span><span className="text-neutral-400">Vence</span> <b className={m.vencida ? "text-red-600" : "text-emerald-700"}>{m.vigencia || "—"}</b></span>
+                </>}
+                {a && a.encontrada && <>
+                  <span><span className="text-neutral-400">N°</span> <b>{a.codigo || "—"}</b></span>
+                  <span><b className={a.habilitado ? "text-emerald-700" : "text-red-600"}>{a.estado || "—"}</b></span>
+                  <span><span className="text-neutral-400">Vence</span> <b className={a.vencida ? "text-red-600" : "text-emerald-700"}>{a.vigencia || "—"}</b></span>
+                  {a.total_unidades ? <span className="text-neutral-400">{a.total_unidades} unidades</span> : null}
+                </>}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
       <div className="flex items-start gap-3">

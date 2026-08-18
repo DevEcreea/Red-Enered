@@ -38,6 +38,8 @@ import DiagnosticoATU from "./pages/DiagnosticoATU";
 import AdminConexionATU from "./pages/AdminConexionATU";
 import SubsidioPublico from "./pages/SubsidioPublico";
 import PreciosPublico from "./pages/PreciosPublico";
+import AdminSire from "./pages/AdminSire";
+import SubsidioDU007 from "./pages/SubsidioDU007";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -122,6 +124,7 @@ function App() {
           <Route path="/precios" element={<PreciosPublico />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
           <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
+          <Route path="/subsidio/du007" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDU007 /></Shell>} />
           <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />
           <Route path="/subsidio/finalizado" element={<ProtectedRoute roles={["cliente_subsidio"]}><SubsidioFinalizado /></ProtectedRoute>} />
           <Route path="/" element={<RootRedirect />} />
@@ -167,6 +170,7 @@ function App() {
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
           <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
           <Route path="/admin/atu" element={<Shell roles={["admin_enered"]}><AdminConexionATU /></Shell>} />
+          <Route path="/admin/sire" element={<Shell roles={["admin_enered"]}><AdminSire /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
           <Route path="*" element={<RootRedirect />} />
         </Routes>

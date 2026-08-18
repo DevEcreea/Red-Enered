@@ -20,7 +20,13 @@ const ICON_BASE = "/assets/icons";
 const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contabilidad", "cliente_subsidio"];
 
 const MENU = [
-  { to: "/subsidio/documentos", label: "Mi Flota", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-expediente", badge: "DU 004", badgeColor: "cyan" },
+  {
+    label: "Subsidios", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-subsidios",
+    submenu: [
+      { to: "/subsidio/documentos", label: "DU - 004", testid: "nav-du004" },
+      { to: "/subsidio/du007", label: "DU - 007 🔒", testid: "nav-du007" },
+    ],
+  },
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard", mkey: "dashboard" },
   { to: "/dashboard-subsidio", label: "Panel Subsidio", icon: LayoutDashboard, roles: ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"], testid: "nav-dashboard-subsidio", requiresSubsidio: true },
   { to: "/analitica", label: "Analytics BI", icon: BarChart3, roles: ALL_REGULAR_ROLES, testid: "nav-analitica", mkey: "analitica" },
@@ -46,6 +52,7 @@ const ADMIN_ITEMS = [
   { to: "/mtc", label: "Consulta MTC", icon: ShieldCheck, testid: "nav-mtc", mkey: "mtc" },
   { to: "/atu", label: "Diagnóstico ATU", icon: ShieldAlert, testid: "nav-atu", mkey: "atu" },
   { to: "/admin/atu", label: "Conexión ATU", icon: ShieldAlert, testid: "nav-admin-atu", mkey: "atu_conexion" },
+  { to: "/admin/sire", label: "Compras SUNAT", icon: FileText, testid: "nav-admin-sire", mkey: "sire" },
 ];
 
 const ROUTE_TITLES = {
@@ -81,9 +88,11 @@ function SidebarLink({ item, onClick, isCollapsed }) {
   const hasSubmenu = item.submenu && item.submenu.length > 0;
   const isSubmenuActive = hasSubmenu && item.submenu.some(sub => location.pathname === sub.to);
   
+  // Auto-expandir SOLO al entrar a una ruta del grupo; luego el usuario puede contraerlo.
   React.useEffect(() => {
-    if (isSubmenuActive && !expanded) setExpanded(true);
-  }, [isSubmenuActive, expanded]);
+    if (isSubmenuActive) setExpanded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSubmenuActive]);
 
   const content = (active) => (
     <>
@@ -265,15 +274,17 @@ export default function Layout({ children }) {
     }
     // Solo mientras NO se ha registrado (entró por RUC): menú recortado a los 5.
     // Al registrarse (acceso_etapa0 = false) ve el menú completo (los premium quedan bloqueados).
-    if (user.role === "cliente_subsidio" && user.acceso_etapa0 === true && !SUBSIDIO_VISIBLES.includes(i.to)) {
-      return false;
+    // El grupo "Subsidios" (desplegable, sin ruta propia) cuenta como visible si contiene el DU-004.
+    if (user.role === "cliente_subsidio" && user.acceso_etapa0 === true) {
+      const esGrupoSubsidios = i.submenu?.some((s) => SUBSIDIO_VISIBLES.includes(s.to));
+      if (!esGrupoSubsidios && !SUBSIDIO_VISIBLES.includes(i.to)) return false;
     }
-    // Eliminamos la restricción de ocultar items del menú para que todos los clientes
-    // (incluso los de solo subsidio) vean la plataforma completa y puedan recibir los upsells (Demos).
 
     if (!i.roles.includes(user.role)) {
       // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
       if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
+      // El grupo "Subsidios" (desplegable) también es visible si la empresa tiene el servicio.
+      if (i.submenu?.some((s) => s.to === "/subsidio/documentos") && user?.servicios?.subsidio) return true;
       return false;
     }
     // Panel Subsidio: Oculto si tiene plataforma activa (porque ya ve el tracker en el Dashboard general)

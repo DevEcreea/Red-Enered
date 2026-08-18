@@ -244,7 +244,8 @@ class BankAccountIn(BaseModel):
     banco: str
     tipo_cuenta: Literal["ahorros", "corriente"]
     numero_cuenta: str
-    moneda: Literal["PEN", "USD"] = "PEN"
+    # El subsidio se abona SOLO en soles: no se aceptan cuentas en dólares.
+    moneda: Literal["PEN"] = "PEN"
     cci: Optional[str] = None
 
 
@@ -539,6 +540,52 @@ async def _sunat_nombre(ruc: str) -> str:
     return ""
 
 
+async def _sunat_ficha(ruc: str) -> Optional[dict]:
+    """
+    Consulta pública de SUNAT para validar la Ficha RUC sin que el cliente suba nada.
+    Devuelve {nombre, estado, condicion, direccion, activo_habido} o None si no responde.
+    """
+    ruc = (ruc or "").strip()
+    if not _re.fullmatch(r"\d{11}", ruc):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=12.0, verify=False,
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}) as c:
+            r = await c.get("https://api.apis.net.pe/v1/ruc", params={"numero": ruc})
+            if r.status_code in (404, 422):
+                # El RUC no existe en SUNAT (distinto de "el servicio no responde").
+                return {"ruc": ruc, "nombre": "", "estado": "NO EXISTE", "condicion": "",
+                        "direccion": "", "activo_habido": False, "no_encontrado": True,
+                        "verificado_en": datetime.now(timezone.utc).isoformat(),
+                        "fuente": "SUNAT (consulta pública)"}
+            if r.status_code != 200:
+                return None
+            d = r.json()
+    except Exception:
+        return None
+    estado = (d.get("estado") or "").strip().upper()
+    condicion = (d.get("condicion") or "").strip().upper()
+    # Ubicación: la fuente ya la desglosa (ubigeo, distrito, provincia, departamento).
+    ubicacion = " / ".join([p for p in [(d.get("distrito") or "").strip(),
+                                        (d.get("provincia") or "").strip(),
+                                        (d.get("departamento") or "").strip()] if p])
+    return {
+        "ruc": ruc,
+        "nombre": (d.get("nombre") or "").strip(),
+        "estado": estado,
+        "condicion": condicion,
+        "direccion": (d.get("direccion") or "").strip(),
+        "ubicacion": ubicacion,
+        "ubigeo": (d.get("ubigeo") or "").strip(),
+        "distrito": (d.get("distrito") or "").strip(),
+        "provincia": (d.get("provincia") or "").strip(),
+        "departamento": (d.get("departamento") or "").strip(),
+        "activo_habido": estado == "ACTIVO" and condicion == "HABIDO",
+        "verificado_en": datetime.now(timezone.utc).isoformat(),
+        "fuente": "SUNAT (consulta pública)",
+    }
+
+
 @subsidio_router.post("/subsidio/entrar")
 async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
     """
@@ -603,23 +650,29 @@ async def registro_etapa0(payload: RegistroEtapa0In, request: Request, response:
 # ============================================================================
 DOCUMENT_LABELS = {
     "ficha_ruc": "Ficha RUC (activo y habido)",
-    "resolucion_autorizacion": "Resolución de autorización",
+    "resolucion_autorizacion": "Autorización del transportista",
     "dni_representante": "DNI del representante legal",
     "tarjeta_habilitacion": "Tarjeta de habilitación",
     "tarjeta_propiedad": "Tarjeta de propiedad",
     "comprobante_jun_2026": "Comprobantes — Mes 1 (junio 2026)",
     "comprobante_jul_2026": "Comprobantes — Mes 2 (julio 2026)",
+    "evidencia_cci": "Evidencia de la cuenta (CCI)",
 }
 
 EMPRESA_CATEGORIES = ["ficha_ruc", "resolucion_autorizacion", "dni_representante"]
 FLOTA_CATEGORIES = ["tarjeta_habilitacion", "tarjeta_propiedad"]
 COMBUSTIBLE_CATEGORIES = ["comprobante_jun_2026", "comprobante_jul_2026"]
-ALL_CATEGORIES = EMPRESA_CATEGORIES + FLOTA_CATEGORIES + COMBUSTIBLE_CATEGORIES
+# La evidencia del CCI acompaña a la cuenta bancaria (no es un doc de empresa/flota/combustible).
+BANCO_CATEGORIES = ["evidencia_cci"]
+ALL_CATEGORIES = EMPRESA_CATEGORIES + FLOTA_CATEGORIES + COMBUSTIBLE_CATEGORIES + BANCO_CATEGORIES
 
 # MIME allowed per category (Art. user-defined: empresa solo PDF, flota PDF+imágenes)
 EMPRESA_MIME = {"application/pdf"}
 FLOTA_MIME = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
-COMBUSTIBLE_MIME = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
+# Las facturas de combustible SOLO se aceptan en PDF (permite leer el QR y validar en SUNAT).
+COMBUSTIBLE_MIME = {"application/pdf"}
+# La evidencia del CCI sí admite captura de pantalla.
+BANCO_MIME = {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
 
 
 def _allowed_mimes_for(categoria: str) -> set:
@@ -627,6 +680,8 @@ def _allowed_mimes_for(categoria: str) -> set:
         return EMPRESA_MIME
     if categoria in FLOTA_CATEGORIES:
         return FLOTA_MIME
+    if categoria in BANCO_CATEGORIES:
+        return BANCO_MIME
     return COMBUSTIBLE_MIME
 
 
@@ -638,6 +693,300 @@ async def subsidio_status(user: dict = Depends(_require_subsidio)):
         "ruc": user.get("ruc"),
         "empresa": user.get("empresa"),
     }
+
+
+_MTC_CACHE: dict = {}   # ruc -> (timestamp, data). El scrape del MTC es lento: se reusa.
+
+
+async def _mtc_consulta(ruc: str) -> Optional[dict]:
+    """Consulta al MTC por RUC con caché en memoria (10 min) para no repetir el scrape."""
+    import time as _t
+    ruc = (ruc or "").strip()
+    if not _re.fullmatch(r"\d{11}", ruc):
+        return None
+    hit = _MTC_CACHE.get(ruc)
+    if hit and (_t.time() - hit[0]) < 600:
+        return hit[1]
+    try:
+        import mtc as _mtc
+        data = await _mtc.consultar("ruc", ruc)
+    except Exception:
+        return None
+    _MTC_CACHE[ruc] = (_t.time(), data)
+    return data
+
+
+def _mtc_vencida(vig) -> bool:
+    import datetime as _dt
+    m = _re.match(r"(\d{2})/(\d{2})/(\d{4})", str(vig or ""))
+    if not m:
+        return False
+    try:
+        return _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1))) < _dt.date.today()
+    except Exception:
+        return False
+
+
+async def _mtc_autorizacion(ruc: str) -> Optional[dict]:
+    """
+    Autorización (resolución) de transporte del MTC — evita subir la resolución en PDF.
+    Devuelve los datos de la autorización habilitada y vigente, o la primera encontrada.
+    """
+    data = await _mtc_consulta(ruc)
+    if data is None:
+        return None
+    auts = data.get("autorizaciones", []) or []
+    if not auts:
+        return {"encontrada": False, "habilitado": False,
+                "verificado_en": datetime.now(timezone.utc).isoformat(),
+                "fuente": "MTC · DGTT (consulta pública)"}
+    mejor = next((a for a in auts if a.get("habilitado") and not _mtc_vencida(a.get("vigente_hasta"))), auts[0])
+    vig = mejor.get("vigente_hasta")
+    return {
+        "encontrada": True,
+        "codigo": mejor.get("codigo") or "",
+        "razon_social": mejor.get("razon_social") or "",
+        "modalidad": mejor.get("modalidad") or "",
+        "estado": mejor.get("estado") or "",
+        "vigencia": vig,
+        "vencida": _mtc_vencida(vig),
+        "habilitado": bool(mejor.get("habilitado")) and not _mtc_vencida(vig),
+        "total_autorizaciones": len(auts),
+        "total_unidades": sum(a.get("total_unidades", 0) for a in auts),
+        "verificado_en": datetime.now(timezone.utc).isoformat(),
+        "fuente": "MTC · DGTT (consulta pública)",
+    }
+
+
+async def _mtc_habilitaciones(ruc: str) -> Optional[dict]:
+    """
+    Habilitación vehicular oficial del MTC por RUC — evita que el cliente suba la
+    tarjeta de habilitación de CADA unidad. Devuelve {PLACA_NORMALIZADA: {...}} o None.
+    """
+    data = await _mtc_consulta(ruc)
+    if data is None:
+        return None
+
+    import datetime as _dt
+
+    def _vencida(vig):
+        m = _re.match(r"(\d{2})/(\d{2})/(\d{4})", str(vig or ""))
+        if not m:
+            return False
+        try:
+            return _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1))) < _dt.date.today()
+        except Exception:
+            return False
+
+    out = {}
+    for a in data.get("autorizaciones", []):
+        vig = a.get("vigente_hasta")
+        for v in a.get("vehiculos", []):
+            pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+            if not pn or pn in out:
+                continue
+            out[pn] = {
+                "placa": v.get("placa"),
+                "categoria": (v.get("categoria") or "").upper(),
+                "constancia": v.get("constancia") or a.get("codigo") or "",
+                "vigencia": vig,
+                "vencida": _vencida(vig),
+                "habilitado": bool(a.get("habilitado")) and not _vencida(vig),
+                "razon_social": a.get("razon_social") or "",
+                "verificado_en": datetime.now(timezone.utc).isoformat(),
+                "fuente": "MTC · DGTT (consulta pública)",
+            }
+    return out
+
+
+@subsidio_router.get("/subsidio/ficha-ruc")
+async def subsidio_ficha_ruc(user: dict = Depends(_require_subsidio), ruc: Optional[str] = None):
+    """
+    Validación en línea de la Ficha RUC contra SUNAT — evita que el cliente suba el PDF.
+    Devuelve razón social, estado, condición y si está ACTIVO y HABIDO.
+    """
+    objetivo = (ruc or user.get("ruc") or "").strip()
+    if not _re.fullmatch(r"\d{11}", objetivo):
+        raise HTTPException(status_code=400, detail="RUC inválido (11 dígitos)")
+    ficha = await _sunat_ficha(objetivo)
+    if not ficha:
+        raise HTTPException(status_code=503, detail="SUNAT no responde en este momento. Intenta de nuevo.")
+    return ficha
+
+
+@subsidio_router.get("/subsidio/grifo/{ruc}")
+async def subsidio_grifo(ruc: str, user: dict = Depends(_require_subsidio)):
+    """
+    Autocompleta los datos del grifo (razón social, ubicación, dirección) desde el padrón
+    de OSINERGMIN, e indica si está inscrito. Alimenta la sección 'GRIFO' del formulario ATU.
+    """
+    from services.padron_grifos import buscar_por_ruc
+    g = await buscar_por_ruc(db, ruc)
+    if g is None:
+        raise HTTPException(status_code=400, detail="RUC inválido (11 dígitos)")
+    return g
+
+
+@subsidio_router.post("/subsidio/comprobante/extraer")
+async def subsidio_extraer_comprobante(file: UploadFile = File(...), user: dict = Depends(_require_subsidio)):
+    """
+    Lee un comprobante (PDF con QR, o XML) y devuelve los campos que exige la ATU,
+    ya autocompletados. El usuario puede editar todo antes de guardar.
+    """
+    contenido = await file.read()
+    if len(contenido) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Archivo mayor a 20MB")
+
+    from services.extractor_comprobante import extraer
+    from services.padron_grifos import buscar_por_ruc
+    datos = extraer(contenido, file.filename or "")
+
+    # Completar los datos del grifo desde OSINERGMIN con el RUC del emisor.
+    if datos.get("ruc_emisor"):
+        g = await buscar_por_ruc(db, datos["ruc_emisor"])
+        if g:
+            datos["grifo"] = g
+            if g.get("inscrito"):
+                datos.setdefault("razon_social_emisor", g.get("razon_social"))
+                for k_dest, k_src in (("departamento", "departamento"), ("provincia", "provincia"),
+                                      ("distrito", "distrito"), ("direccion_grifo", "direccion")):
+                    if not datos.get(k_dest) and g.get(k_src):
+                        datos[k_dest] = g[k_src]
+                        datos.setdefault("fuentes", {})[k_dest] = "OSINERGMIN"
+
+    # Avisar si el comprobante no está a nombre del transportista.
+    if datos.get("ruc_adquirente") and user.get("ruc"):
+        datos["adquirente_coincide"] = datos["ruc_adquirente"] == user["ruc"]
+    return datos
+
+
+@subsidio_router.get("/subsidio/carga-masiva/plantilla")
+async def subsidio_plantilla_masiva(user: dict = Depends(_require_subsidio)):
+    """Descarga la plantilla ENERED de carga masiva, ya con la flota del transportista."""
+    from services.carga_masiva import generar_plantilla
+    uids = await _get_company_uids(user["id"])
+    vehiculos = await db.subsidio_vehicles.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
+    ).to_list(500)
+    xlsx = generar_plantilla(empresa=user.get("empresa") or "", ruc=user.get("ruc") or "",
+                             vehiculos=vehiculos)
+    nombre = f"ENERED_carga_masiva_{(user.get('ruc') or 'comprobantes')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
+@subsidio_router.post("/subsidio/carga-masiva/previsualizar")
+async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict = Depends(_require_subsidio)):
+    """
+    Lee la plantilla llena y devuelve cada fila validada (sin guardar todavía),
+    completando los datos del grifo desde OSINERGMIN.
+    """
+    from services.carga_masiva import leer_plantilla
+    from services.validador_facturas import validar_factura
+    from services.padron_grifos import buscar_por_ruc
+
+    contenido = await file.read()
+    if len(contenido) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Archivo mayor a 20MB")
+    try:
+        filas = leer_plantilla(contenido)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"No se pudo leer la plantilla: {e}")
+    if not filas:
+        raise HTTPException(status_code=400, detail="La plantilla no tiene filas con datos")
+
+    uids = await _get_company_uids(user["id"])
+    vehiculos = await db.subsidio_vehicles.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
+    ).to_list(500)
+    _np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
+    placas = {_np(v["placa"]) for v in vehiculos}
+    cats = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
+
+    previas = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
+    ).to_list(3000)
+    vistos = {(str(p.get("ruc_emisor") or "").strip(), str(p.get("numero_documento") or "").strip().upper(),
+               _np(p.get("placa"))) for p in previas if p.get("numero_documento")}
+
+    grifos: dict[str, dict] = {}
+    resultado, resumen = [], {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}
+    for f in filas:
+        # Completar datos del grifo desde OSINERGMIN si faltan en la plantilla.
+        ruc_g = f.get("ruc_emisor")
+        if ruc_g:
+            if ruc_g not in grifos:
+                grifos[ruc_g] = await buscar_por_ruc(db, ruc_g) or {}
+            g = grifos[ruc_g]
+            if g.get("inscrito"):
+                f.setdefault("estacion", g.get("razon_social"))
+                for k in ("departamento", "provincia", "distrito"):
+                    if not f.get(k):
+                        f[k] = g.get(k)
+                if not f.get("direccion_grifo"):
+                    f["direccion_grifo"] = g.get("direccion")
+            f["grifo_inscrito"] = bool(g.get("inscrito"))
+
+        # La categoría real la manda la flota registrada (como hace la ATU).
+        pn = _np(f.get("placa"))
+        if pn in cats and cats[pn]:
+            f["categoria"] = cats[pn]
+
+        val = validar_factura(f, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos)
+        if f.get("numero_documento"):
+            vistos.add((str(ruc_g or "").strip(), f["numero_documento"].strip().upper(), _np(f.get("placa"))))
+        resumen[val["estado"]] = resumen.get(val["estado"], 0) + 1
+        resultado.append({**f, "validacion": val, "validacion_estado": val["estado"]})
+
+    return {"filas": resultado, "total": len(resultado), "resumen": resumen,
+            "listas_para_guardar": resumen.get("CONFORME", 0) + resumen.get("OBSERVADA", 0)}
+
+
+@subsidio_router.post("/subsidio/carga-masiva/confirmar")
+async def subsidio_confirmar_masiva(payload: dict, user: dict = Depends(_require_subsidio)):
+    """Guarda como borrador las filas de la carga masiva (se omiten las RECHAZADAS)."""
+    filas = payload.get("filas") or []
+    if not filas:
+        raise HTTPException(status_code=400, detail="No hay filas para guardar")
+    ahora = datetime.now(timezone.utc).isoformat()
+    docs = []
+    for f in filas:
+        if (f.get("validacion_estado") or "").upper() == "RECHAZADA":
+            continue
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"], "empresa": user.get("empresa"), "empresa_id": user.get("empresa"),
+            "origin": "carga_masiva",
+            "numero_documento": f.get("numero_documento"), "serie": f.get("serie"), "numero": f.get("numero"),
+            "fecha": f.get("fecha"), "ruc_emisor": f.get("ruc_emisor"),
+            "estacion": f.get("estacion"), "ciudad": normalize_city(f.get("distrito")),
+            "departamento": f.get("departamento"), "provincia": f.get("provincia"), "distrito": f.get("distrito"),
+            "direccion_grifo": f.get("direccion_grifo"),
+            "placa": f.get("placa"), "placa_match": f.get("placa"), "categoria": f.get("categoria"),
+            "producto": f.get("producto"), "galones": f.get("galones"),
+            "tiene_nc": f.get("tiene_nc"), "serie_nc": f.get("serie_nc"),
+            "numero_nc": f.get("numero_nc"), "alcance_nc": f.get("alcance_nc"),
+            "validacion": f.get("validacion"), "validacion_estado": f.get("validacion_estado"),
+            "requiere_revision": (f.get("validacion") or {}).get("requiere_revision", True),
+            "status": "draft", "created_at": ahora, "confirmed_at": None,
+        })
+    if not docs:
+        raise HTTPException(status_code=400, detail="Todas las filas fueron rechazadas; corrige la plantilla")
+    await db.consumos_subsidio.insert_many(docs)
+    return {"guardadas": len(docs), "omitidas": len(filas) - len(docs)}
+
+
+@subsidio_router.post("/subsidio/padron-grifos/sync")
+async def subsidio_sync_padron(user: dict = Depends(_require_subsidio)):
+    """Descarga el padrón de grifos de OSINERGMIN (Datos Abiertos) y lo carga en la base."""
+    from services.padron_grifos import sincronizar
+    try:
+        return await sincronizar(db)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"No se pudo sincronizar el padrón: {e}")
 
 
 @subsidio_router.get("/subsidio/validation-state")
@@ -731,25 +1080,94 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     ).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
 
-    # Cuenta bancaria
+    # Cuenta bancaria + evidencia del CCI (voucher/captura que respalda la cuenta)
     bank = await db.subsidio_bank_accounts.find_one(
         {"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)]
     )
+    evidencia_cci = [d for d in docs if d["categoria"] == "evidencia_cci"]
 
     # Construir checklist
     def files_for(cat, placa=None):
         return [d for d in docs if d["categoria"] == cat and d.get("placa") == placa]
 
+    # Documentos que ENERED verifica en línea COMO APOYO. El cliente igual debe adjuntarlos.
+    #   ficha_ruc               → SUNAT (activo y habido)
+    #   resolucion_autorizacion → MTC (autorización de transporte vigente)
+    ficha_ruc_sunat = await _sunat_ficha(user.get("ruc") or "")
+    aut_mtc = await _mtc_autorizacion(user.get("ruc") or "")
+
     checklist = {"empresa": [], "flota": [], "combustible": []}
     for cat in EMPRESA_CATEGORIES:
         f = files_for(cat)
+        if cat == "resolucion_autorizacion":
+            ok = bool(aut_mtc and aut_mtc.get("habilitado"))
+            checklist["empresa"].append({
+                "categoria": cat, "label": DOCUMENT_LABELS[cat],
+                "uploaded": bool(f), "files": f,   # el adjunto es obligatorio
+                "requiere_archivo": True,
+                "auto_validado": True,
+                "validado": ok,
+                "autorizacion": aut_mtc,
+                "detalle": (
+                    f"Autorización {aut_mtc.get('codigo') or ''} habilitada en el MTC · Vigente hasta {aut_mtc.get('vigencia')}."
+                    if ok else
+                    f"La autorización del MTC está vencida ({aut_mtc.get('vigencia')})."
+                    if (aut_mtc and aut_mtc.get("vencida")) else
+                    "No se encontró autorización de transporte en el MTC."
+                    if (aut_mtc and not aut_mtc.get("encontrada")) else
+                    "No se pudo verificar en el MTC en este momento."
+                ),
+            })
+            continue
+        if cat == "ficha_ruc":
+            ok = bool(ficha_ruc_sunat and ficha_ruc_sunat["activo_habido"])
+            checklist["empresa"].append({
+                "categoria": cat, "label": DOCUMENT_LABELS[cat],
+                "uploaded": bool(f), "files": f,   # el adjunto es obligatorio
+                "requiere_archivo": True,
+                "auto_validado": True,
+                "validado": ok,
+                "sunat": ficha_ruc_sunat,
+                "detalle": (
+                    "Este RUC no figura en SUNAT."
+                    if (ficha_ruc_sunat or {}).get("no_encontrado") else
+                    f"Verificado en SUNAT: {ficha_ruc_sunat['estado']} y {ficha_ruc_sunat['condicion']}."
+                    if ficha_ruc_sunat else
+                    "No se pudo verificar en SUNAT en este momento."
+                ),
+            })
+            continue
         checklist["empresa"].append({
             "categoria": cat, "label": DOCUMENT_LABELS[cat],
             "uploaded": bool(f), "files": f,
         })
+    # Tarjeta de habilitación: se verifica contra el MTC (constancia + vigencia) y además se adjunta.
+    mtc_hab = await _mtc_habilitaciones(user.get("ruc") or "") if vehicles else None
+
     for v in vehicles:
         for cat in FLOTA_CATEGORIES:
             f = files_for(cat, v["placa"])
+            if cat == "tarjeta_habilitacion":
+                pn = (v["placa"] or "").replace("-", "").replace(" ", "").upper()
+                h = (mtc_hab or {}).get(pn)
+                ok = bool(h and h["habilitado"])
+                checklist["flota"].append({
+                    "categoria": cat, "placa": v["placa"],
+                    "label": f"{DOCUMENT_LABELS[cat]} — Placa {v['placa']}",
+                    "uploaded": bool(f), "files": f,   # el adjunto es obligatorio
+                "requiere_archivo": True,
+                    "auto_validado": True,
+                    "validado": ok,
+                    "mtc": h,
+                    "detalle": (
+                        f"Habilitada en el MTC · Constancia {h['constancia']} · Vigente hasta {h['vigencia']}."
+                        if ok else
+                        f"Autorización del MTC vencida ({h['vigencia']})." if (h and h.get("vencida")) else
+                        "Esta placa no figura habilitada en el MTC." if mtc_hab is not None else
+                        "No se pudo verificar en el MTC en este momento."
+                    ),
+                })
+                continue
             checklist["flota"].append({
                 "categoria": cat, "placa": v["placa"],
                 "label": f"{DOCUMENT_LABELS[cat]} — Placa {v['placa']}",
@@ -796,6 +1214,7 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
         "ahorro_reconocido": ahorro_reconocido_real,
         "vehicles": vehicles,
         "bank_account": bank,
+        "evidencia_cci": evidencia_cci,
         "checklist": checklist,
         "progress": {"total_required": total_required, "total_done": total_done, "pct": pct},
         "can_finalize": can_finalize,
@@ -848,6 +1267,8 @@ async def aceptar_declaracion(
     docs = [_normalize_doc(d) for d in docs]
     vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
+    # Todos los documentos deben estar adjuntos: la verificación en línea (SUNAT/MTC) es
+    # un apoyo para el cliente, pero no reemplaza el archivo en el expediente.
     missing = []
     for cat in EMPRESA_CATEGORIES:
         if (cat, None) not in docs_set:
@@ -1172,6 +1593,7 @@ async def finalize(user: dict = Depends(_require_subsidio)):
 
     missing = []
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
+    # Todos los documentos deben adjuntarse (la verificación en línea es solo apoyo).
     for cat in EMPRESA_CATEGORIES:
         if (cat, None) not in docs_set:
             missing.append(DOCUMENT_LABELS[cat])
@@ -1229,6 +1651,18 @@ class InvoiceUpdateIn(BaseModel):
     importe_total: Optional[float] = None
     numero_documento: Optional[str] = None
     ruc_emisor: Optional[str] = None
+    # Campos del formulario de la ATU (editables por el cliente)
+    serie: Optional[str] = None
+    numero: Optional[str] = None
+    categoria: Optional[str] = None
+    departamento: Optional[str] = None
+    provincia: Optional[str] = None
+    distrito: Optional[str] = None
+    direccion_grifo: Optional[str] = None
+    tiene_nc: Optional[bool] = None
+    serie_nc: Optional[str] = None
+    numero_nc: Optional[str] = None
+    alcance_nc: Optional[str] = None
     # Declarar factura como inválida (NO se borra, solo se marca con su motivo).
     invalida: Optional[bool] = None
     motivos_invalidez: Optional[List[str]] = None  # ej: ["tipo_combustible", "sin_placa"]
@@ -1253,9 +1687,25 @@ async def invoices_upload(
 
     # Cargar placas del usuario para auto-match
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0, "placa": 1}
+        {"user_id": user["id"]}, {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
     user_placas = {v["placa"] for v in vehicles}
+
+    # Contexto para la validación automática (reglas del DU 004-2026)
+    from services.validador_facturas import validar_factura as _validar
+    _np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
+    placas_norm = {_np(v["placa"]) for v in vehicles}
+    categoria_por_placa = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehicles}
+    # Facturas ya cargadas → detectar duplicados
+    _previas = await db.consumos_subsidio.find(
+        {"user_id": user["id"]}, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
+    ).to_list(2000)
+    _npl = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
+    numeros_existentes = {
+        (str(p.get("ruc_emisor") or "").strip(), str(p.get("numero_documento") or "").strip().upper(),
+         _npl(p.get("placa")))
+        for p in _previas if p.get("numero_documento")
+    }
 
     results = []
     for f in files:
@@ -1273,6 +1723,15 @@ async def invoices_upload(
         ct = (content_type or "").lower()
         is_pdf = "pdf" in ct or content[:4] == b"%PDF"
         _sid = f"ocr-{user['id']}-{uuid.uuid4().hex[:6]}"
+        # 1) QR / XML: fuente EXACTA (norma SUNAT). Da serie, número, fecha, RUC del grifo,
+        #    IGV y total sin depender del OCR; el XML además da los galones.
+        from services.extractor_comprobante import extraer as _extraer_comprobante
+        try:
+            base = _extraer_comprobante(content, f.filename or "")
+        except Exception as _e:
+            logger.warning(f"Extracción QR/XML falló en {f.filename}: {_e}")
+            base = {}
+
         try:
             if is_pdf:
                 ocr = await _extract_pdf_text(content, content_type, session_id=_sid)
@@ -1292,15 +1751,32 @@ async def invoices_upload(
             ocr_error = None
         except Exception as e:
             logger.warning(f"OCR error en {f.filename}: {e}")
-            extracted = {
-                "fecha": None, "hora": None, "estacion": None, "ciudad": None,
-                "placa": None, "producto": None, "galones": None,
-                "precio_unitario": None, "importe_total": None,
-                "numero_documento": None, "ruc_emisor": None, "confianza": 0.0,
-            }
-            raw_resp = ""
-            ocr_ok = False
-            ocr_error = str(e)[:200]
+            extracted, raw_resp, ocr_ok, ocr_error = {}, "", False, str(e)[:200]
+
+        # El dato del QR/XML manda sobre el del OCR (es exacto, no inferido).
+        if base:
+            for _k_ocr, _k_base in (("numero_documento", "numero_documento"), ("fecha", "fecha"),
+                                    ("ruc_emisor", "ruc_emisor"), ("importe_total", "importe_total"),
+                                    ("galones", "galones"), ("producto", "producto"),
+                                    ("placa", "placa"), ("precio_unitario", "precio_unitario")):
+                if base.get(_k_base) not in (None, ""):
+                    extracted[_k_ocr] = base[_k_base]
+            if base.get("razon_social_emisor") and not extracted.get("estacion"):
+                extracted["estacion"] = base["razon_social_emisor"]
+            ocr_ok = ocr_ok or bool(base.get("extraccion_ok"))
+
+        # 2) Datos del grifo desde OSINERGMIN con el RUC del emisor (lo que exige la ATU).
+        _grifo = None
+        if extracted.get("ruc_emisor"):
+            try:
+                from services.padron_grifos import buscar_por_ruc as _buscar_grifo
+                _grifo = await _buscar_grifo(db, extracted["ruc_emisor"])
+                if _grifo and _grifo.get("inscrito"):
+                    extracted.setdefault("estacion", _grifo.get("razon_social"))
+                    if not extracted.get("ciudad"):
+                        extracted["ciudad"] = _grifo.get("distrito")
+            except Exception:
+                pass
 
         # Auto-match con flota del usuario
         placa_match = None
@@ -1337,7 +1813,34 @@ async def invoices_upload(
             "importe_total": extracted.get("importe_total"),
             "numero_documento": extracted.get("numero_documento"),
             "confianza": extracted.get("confianza", 0.0),
+            # Datos del grifo (OSINERGMIN) y trazabilidad de la extracción — los pide la ATU.
+            "serie": base.get("serie"), "numero": base.get("numero"),
+            "departamento": (_grifo or {}).get("departamento"),
+            "provincia": (_grifo or {}).get("provincia"),
+            "distrito": (_grifo or {}).get("distrito"),
+            "direccion_grifo": (_grifo or {}).get("direccion"),
+            "grifo_inscrito": bool((_grifo or {}).get("inscrito")),
+            "fuentes": base.get("fuentes") or {},
+            "origin": "individual",
         }
+
+        # ── Validación automática contra las reglas del DU 004-2026 (lo que la ATU revisa a mano)
+        try:
+            _val = _validar(doc, placas_flota=placas_norm,
+                            categoria_por_placa=categoria_por_placa,
+                            numeros_existentes=numeros_existentes)
+            doc["validacion"] = _val
+            doc["validacion_estado"] = _val["estado"]          # CONFORME | OBSERVADA | RECHAZADA
+            doc["requiere_revision"] = _val["requiere_revision"]
+            # Evita que dos archivos de la MISMA carga se dupliquen entre sí.
+            if doc.get("numero_documento"):
+                numeros_existentes.add((str(doc.get("ruc_emisor") or "").strip(),
+                                        str(doc["numero_documento"]).strip().upper(),
+                                        _npl(doc.get("placa"))))
+        except Exception as _e:
+            logger.warning(f"Validación automática falló en {f.filename}: {_e}")
+            doc["validacion_estado"] = "OBSERVADA"
+            doc["requiere_revision"] = True
         await db.consumos_subsidio.insert_one(doc)
         results.append({
             "id": doc["id"],
@@ -1370,6 +1873,26 @@ async def invoices_preview(user: dict = Depends(_require_subsidio)):
     return {"items": rows, "vehicles": vehicles}
 
 
+@subsidio_router.get("/subsidio/invoices/{invoice_id}/file")
+async def invoice_file(invoice_id: str, user: dict = Depends(_require_subsidio)):
+    """Sirve el PDF/imagen original de una factura del propio cliente, inline,
+    para previsualizarla al costado del formulario de edición."""
+    uids = await _get_company_uids(user["id"])
+    d = await db.consumos_subsidio.find_one(
+        {"id": invoice_id, "user_id": {"$in": uids}},
+        {"_id": 0, "factura_storage_key": 1, "factura_filename": 1, "factura_content_type": 1},
+    )
+    if not d:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    key = d.get("factura_storage_key")
+    if not key:
+        raise HTTPException(status_code=404, detail="Este comprobante no tiene archivo adjunto")
+    return storage.download_response(
+        key, d.get("factura_filename") or "factura.pdf",
+        d.get("factura_content_type") or "application/pdf",
+    )
+
+
 @subsidio_router.put("/subsidio/invoices/{invoice_id}")
 async def invoices_update(
     invoice_id: str,
@@ -1385,7 +1908,32 @@ async def invoices_update(
     patch = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
     if "placa" in patch and patch["placa"]:
         patch["placa"] = patch["placa"].upper().strip()
+    if patch.get("serie") and patch.get("numero"):
+        patch["numero_documento"] = f"{patch['serie'].upper()}-{patch['numero']}"
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Revalidar con los datos corregidos, para que el estado se actualice al instante.
+    try:
+        from services.validador_facturas import validar_factura as _validar_upd
+        futuro = {**inv, **patch}
+        vehiculos = await db.subsidio_vehicles.find(
+            {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}).to_list(500)
+        _npu = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
+        placas = {_npu(v["placa"]) for v in vehiculos}
+        cats = {_npu(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
+        otras = await db.consumos_subsidio.find(
+            {"user_id": {"$in": uids}, "id": {"$ne": invoice_id}},
+            {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(3000)
+        vistos = {(str(o.get("ruc_emisor") or "").strip(),
+                   str(o.get("numero_documento") or "").strip().upper(), _npu(o.get("placa")))
+                  for o in otras if o.get("numero_documento")}
+        _v = _validar_upd(futuro, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos)
+        patch["validacion"] = _v
+        patch["validacion_estado"] = _v["estado"]
+        patch["requiere_revision"] = _v["requiere_revision"]
+    except Exception as _e:
+        logger.warning(f"Revalidación tras editar falló: {_e}")
+
     await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": patch})
     updated = await db.consumos_subsidio.find_one(
         {"id": invoice_id},

@@ -129,10 +129,23 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Responsive: en móvil las columnas se apilan y el monto baja de tamaño */}
+      <style>{`
+        @media (max-width: 820px) {
+          .e0-grid, .e0-split { grid-template-columns: 1fr !important; }
+          .e0-monto { font-size: 34px !important; }
+          .e0-banner { padding: 18px !important; }
+          .e0-cats { grid-template-columns: 1fr 1fr !important; }
+        }
+        @media (max-width: 420px) {
+          .e0-monto { font-size: 29px !important; }
+          .e0-cats { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
       {/* Potencial */}
-      <div style={{ background: "linear-gradient(135deg,#7C3AED 0%,#5B21B6 100%)", borderRadius: 18, padding: 24, color: "#fff", position: "relative", overflow: "hidden" }}>
+      <div className="e0-banner" style={{ background: "linear-gradient(135deg,#7C3AED 0%,#5B21B6 100%)", borderRadius: 18, padding: 24, color: "#fff", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", right: -20, top: -20, opacity: 0.1 }}><Coins style={{ width: 150, height: 150 }} /></div>
-        <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 22, alignItems: "stretch", position: "relative" }}>
+        <div className="e0-grid" style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 22, alignItems: "stretch", position: "relative" }}>
           {/* Izquierda: empresa + monto */}
           <div>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,.18)", padding: "3px 11px", borderRadius: 999, fontSize: 11, fontWeight: 800, letterSpacing: ".05em" }}>MÓDULO 0 · DIAGNÓSTICO SUBSIDIO</div>
@@ -142,7 +155,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
               <div style={{ fontSize: 13, color: "#C4B5FD", fontWeight: 700, marginTop: 2, letterSpacing: ".04em" }}>RUC {ruc}</div>
             </div>
             <div style={{ fontSize: 13.5, color: "#DDD6FE", marginTop: 16 }}>Máximo del subsidio que puedes reclamar</div>
-            <div style={{ fontSize: 46, fontWeight: 900, lineHeight: 1.05, marginTop: 2 }}>{fmtSoles(s.total_monto)}</div>
+            <div className="e0-monto" style={{ fontSize: 46, fontWeight: 900, lineHeight: 1.05, marginTop: 2 }}>{fmtSoles(s.total_monto)}</div>
             <div style={{ fontSize: 13, color: "#DDD6FE", marginTop: 6 }}>Hasta <b style={{ color: "#fff" }}>{fmtNum(s.total_galones)} galones</b> · {s.unidades_con_subsidio} de {s.total_unidades} unidades</div>
             {(s.categorias_no_aplican || []).length > 0 && (
               <div style={{ marginTop: 14, fontSize: 12, color: "#E9D5FF", background: "rgba(0,0,0,.14)", borderRadius: 10, padding: "9px 12px" }}>
@@ -175,7 +188,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
               </a>
             </div>
             {/* Categorías en el espacio libre */}
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min((s.por_categoria || []).length || 1, 3)}, 1fr)`, gap: 10 }}>
+            <div className="e0-cats" style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min((s.por_categoria || []).length || 1, 3)}, 1fr)`, gap: 10 }}>
               {(s.por_categoria || []).map((c) => (
                 <div key={c.categoria} style={{ background: "rgba(255,255,255,.12)", borderRadius: 12, padding: "11px 14px", textAlign: "center" }}>
                   <div style={{ fontSize: 12, fontWeight: 800, color: "#E9D5FF" }}>{c.unidades} × {c.categoria}</div>
@@ -189,7 +202,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
       </div>
 
       {/* Mitad y mitad: placas (izq) + semáforo de requisitos (der) */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}>
+      <div className="e0-split" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, alignItems: "start" }}>
         {/* IZQUIERDA: lista de placas */}
         <div style={{ background: "#fff", borderRadius: 16, overflow: "hidden", border: "1px solid #EEE", display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "14px 18px", borderBottom: "1px solid #F3F4F6" }}>

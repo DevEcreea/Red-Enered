@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import EmayFooter from "../components/EmayFooter";
 import { Search, Loader2, AlertTriangle, Building2, Coins } from "lucide-react";
 
 const HERO_IMG = "https://customer-assets.emergentagent.com/job_ui-update-11/artifacts/mbmk49w0_WhatsApp%20Image%202026-06-10%20at%206.26.35%20PM.jpeg";
@@ -58,6 +59,10 @@ export default function SubsidioPublico() {
             {loading ? "Ingresando…" : "Ver mi subsidio"}
           </button>
           <div style={{ marginTop: 22, fontSize: 12.5, color: "#9CA3AF" }}>¿Ya tienes cuenta con contraseña? <a href="/login" style={{ color: "#7C3AED", fontWeight: 700 }}>Inicia sesión</a></div>
+          {/* Marca EMAY TECH al pie */}
+          <div style={{ marginTop: 26 }}>
+            <EmayFooter variant="compact" />
+          </div>
         </div>
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @media(min-width:1024px){.sub-hero{display:block!important}}`}</style>

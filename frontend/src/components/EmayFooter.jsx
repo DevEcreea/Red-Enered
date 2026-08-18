@@ -63,9 +63,9 @@ export default function EmayFooter({ variant = "compact" }) {
       </div>
     );
   }
-  // Modules — with tagline
+  // Modules — with tagline. Línea sutil y espaciado justo (evita dobles separadores).
   return (
-    <footer className="mt-10 pt-4 border-t border-neutral-200">
+    <footer className="mt-6 pt-3 border-t border-neutral-100">
       <BaseLine withTagline={true} />
     </footer>
   );
