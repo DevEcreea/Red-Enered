@@ -576,12 +576,32 @@ function FlotaEtapa({ items, vehicles, onChange }) {
   const [placa, setPlaca] = useState("");
   const [categoria, setCategoria] = useState("N2");
   const [error, setError] = useState(null);
+  const [importando, setImportando] = useState(false);
+  const [aviso, setAviso] = useState(null);
 
   const addVehicle = async () => {
     setError(null);
     if (!placa.trim()) return;
     try { await api.post("/subsidio/vehicles", { placa: placa.toUpperCase(), categoria }); setPlaca(""); setAdding(false); onChange(); }
     catch (e) { setError(e?.response?.data?.detail || "Error"); }
+  };
+
+  // Trae las placas que el diagnóstico (Etapa 0) ya encontró en el MTC para este RUC.
+  const importarDelDiagnostico = async () => {
+    setImportando(true); setError(null); setAviso(null);
+    try {
+      const { data } = await api.post("/subsidio/vehicles/importar-diagnostico", {}, { timeout: 60000 });
+      setAviso(
+        data.importadas > 0
+          ? `Se agregaron ${data.importadas} unidad${data.importadas === 1 ? "" : "es"} de tu diagnóstico.`
+          : data.encontradas > 0
+            ? "Tus unidades del diagnóstico ya estaban registradas."
+            : "No encontramos unidades en el MTC para tu RUC. Agrégalas manualmente."
+      );
+      onChange();
+    } catch (e) {
+      setError(e?.response?.data?.detail || "No se pudieron traer las unidades");
+    } finally { setImportando(false); }
   };
   const removeVehicle = async (p) => {
     if (!window.confirm(`¿Quitar placa ${p}? Se borrarán también sus documentos.`)) return;
@@ -592,10 +612,29 @@ function FlotaEtapa({ items, vehicles, onChange }) {
     <div>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <EtapaHeader n={2} icon={Truck} title={`Documentos de flota · ${vehicles.length} unidad${vehicles.length === 1 ? "" : "es"}`} subtitle="Tarjetas de habilitación y propiedad · PDF, PNG o JPG" inline />
-        <button onClick={() => setAdding(!adding)} className="px-3 py-2 border border-neutral-300 rounded-lg text-sm font-bold flex items-center gap-1.5 hover:bg-neutral-50" data-testid="flota-toggle-add">
-          <Plus className="w-4 h-4" /> {adding ? "Cancelar" : "Agregar unidad"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={importarDelDiagnostico} disabled={importando}
+            className="px-3 py-2 border-2 border-brand text-brand rounded-lg text-sm font-bold flex items-center gap-1.5 hover:bg-brand/5 disabled:opacity-60"
+            data-testid="flota-importar-diagnostico">
+            {importando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+            {importando ? "Consultando el MTC…" : "Traer unidades de mi diagnóstico"}
+          </button>
+          <button onClick={() => setAdding(!adding)} className="px-3 py-2 border border-neutral-300 rounded-lg text-sm font-bold flex items-center gap-1.5 hover:bg-neutral-50" data-testid="flota-toggle-add">
+            <Plus className="w-4 h-4" /> {adding ? "Cancelar" : "Agregar unidad"}
+          </button>
+        </div>
       </div>
+
+      {aviso && (
+        <div className="mb-4 text-sm bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-4 py-2.5 font-semibold">
+          {aviso}
+        </div>
+      )}
+      {error && !adding && (
+        <div className="mb-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-2.5 font-semibold">
+          {error}
+        </div>
+      )}
 
       {adding && (
         <div className="bg-white border-2 border-brand/30 rounded-xl p-4 mb-4 flex flex-wrap gap-3 items-end">
@@ -616,7 +655,8 @@ function FlotaEtapa({ items, vehicles, onChange }) {
 
       {vehicles.length === 0 && !adding && (
         <div className="text-center text-sm text-neutral-500 bg-neutral-50 border-2 border-dashed border-neutral-300 rounded-xl p-8">
-          Aún no has registrado unidades. Agrega tus placas para subir habilitaciones y tarjetas de propiedad.
+          Aún no has registrado unidades. Usa <b>“Traer unidades de mi diagnóstico”</b> para cargar
+          automáticamente las placas que encontramos en el MTC, o agrégalas manualmente.
         </div>
       )}
 

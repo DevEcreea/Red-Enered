@@ -1563,6 +1563,66 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
     return {"ok": True, "vehicle": {k: v for k, v in doc.items() if k != "_id"}}
 
 
+@subsidio_router.post("/subsidio/vehicles/importar-diagnostico")
+async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio)):
+    """Trae a la Etapa 2 las unidades que el diagnóstico (Etapa 0) encontró en el MTC
+    para el RUC de la empresa, para que el cliente no las vuelva a escribir a mano.
+    Es idempotente: las placas ya registradas se respetan (no se duplican ni se pisan)."""
+    ruc = (user.get("ruc") or "").strip()
+    if not _re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="La empresa no tiene un RUC válido registrado")
+
+    try:
+        import asyncio as _asyncio
+        import mtc as _mtc
+        m = await _asyncio.wait_for(_mtc.consultar("ruc", ruc), timeout=45)
+    except Exception as e:
+        logger.warning(f"Importar unidades del diagnóstico falló para RUC {ruc}: {e}")
+        raise HTTPException(status_code=502,
+                            detail="No pudimos consultar el MTC en este momento. Intenta de nuevo en un minuto.")
+
+    # Un RUC puede tener varias autorizaciones con la MISMA placa repetida → dedup.
+    encontradas, vistas = [], set()
+    for a in (m.get("autorizaciones") or []):
+        for v in (a.get("vehiculos") or []):
+            placa = (v.get("placa") or "").upper().strip()
+            pn = placa.replace("-", "").replace(" ", "")
+            if not pn or pn in vistas:
+                continue
+            vistas.add(pn)
+            encontradas.append({"placa": placa, "categoria": (v.get("categoria") or "").upper()})
+
+    uids = await _get_company_uids(user["id"])
+    existentes = {
+        (v.get("placa") or "").upper().replace("-", "").replace(" ", "")
+        for v in await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+    }
+
+    nuevos = []
+    for u in encontradas:
+        if u["placa"].replace("-", "").replace(" ", "") in existentes:
+            continue
+        nuevos.append({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "empresa": user.get("empresa"),
+            "placa": u["placa"],
+            "categoria": u["categoria"],
+            "origen": "diagnostico_mtc",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    if nuevos:
+        await db.subsidio_vehicles.insert_many(nuevos)
+
+    return {
+        "ok": True,
+        "encontradas": len(encontradas),
+        "importadas": len(nuevos),
+        "ya_registradas": len(encontradas) - len(nuevos),
+        "placas": [n["placa"] for n in nuevos],
+    }
+
+
 @subsidio_router.delete("/subsidio/vehicles/{placa}")
 async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
     placa_norm = placa.upper().strip()
