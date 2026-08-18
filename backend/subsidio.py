@@ -1714,6 +1714,12 @@ async def invoices_upload(
             results.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
             continue
         content_type = f.content_type or "application/octet-stream"
+        # Las facturas de combustible SOLO se aceptan en PDF (el QR/XML del PDF es la fuente exacta).
+        if not (content_type in COMBUSTIBLE_MIME or content[:4] == b"%PDF"):
+            results.append({"filename": f.filename, "ok": False,
+                            "error": "Solo se aceptan facturas en PDF"})
+            continue
+        content_type = "application/pdf"
 
         # Save raw file
         key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")

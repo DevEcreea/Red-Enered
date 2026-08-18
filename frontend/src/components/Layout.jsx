@@ -49,10 +49,15 @@ const ADMIN_ITEMS = [
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload", mkey: "datos" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin", mkey: "subsidio" },
   { to: "/admin/bitacora", label: "Bitácora", icon: FileText, testid: "nav-bitacora", mkey: "bitacora" },
-  { to: "/mtc", label: "Consulta MTC", icon: ShieldCheck, testid: "nav-mtc", mkey: "mtc" },
-  { to: "/atu", label: "Diagnóstico ATU", icon: ShieldAlert, testid: "nav-atu", mkey: "atu" },
-  { to: "/admin/atu", label: "Conexión ATU", icon: ShieldAlert, testid: "nav-admin-atu", mkey: "atu_conexion" },
-  { to: "/admin/sire", label: "Compras SUNAT", icon: FileText, testid: "nav-admin-sire", mkey: "sire" },
+  {
+    label: "En desarrollo (GIU)", icon: ShieldCheck, testid: "nav-en-desarrollo",
+    submenu: [
+      { to: "/mtc", label: "Consulta MTC", testid: "nav-mtc", mkey: "mtc" },
+      { to: "/atu", label: "Diagnóstico ATU", testid: "nav-atu", mkey: "atu" },
+      { to: "/admin/atu", label: "Conexión ATU", testid: "nav-admin-atu", mkey: "atu_conexion" },
+      { to: "/admin/sire", label: "Compras SUNAT", testid: "nav-admin-sire", mkey: "sire" },
+    ],
+  },
 ];
 
 const ROUTE_TITLES = {
@@ -367,9 +372,19 @@ export default function Layout({ children }) {
             }`}>
               Admin
             </div>
-            {ADMIN_ITEMS.filter((item) => !(Array.isArray(user.permisos) && item.mkey && !user.permisos.includes(item.mkey))).map((item) => (
-              <SidebarLink key={item.to} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
-            ))}
+            {ADMIN_ITEMS
+              .map((item) => {
+                // Los grupos (submenu) filtran sus submódulos por permiso; el grupo se oculta si queda vacío.
+                if (item.submenu) {
+                  const submenu = item.submenu.filter((s) => !(Array.isArray(user.permisos) && s.mkey && !user.permisos.includes(s.mkey)));
+                  return submenu.length ? { ...item, submenu } : null;
+                }
+                return Array.isArray(user.permisos) && item.mkey && !user.permisos.includes(item.mkey) ? null : item;
+              })
+              .filter(Boolean)
+              .map((item) => (
+                <SidebarLink key={item.to || item.label} item={item} onClick={() => setMobileOpen(false)} isCollapsed={isCollapsed} />
+              ))}
           </>
         )}
 
