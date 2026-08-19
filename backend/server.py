@@ -609,6 +609,224 @@ async def get_combustibles_disponibles(user: dict = Depends(get_current_user)):
     return {"combustibles": ["Diesel B5 UV", "Gasohol Regular", "Gasohol Premium"]}
 
 
+async def _geocodificar(consulta: str) -> Optional[dict]:
+    """Dirección → {lat, lon} usando Nominatim (OpenStreetMap, gratis). Con caché en Mongo
+    (las coordenadas de un grifo no cambian) para respetar el límite de 1 consulta/seg."""
+    consulta = " ".join((consulta or "").split()).strip()
+    if len(consulta) < 4:
+        return None
+    hit = await db.geocode_cache.find_one({"q": consulta.upper()}, {"_id": 0, "lat": 1, "lon": 1})
+    if hit:
+        return hit if hit.get("lat") is not None else None
+    import httpx as _hx
+    coords = None
+    try:
+        async with _hx.AsyncClient(timeout=12.0, headers={"User-Agent": "ENERED/1.0 (soporte@enered.pe)"}) as c:
+            r = await c.get("https://nominatim.openstreetmap.org/search",
+                            params={"format": "json", "limit": 1, "countrycodes": "pe", "q": consulta})
+            if r.status_code == 200 and r.json():
+                d = r.json()[0]
+                coords = {"lat": float(d["lat"]), "lon": float(d["lon"])}
+    except Exception as e:
+        logger.warning(f"[geocode] {consulta[:40]}: {e}")
+    # Cachea también el fallo (lat=None) para no reintentar direcciones imposibles cada vez.
+    await db.geocode_cache.update_one(
+        {"q": consulta.upper()},
+        {"$set": {"q": consulta.upper(), "lat": (coords or {}).get("lat"),
+                  "lon": (coords or {}).get("lon"), "at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    return coords
+
+
+@api.get("/precios/mapa")
+async def precios_mapa(
+    user: dict = Depends(get_current_user),
+    combustible: Optional[str] = None,
+    departamento: Optional[str] = None,
+    provincia: Optional[str] = None,
+    distrito: Optional[str] = None,
+    solo_enered: bool = False,
+    max_geo: int = 12,
+):
+    """Grifos con COORDENADAS para pintarlos en el mapa. Reutiliza el filtro de /precios y
+    geocodifica (con caché) las direcciones. Para no exceder el límite de Nominatim (1/seg),
+    geocodifica pocas direcciones nuevas por llamada y reporta cuántas quedan pendientes; el
+    frontend reintenta hasta completar (a partir de la 2ª vez todo sale de la caché, instantáneo)."""
+    datos = await get_precios(user=user, combustible=combustible, departamento=departamento,
+                              provincia=provincia, distrito=distrito, solo_enered=solo_enered)
+    precios = datos.get("precios") or []
+
+    # Vía rápida: si los precios ya traen coordenadas GPS reales (sincronizadas desde el mapa
+    # de Facilito), se usan directo — nada de geocodificar ni aproximar.
+    con_gps = [p for p in precios if p.get("lat") is not None and p.get("lon") is not None]
+    if con_gps:
+        # Algunos operadores reportan a Facilito un GPS equivocado (p. ej. un grifo de la sierra
+        # con coordenadas en la costa). Se descartan esos outliers: dentro de una misma provincia
+        # los grifos están cerca, así que se compara cada uno con la mediana de su provincia.
+        import statistics as _st
+        def _km(a_lat, a_lon, b_lat, b_lon):
+            import math
+            return math.hypot((a_lat - b_lat) * 111, (a_lon - b_lon) * 111 * math.cos(math.radians(a_lat)))
+        por_prov = {}
+        for p in con_gps:
+            por_prov.setdefault((p.get("provincia") or "").upper(), []).append(p)
+        limpios = []
+        for prov, grupo in por_prov.items():
+            if len(grupo) < 5:
+                limpios.extend(grupo)   # muy pocos para juzgar outliers
+                continue
+            mlat = _st.median(g["lat"] for g in grupo)
+            mlon = _st.median(g["lon"] for g in grupo)
+            for g in grupo:
+                if _km(g["lat"], g["lon"], mlat, mlon) <= 80:   # dentro de la provincia
+                    limpios.append(g)
+                else:
+                    logger.info(f"[precios_mapa] outlier GPS descartado: {g.get('establecimiento')} "
+                                f"({g['lat']},{g['lon']}) lejos de {prov}")
+        con_gps = limpios
+        salida = [{
+            "preciso": True,
+            "establecimiento": p.get("establecimiento"), "direccion": p.get("direccion"),
+            "distrito": p.get("distrito") or p.get("ciudad"), "provincia": p.get("provincia"),
+            "departamento": p.get("departamento"),
+            "precio_venta": p.get("precio_venta"), "precio_enered": p.get("precio_enered"),
+            "combustible": p.get("combustible"), "es_enered": bool(p.get("es_enered")),
+            "acepta_factura": p.get("acepta_factura", True),
+            "lat": p["lat"], "lon": p["lon"],
+        } for p in con_gps]
+        return {"ok": True, "grifos": salida, "total": len(precios),
+                "con_coordenadas": len(salida), "pendientes": 0}
+
+    presupuesto = {"n": max_geo}   # llamadas nuevas a Nominatim permitidas en esta request
+
+    async def resolver(consulta):
+        """Devuelve {lat,lon} de una consulta. 'PENDIENTE' si no hay presupuesto para geocodificarla."""
+        consulta = " ".join((consulta or "").split()).strip()
+        if len(consulta) < 4:
+            return None
+        hit = await db.geocode_cache.find_one({"q": consulta.upper()}, {"_id": 0, "lat": 1, "lon": 1})
+        if hit is not None:
+            return hit if hit.get("lat") is not None else None
+        if presupuesto["n"] <= 0:
+            return "PENDIENTE"
+        presupuesto["n"] -= 1
+        coords = await _geocodificar(consulta)   # ya cachea el resultado (coords o null)
+        await asyncio.sleep(1.1)                 # respeta el límite de Nominatim (1/seg)
+        return coords
+
+    salida, pendientes = [], 0
+    for p in precios:
+        direccion = p.get("direccion") or ""
+        dist = p.get("distrito") or p.get("ciudad") or ""
+        prov = p.get("provincia") or ""
+        dep = p.get("departamento") or ""
+        # Cascada: dirección exacta → centro del distrito → centro de la provincia.
+        # 'preciso' = la coordenada vino de la dirección exacta (posición real). Si cayó al
+        # centro del distrito/provincia, es aproximada → el frontend la agrupa por zona en vez
+        # de fingir una posición individual.
+        coords, preciso, hubo_pendiente = None, False, False
+        intentos = [
+            (f"{direccion}, {dist}, {prov}, {dep}", True),
+            (f"{dist}, {prov}, {dep}", False),
+            (f"{prov}, {dep}", False),
+        ]
+        for consulta, es_exacta in intentos:
+            if not consulta.replace(",", "").strip():
+                continue
+            r = await resolver(consulta)
+            if r == "PENDIENTE":
+                # Sin presupuesto para este intento: seguimos a la zona (barata por caché).
+                # La dirección exacta se refina en una carga posterior.
+                hubo_pendiente = True
+                continue
+            if r:
+                coords, preciso = r, es_exacta
+                break
+        if not coords:
+            if hubo_pendiente:
+                pendientes += 1
+            continue
+        # Si aún no tenemos la posición exacta pero sí la de zona, y quedó presupuesto pendiente,
+        # avisamos que hay refinamiento posible.
+        if not preciso and hubo_pendiente:
+            pendientes += 1
+        salida.append({
+            "preciso": preciso,
+            "establecimiento": p.get("establecimiento"), "direccion": p.get("direccion"),
+            "distrito": p.get("distrito") or p.get("ciudad"), "provincia": p.get("provincia"),
+            "departamento": p.get("departamento"),
+            "precio_venta": p.get("precio_venta"), "precio_enered": p.get("precio_enered"),
+            "combustible": p.get("combustible"), "es_enered": bool(p.get("es_enered")),
+            "acepta_factura": p.get("acepta_factura", True),
+            "lat": coords["lat"], "lon": coords["lon"],
+        })
+
+    return {"ok": True, "grifos": salida, "total": len(precios),
+            "con_coordenadas": len(salida), "pendientes": pendientes}
+
+
+@api.get("/precios/ruta")
+async def precios_ruta(
+    origen_lat: float, origen_lon: float,
+    direccion: str = "", distrito: str = "", provincia: str = "", departamento: str = "",
+    dest_lat: Optional[float] = None, dest_lon: Optional[float] = None,
+    user: dict = Depends(get_current_user),
+):
+    """Ruta en auto desde la ubicación del usuario hasta un grifo: distancia (km), tiempo
+    estimado (min) y el trazo del camino. Geocodifica el grifo si no llegan sus coordenadas.
+    Fuentes gratuitas: Nominatim (geocodificación) + OSRM (ruteo)."""
+    destino = None
+    if dest_lat is not None and dest_lon is not None:
+        destino = {"lat": dest_lat, "lon": dest_lon}
+    else:
+        # Intentos de menor a mayor especificidad; el grifo suele estar en carretera.
+        for consulta in (
+            f"{direccion}, {distrito}, {provincia}, {departamento}",
+            f"{direccion}, {distrito}, {departamento}",
+            f"{distrito}, {provincia}, {departamento}",
+        ):
+            if consulta.replace(",", "").strip():
+                destino = await _geocodificar(consulta)
+                if destino:
+                    break
+    if not destino:
+        raise HTTPException(status_code=404,
+                            detail="No pudimos ubicar este grifo en el mapa por su dirección.")
+
+    import httpx as _hx
+    try:
+        url = (f"https://router.project-osrm.org/route/v1/driving/"
+               f"{origen_lon},{origen_lat};{destino['lon']},{destino['lat']}"
+               f"?overview=full&geometries=geojson")
+        async with _hx.AsyncClient(timeout=15.0) as c:
+            r = await c.get(url)
+        data = r.json()
+        ruta = (data.get("routes") or [None])[0]
+        if not ruta:
+            raise ValueError("sin ruta")
+    except Exception as e:
+        logger.warning(f"[ruta] OSRM: {e}")
+        # Sin ruteo: al menos devolvemos el destino para marcarlo en el mapa.
+        return {"ok": True, "destino": destino, "distancia_km": None, "duracion_min": None, "camino": []}
+
+    # GeoJSON entrega [lon, lat]; el mapa (Leaflet) usa [lat, lon].
+    camino = [[p[1], p[0]] for p in ruta["geometry"]["coordinates"]]
+    km = ruta["distance"] / 1000
+    # OSRM da el tiempo en "flujo libre" (vía vacía), irreal en ciudad. Ajuste por tráfico:
+    # más fuerte en tramos cortos/urbanos (semáforos, congestión) y menor en carretera.
+    base_min = ruta["duration"] / 60
+    factor = 2.0 if km <= 5 else 1.7 if km <= 20 else 1.35
+    duracion_real = round(base_min * factor)
+    return {
+        "ok": True,
+        "destino": destino,
+        "distancia_km": round(km, 1),
+        "duracion_min": duracion_real,
+        "duracion_libre_min": round(base_min),
+        "camino": camino,
+    }
+
+
 @api.post("/admin/precios/sync")
 async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
     """Dispara el scraping de precios desde Facilito OSINERGMIN."""
@@ -717,6 +935,56 @@ async def importar_precios_html(
     await db.precios_facilito.create_index("departamento")
     count = await db.precios_facilito.count_documents({})
     return {"ok": True, "importados": total, "total_en_db": count, "detalle": detalle}
+
+
+@api.post("/admin/precios/sync-mapa")
+async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_roles("admin_enered"))):
+    """Sincroniza precios Y coordenadas GPS reales desde el mapa de Facilito (sin captcha).
+    Body opcional: {"departamentos": ["LA LIBERTAD", ...]}; sin él, trae todo el Perú.
+    Reemplaza cada departamento traído. Esta es la fuente correcta: ubica los grifos donde
+    de verdad están (no una aproximación por dirección)."""
+    from services.facilito_mapa import traer_precios_con_gps, DEPARTAMENTOS
+
+    deps = (payload or {}).get("departamentos") or None
+    try:
+        registros = await traer_precios_con_gps(deps)
+    except Exception as e:
+        logger.error(f"[sync_precios_mapa] {e}")
+        raise HTTPException(status_code=502, detail=f"No se pudo consultar el mapa de Facilito: {str(e)[:120]}")
+    if not registros:
+        raise HTTPException(status_code=404, detail="Facilito no devolvió grifos para ese ámbito.")
+
+    # Marca es_enered por nombre y normaliza combustible.
+    enered_names = {(n or "").upper() for n in await db.estaciones_enered.distinct("nombre_facilito")}
+    # Provincia/distrito reales cruzando el código OSINERGMIN con el padrón (para que los filtros afinen).
+    codigos = {r.get("codigo_osinergmin") for r in registros if r.get("codigo_osinergmin")}
+    padron = {}
+    if codigos:
+        async for g in db.grifos_osinergmin.find(
+            {"codigo_osinergmin": {"$in": list(codigos)}},
+            {"_id": 0, "codigo_osinergmin": 1, "provincia": 1, "distrito": 1}):
+            padron[g["codigo_osinergmin"]] = g
+    dptos = set()
+    for r in registros:
+        r["combustible"] = normalizar_combustible(r["combustible"])
+        r["es_enered"] = (r["establecimiento"] or "").upper() in enered_names
+        r["preciso"] = True   # coordenada GPS real
+        ref = padron.get(r.get("codigo_osinergmin"), {})
+        r["provincia"] = (ref.get("provincia") or r["departamento"]).upper()
+        r["distrito"] = (ref.get("distrito") or "").upper()
+        r["ciudad"] = r["distrito"] or r["departamento"]
+        dptos.add(r["departamento"])
+
+    for dep in dptos:
+        await db.precios_facilito.delete_many({"departamento": dep})
+    await db.precios_facilito.insert_many(registros)
+    await db.precios_facilito.create_index("combustible")
+    await db.precios_facilito.create_index("departamento")
+
+    count = await db.precios_facilito.count_documents({})
+    grifos = len({(r["establecimiento"], r["lat"], r["lon"]) for r in registros})
+    return {"ok": True, "grifos_con_gps": grifos, "registros": len(registros),
+            "departamentos": sorted(dptos), "total_en_db": count}
 
 
 @api.post("/admin/precios/importar-json")

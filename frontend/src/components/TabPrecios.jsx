@@ -3,6 +3,8 @@ import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
 import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw, Star, ShieldCheck, Plus, Upload } from "lucide-react";
 import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
+import ModalRutaGrifo from "./ModalRutaGrifo";
+import MapaGrifos from "./MapaGrifos";
 
 export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, syncing, isMobile = false }) {
   // Updated 2026-08-04 - Standardized TabPrecios table format
@@ -40,6 +42,25 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
 
   const [lastSync, setLastSync] = useState(null);
   const [totalRegistros, setTotalRegistros] = useState(0);
+  const [syncGps, setSyncGps] = useState(false);
+
+  // Sincroniza precios + coordenadas GPS REALES desde el mapa de Facilito (sin captcha).
+  const actualizarConGps = async () => {
+    const dep = selDepartamento || "";
+    if (!window.confirm(
+      dep ? `¿Traer precios y ubicación GPS real de ${dep} desde Facilito?`
+          : "¿Traer precios y ubicación GPS real de TODO el Perú? (tarda varios minutos)"
+    )) return;
+    setSyncGps(true);
+    try {
+      const body = dep ? { departamentos: [dep.toUpperCase()] } : {};
+      const { data } = await api.post("/admin/precios/sync-mapa", body, { timeout: 600000 });
+      alert(`✅ ${data.grifos_con_gps} grifos con GPS real actualizados (${data.departamentos.join(", ")}).`);
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    } finally { setSyncGps(false); }
+  };
 
   // Importación asistida: Facilito puso captcha al buscador, así que el admin busca en su
   // navegador (resuelve el captcha), guarda la página (⌘+S) y la sube aquí.
@@ -204,10 +225,19 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
   };
 
-  const openRouteMap = (estacion, ciudad) => {
-    const q = encodeURIComponent(`${estacion} ${ciudad} peru`);
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${q}`, "_blank");
-  };
+  // Ruta a la estación DENTRO de ENERED (mapa + km + tiempo). Recibe el grifo completo.
+  const [grifoRuta, setGrifoRuta] = useState(null);
+
+  // Filtros que alimentan el mapa de la red (mismos que la tabla); memoizado para no recargar.
+  const mapaFiltros = useMemo(() => {
+    const f = {};
+    if (selDepartamento) f.departamento = selDepartamento;
+    if (selProvincia) f.provincia = selProvincia;
+    if (selDistrito) f.distrito = selDistrito;
+    if (selCombustible) f.combustible = selCombustible;
+    if (soloEnered) f.solo_enered = true;
+    return f;
+  }, [selDepartamento, selProvincia, selDistrito, selCombustible, soloEnered]);
 
   const handleSavePrecioEnered = async (e) => {
     e.preventDefault();
@@ -364,12 +394,13 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                   {importing ? "Importando…" : "Actualizar precios"}
                 </button>
                 <button
-                  onClick={doSync}
-                  disabled={isSyncing}
+                  onClick={actualizarConGps}
+                  disabled={syncGps}
                   className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
+                  title="Trae precios y ubicación GPS real desde el mapa de Facilito"
                 >
-                  <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} />
-                  {isSyncing ? "Scrapeando..." : "Sincronizar Facilito"}
+                  <MapPin className={`w-3 h-3 ${syncGps ? "animate-pulse" : ""}`} />
+                  {syncGps ? "Trayendo GPS…" : selDepartamento ? `Actualizar ${selDepartamento}` : "Actualizar todo (GPS)"}
                 </button>
               </>
             )}
@@ -486,6 +517,9 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
           </div>
         )}
       </div>
+
+      {/* MAPA DE LA RED DE GRIFOS */}
+      <MapaGrifos filtros={mapaFiltros} />
 
       {/* TABLA DE PRECIOS */}
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
@@ -688,26 +722,19 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                       {/* 9. Acción */}
                       <td className="px-4 py-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {esEnered ? (
-                            <button
-                              onClick={() => openStationMap(nombreEst, ciudad)}
-                              className="bg-emerald-600 text-white text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-emerald-700 transition-colors shadow-xs"
-                            >
-                              Dirigir
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => openStationMap(nombreEst, ciudad)}
-                              className="bg-white border border-neutral-300 text-neutral-700 text-[11px] font-semibold px-3 py-1 rounded-full hover:bg-neutral-50 transition-colors"
-                            >
-                              Evaluar
-                            </button>
-                          )}
                           <button
-                            onClick={() => openRouteMap(nombreEst, ciudad)}
+                            onClick={() => setGrifoRuta(p)}
+                            className={`text-[11px] font-semibold px-3 py-1 rounded-full transition-colors inline-flex items-center gap-1 ${
+                              esEnered ? "bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
+                              : "bg-brand text-white hover:bg-brand-hover"}`}
+                          >
+                            <MapPin className="w-3 h-3" /> Cómo llegar
+                          </button>
+                          <button
+                            onClick={() => openStationMap(nombreEst, ciudad)}
                             className="bg-white border border-neutral-300 text-neutral-600 text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-neutral-50 transition-colors"
                           >
-                            Ruta
+                            Ver
                           </button>
                         </div>
                       </td>
@@ -863,6 +890,8 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
           </div>
         </div>
       )}
+
+      {grifoRuta && <ModalRutaGrifo grifo={grifoRuta} onClose={() => setGrifoRuta(null)} />}
     </div>
   );
 }
