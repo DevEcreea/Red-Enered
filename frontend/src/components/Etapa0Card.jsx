@@ -233,6 +233,8 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
         <div className="e0k-eyebrow">D.U. 004-2026 <span className="tag one">PRESENTACIÓN ÚNICA</span></div>
 
         <div className="e0k-amount a4">
+          {/* Encabezado: a quién pertenece el diagnóstico */}
+          <div className="amt-emp"><span className="emp">{empresa}</span><b className="rucv">RUC {ruc}</b></div>
           <div className="amt-row">
             <div className="amt-l">
               <div className="lbl">Máximo que puedes reclamar</div>
@@ -241,6 +243,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
             </div>
             <Reloj target={DU004_FIN} label="cierre" fecha="28 SET" />
           </div>
+          <div className="amt-foot">Un solo intento en el año — cierra <b>28 SET 2026</b></div>
         </div>
 
         <div className="e0k-box">
@@ -322,6 +325,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
         <div className="e0k-eyebrow">D.U. 007-2026 <span className="tag three">3 PERIODOS · 3 SOLICITUDES</span></div>
 
         <div className="e0k-amount a7">
+          <div className="amt-emp"><span className="emp">{empresa}</span><b className="rucv">RUC {ruc}</b></div>
           <div className="amt-row">
             <div className="amt-l">
               <div className="lbl">Máximo por periodo</div>
@@ -334,8 +338,10 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
             </div>
             <Reloj target={target7} label={label7} fecha={fecha7} soft={soft7} />
           </div>
-          {monto007 > 0 && (
+          {monto007 > 0 ? (
             <div className="amt-foot">Si presentas los 3 periodos <b>{fmtSoles(monto007 * 3)}</b></div>
+          ) : (
+            <div className="amt-foot">Consumo del periodo 1 <b>ya corriendo</b></div>
           )}
         </div>
 
@@ -416,8 +422,15 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
 .e0k-amount .big{font-family:"Cabinet Grotesk",system-ui,sans-serif;font-size:38px;font-weight:800;line-height:1.04;margin:2px 0 4px;
   font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 .e0k-amount .sub{font-size:11.5px;opacity:.85}
+.e0k-amount .amt-emp{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  margin-bottom:12px;padding-bottom:11px;border-bottom:1px solid rgba(255,255,255,.22);
+  position:relative;z-index:1}
+.e0k-amount .amt-emp .emp{font-family:"Cabinet Grotesk",system-ui,sans-serif;font-size:13px;font-weight:800;
+  letter-spacing:.02em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.e0k-amount .amt-emp .rucv{font-size:11.5px;font-weight:700;opacity:.9;white-space:nowrap;
+  font-variant-numeric:tabular-nums;letter-spacing:.05em}
 .e0k-amount .amt-foot{margin-top:13px;padding-top:12px;border-top:1px solid rgba(255,255,255,.22);
-  display:flex;align-items:baseline;gap:9px;font-size:12px;position:relative;z-index:1}
+  display:flex;align-items:baseline;gap:9px;font-size:12px;position:relative;z-index:1;min-height:42px}
 .e0k-amount .amt-foot b{font-family:"Cabinet Grotesk",system-ui,sans-serif;font-size:19px;font-weight:800}
 
 .e0k-clock{display:flex;align-items:center;gap:12px;flex:none;padding:11px 15px;border-radius:12px;

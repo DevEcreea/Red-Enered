@@ -281,6 +281,61 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
 
 
 
+def parsear_html_guardado(html: str, enered_stations: set = None,
+                          departamento: str = "", provincia: str = "", combustible: str = "") -> dict:
+    """
+    Importación ASISTIDA: Facilito puso reCAPTCHA al buscador, así que una persona hace la
+    búsqueda en su navegador (resolviendo el captcha), guarda la página de resultados
+    (⌘+S / Ctrl+S) y la sube. Aquí se parsea ese HTML con el mismo _parse_table del scraper.
+
+    Auto-detecta departamento/provincia/combustible desde los <select> server-rendered de la
+    página; los parámetros explícitos (si vienen) tienen prioridad.
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    def _selected(nombre: str):
+        sel = soup.find("select", attrs={"name": nombre}) or soup.find("select", id=nombre)
+        if not sel:
+            return None, None
+        opt = sel.find("option", selected=True)
+        if not opt:
+            return None, None
+        return (opt.get("value") or "").strip(), opt.get_text(strip=True).upper()
+
+    dpto_name = (departamento or "").upper().strip()
+    if not dpto_name:
+        code, txt = _selected("departamento_elegido")
+        if txt and "SELECCIONE" not in txt:
+            dpto_name = txt
+        elif code:
+            dpto_name = next((d["name"] for d in DEPARTAMENTOS if d["code"] == code), "")
+
+    prov_name = (provincia or "").upper().strip()
+    if not prov_name:
+        _, txt = _selected("provincia")
+        if txt and "SELECCIONE" not in txt:
+            prov_name = txt
+
+    comb = (combustible or "").strip()
+    if not comb:
+        val, txt = _selected("combustible")
+        comb = (val or txt or "").strip()
+
+    if not dpto_name:
+        return {"ok": False, "registros": [],
+                "error": "No se pudo detectar el departamento en la página; elígelo manualmente."}
+    if not comb:
+        return {"ok": False, "registros": [],
+                "error": "No se pudo detectar el combustible en la página; elígelo manualmente."}
+
+    dpto = {"name": dpto_name}
+    if prov_name:
+        dpto["provincia"] = prov_name
+    registros = _parse_table(html, dpto, comb, enered_stations or set())
+    return {"ok": True, "departamento": dpto_name, "provincia": prov_name or None,
+            "combustible": comb, "registros": registros}
+
+
 def scrape_all_precios(enered_stations: set = None) -> list[dict]:
     """Scrape ALL fuel stations from Facilito OSINERGMIN across Peru."""
     if enered_stations is None:

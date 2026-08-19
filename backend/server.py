@@ -661,6 +661,59 @@ async def sync_precios(user: dict = Depends(require_roles("admin_enered"))):
     }
 
 
+@api.post("/admin/precios/importar-html")
+async def importar_precios_html(
+    files: List[UploadFile] = File(...),
+    departamento: str = Form(""),
+    provincia: str = Form(""),
+    combustible: str = Form(""),
+    user: dict = Depends(require_roles("admin_enered")),
+):
+    """
+    Importación ASISTIDA de precios: Facilito bloqueó el scraping con reCAPTCHA, así que el
+    admin hace la búsqueda en su navegador (resuelve el captcha como humano), guarda la página
+    de resultados (⌘+S) y la sube aquí. Se parsea con el mismo parser del scraper y se
+    reemplazan SOLO los precios del ámbito importado (departamento[+provincia]+combustible).
+    """
+    from services.facilito_scraper import parsear_html_guardado
+
+    enered_docs = await db.estaciones_enered.find({}, {"nombre_facilito": 1}).to_list(500)
+    enered_stations = {e.get("nombre_facilito", "") for e in enered_docs if e.get("nombre_facilito")}
+
+    detalle, total = [], 0
+    for f in files:
+        try:
+            html = (await f.read()).decode("utf-8", errors="replace")
+            r = parsear_html_guardado(html, enered_stations, departamento, provincia, combustible)
+        except Exception as e:
+            detalle.append({"archivo": f.filename, "ok": False, "error": f"No se pudo leer: {str(e)[:120]}"})
+            continue
+        if not r.get("ok"):
+            detalle.append({"archivo": f.filename, "ok": False, "error": r.get("error")})
+            continue
+        if not r["registros"]:
+            detalle.append({"archivo": f.filename, "ok": False,
+                            "error": "El archivo no contiene la tabla de resultados de Facilito. "
+                                     "Guarda la página DESPUÉS de hacer la búsqueda."})
+            continue
+        filtro = {"departamento": r["departamento"], "combustible": r["combustible"]}
+        if r.get("provincia"):
+            filtro["provincia"] = r["provincia"]
+        await db.precios_facilito.delete_many(filtro)
+        await db.precios_facilito.insert_many(r["registros"])
+        total += len(r["registros"])
+        detalle.append({"archivo": f.filename, "ok": True, "registros": len(r["registros"]),
+                        "departamento": r["departamento"], "provincia": r.get("provincia"),
+                        "combustible": r["combustible"]})
+        logger.info(f"[importar_precios_html] {f.filename}: {len(r['registros'])} precios "
+                    f"({r['departamento']}/{r.get('provincia') or '-'}/{r['combustible']})")
+
+    await db.precios_facilito.create_index("combustible")
+    await db.precios_facilito.create_index("departamento")
+    count = await db.precios_facilito.count_documents({})
+    return {"ok": True, "importados": total, "total_en_db": count, "detalle": detalle}
+
+
 
 @api.get("/admin/precios/estaciones-enered")
 async def list_estaciones_enered(user: dict = Depends(require_roles("admin_enered"))):

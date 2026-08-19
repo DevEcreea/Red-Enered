@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
-import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw, Star, ShieldCheck, Plus } from "lucide-react";
+import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw, Star, ShieldCheck, Plus, Upload } from "lucide-react";
 import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
 
 export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, syncing, isMobile = false }) {
@@ -40,6 +40,33 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
 
   const [lastSync, setLastSync] = useState(null);
   const [totalRegistros, setTotalRegistros] = useState(0);
+
+  // Importación asistida: Facilito puso captcha al buscador, así que el admin busca en su
+  // navegador (resuelve el captcha), guarda la página (⌘+S) y la sube aquí.
+  const importInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  const importarHtml = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      files.forEach((f) => fd.append("files", f));
+      const { data } = await api.post("/admin/precios/importar-html", fd, { timeout: 120000 });
+      const lineas = (data.detalle || []).map((d) =>
+        d.ok
+          ? `✅ ${d.archivo}: ${d.registros} precios (${[d.departamento, d.provincia, d.combustible].filter(Boolean).join(" · ")})`
+          : `❌ ${d.archivo}: ${d.error}`
+      );
+      alert(`Importación terminada — ${data.importados} precios actualizados.\n\n${lineas.join("\n")}`);
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error al importar: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setImporting(false);
+      if (importInputRef.current) importInputRef.current.value = "";
+    }
+  };
 
   // Filtros de ubicación / combustible
   const [listaDepartamentos, setListaDepartamentos] = useState(DEPARTAMENTOS_PERU);
@@ -300,14 +327,34 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
               </span>
             )}
             {user?.role === "admin_enered" && (
-              <button
-                onClick={doSync}
-                disabled={isSyncing}
-                className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
-              >
-                <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} />
-                {isSyncing ? "Scrapeando..." : "Sincronizar Facilito"}
-              </button>
+              <>
+                <input ref={importInputRef} type="file" hidden multiple accept=".html,.htm"
+                  onChange={(e) => importarHtml(e.target.files)} data-testid="precios-importar-input" />
+                <button
+                  onClick={() => {
+                    if (window.confirm(
+                      "Importación asistida (Facilito ahora pide captcha):\n\n" +
+                      "1. Abre facilito.gob.pe y haz tu búsqueda normal (departamento + combustible).\n" +
+                      "2. Con los resultados en pantalla, guarda la página con ⌘+S (formato: Página web, solo HTML).\n" +
+                      "3. Sube aquí ese archivo .html (puedes subir varios a la vez).\n\n¿Elegir archivos?"
+                    )) importInputRef.current?.click();
+                  }}
+                  disabled={importing}
+                  className="text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg border-2 border-brand text-brand font-bold hover:bg-brand/5 disabled:opacity-60"
+                  data-testid="precios-importar-btn"
+                >
+                  <Upload className={`w-3 h-3 ${importing ? "animate-pulse" : ""}`} />
+                  {importing ? "Importando…" : "Importar página Facilito"}
+                </button>
+                <button
+                  onClick={doSync}
+                  disabled={isSyncing}
+                  className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncing ? "animate-spin" : ""}`} />
+                  {isSyncing ? "Scrapeando..." : "Sincronizar Facilito"}
+                </button>
+              </>
             )}
           </div>
         </div>
