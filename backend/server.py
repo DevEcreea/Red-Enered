@@ -719,6 +719,70 @@ async def importar_precios_html(
     return {"ok": True, "importados": total, "total_en_db": count, "detalle": detalle}
 
 
+@api.post("/admin/precios/importar-json")
+async def importar_precios_json(payload: dict, user: dict = Depends(require_roles("admin_enered"))):
+    """
+    Importación en bloque desde el recolector de consola de Facilito (un solo archivo .json
+    con TODO lo recorrido). Reemplaza cada (departamento + combustible) presente en el lote.
+    Cada registro: {departamento, provincia, distrito, establecimiento, direccion, telefono,
+    precio_venta, combustible}.
+    """
+    registros = payload.get("registros") or payload.get("precios") or []
+    if not isinstance(registros, list) or not registros:
+        raise HTTPException(status_code=400, detail="El archivo no contiene registros")
+
+    enered_docs = await db.estaciones_enered.find({}, {"nombre_facilito": 1}).to_list(500)
+    enered_stations = {(e.get("nombre_facilito") or "").upper() for e in enered_docs if e.get("nombre_facilito")}
+
+    scraped_at = datetime.now(timezone.utc).isoformat()
+    limpios, ambitos = [], set()
+    for r in registros:
+        est = (r.get("establecimiento") or "").strip()
+        try:
+            precio = float(r.get("precio_venta"))
+        except (TypeError, ValueError):
+            precio = None
+        if not est or precio is None or not (5.0 < precio < 100.0):
+            continue
+        dpto = (r.get("departamento") or "").strip().upper()
+        if dpto.startswith("PROV. CONST"):
+            dpto = "CALLAO"
+        comb = (r.get("combustible") or "").strip()
+        limpios.append({
+            "establecimiento": est,
+            "direccion": (r.get("direccion") or "").strip(),
+            "telefono": (r.get("telefono") or "").strip(),
+            "precio_venta": precio, "precio_pizarra": precio,
+            "combustible": comb,
+            "departamento": dpto,
+            "provincia": (r.get("provincia") or "").strip().upper() or dpto,
+            "distrito": (r.get("distrito") or "").strip().upper(),
+            "ciudad": (r.get("distrito") or r.get("provincia") or "").strip().upper(),
+            "fuente": "facilito.gob.pe", "scraped_at": scraped_at,
+            "es_enered": est.upper() in enered_stations,
+            "calidad": 4, "acepta_factura": True, "acepta_tarjeta": False,
+        })
+        if dpto and comb:
+            ambitos.add((dpto, comb))
+
+    if not limpios:
+        raise HTTPException(status_code=400, detail="Ningún registro válido en el archivo")
+
+    for dpto, comb in ambitos:
+        await db.precios_facilito.delete_many({"departamento": dpto, "combustible": comb})
+    await db.precios_facilito.insert_many(limpios)
+    await db.precios_facilito.create_index("combustible")
+    await db.precios_facilito.create_index("departamento")
+
+    count = await db.precios_facilito.count_documents({})
+    resumen = {}
+    for r in limpios:
+        resumen[r["departamento"]] = resumen.get(r["departamento"], 0) + 1
+    logger.info(f"[importar_precios_json] {len(limpios)} precios en {len(ambitos)} ámbitos")
+    return {"ok": True, "importados": len(limpios), "total_en_db": count,
+            "por_departamento": [{"departamento": k, "registros": v} for k, v in sorted(resumen.items())]}
+
+
 
 @api.get("/admin/precios/estaciones-enered")
 async def list_estaciones_enered(user: dict = Depends(require_roles("admin_enered"))):

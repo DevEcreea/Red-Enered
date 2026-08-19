@@ -50,15 +50,25 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     if (!files.length) return;
     setImporting(true);
     try {
-      const fd = new FormData();
-      files.forEach((f) => fd.append("files", f));
-      const { data } = await api.post("/admin/precios/importar-html", fd, { timeout: 120000 });
-      const lineas = (data.detalle || []).map((d) =>
-        d.ok
-          ? `✅ ${d.archivo}: ${d.registros} precios (${[d.departamento, d.provincia, d.combustible].filter(Boolean).join(" · ")})`
-          : `❌ ${d.archivo}: ${d.error}`
-      );
-      alert(`Importación terminada — ${data.importados} precios actualizados.\n\n${lineas.join("\n")}`);
+      // Un solo .json = recolector de consola (todo Perú de una); .html = páginas guardadas.
+      const json = files.find((f) => /\.json$/i.test(f.name));
+      if (json) {
+        const registros = JSON.parse(await json.text());
+        const { data } = await api.post("/admin/precios/importar-json",
+          Array.isArray(registros) ? { registros } : registros, { timeout: 120000 });
+        const lineas = (data.por_departamento || []).map((d) => `✅ ${d.departamento}: ${d.registros}`);
+        alert(`Importación terminada — ${data.importados} precios de ${(data.por_departamento || []).length} departamentos.\n\n${lineas.join("\n")}`);
+      } else {
+        const fd = new FormData();
+        files.forEach((f) => fd.append("files", f));
+        const { data } = await api.post("/admin/precios/importar-html", fd, { timeout: 120000 });
+        const lineas = (data.detalle || []).map((d) =>
+          d.ok
+            ? `✅ ${d.archivo}: ${d.registros} precios (${[d.departamento, d.provincia, d.combustible].filter(Boolean).join(" · ")})`
+            : `❌ ${d.archivo}: ${d.error}`
+        );
+        alert(`Importación terminada — ${data.importados} precios actualizados.\n\n${lineas.join("\n")}`);
+      }
       await fetchPrecios();
     } catch (err) {
       alert("Error al importar: " + (err.response?.data?.detail || err.message));
@@ -328,15 +338,22 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
             )}
             {user?.role === "admin_enered" && (
               <>
-                <input ref={importInputRef} type="file" hidden multiple accept=".html,.htm"
+                <input ref={importInputRef} type="file" hidden multiple accept=".html,.htm,.json"
                   onChange={(e) => importarHtml(e.target.files)} data-testid="precios-importar-input" />
+                <a href="/facilito-recolector.js" target="_blank" rel="noreferrer"
+                  className="text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg border border-neutral-300 text-neutral-600 font-bold hover:bg-neutral-50">
+                  Ver recolector
+                </a>
                 <button
                   onClick={() => {
                     if (window.confirm(
-                      "Importación asistida (Facilito ahora pide captcha):\n\n" +
-                      "1. Abre facilito.gob.pe y haz tu búsqueda normal (departamento + combustible).\n" +
-                      "2. Con los resultados en pantalla, guarda la página con ⌘+S (formato: Página web, solo HTML).\n" +
-                      "3. Sube aquí ese archivo .html (puedes subir varios a la vez).\n\n¿Elegir archivos?"
+                      "Actualizar precios de Facilito\n\n" +
+                      "FORMA RÁPIDA (todo Perú de una vez):\n" +
+                      "1. Abre facilito.gob.pe (Diesel y Gasolina) y pulsa F12 → Console.\n" +
+                      "2. Pega el archivo del botón 'Ver recolector' y Enter.\n" +
+                      "3. Espera; descarga 'facilito-precios.json' y súbelo aquí.\n\n" +
+                      "FORMA MANUAL (una región): guarda la página de Facilito con ⌘+S y sube el .html.\n\n" +
+                      "¿Elegir archivo (.json o .html) para subir?"
                     )) importInputRef.current?.click();
                   }}
                   disabled={importing}
@@ -344,7 +361,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                   data-testid="precios-importar-btn"
                 >
                   <Upload className={`w-3 h-3 ${importing ? "animate-pulse" : ""}`} />
-                  {importing ? "Importando…" : "Importar página Facilito"}
+                  {importing ? "Importando…" : "Actualizar precios"}
                 </button>
                 <button
                   onClick={doSync}
