@@ -683,7 +683,12 @@ async def importar_precios_html(
     detalle, total = [], 0
     for f in files:
         try:
-            html = (await f.read()).decode("utf-8", errors="replace")
+            crudo = await f.read()
+            # Facilito sirve la página en windows-1252 (así la guarda el navegador).
+            try:
+                html = crudo.decode("utf-8")
+            except UnicodeDecodeError:
+                html = crudo.decode("cp1252", errors="replace")
             r = parsear_html_guardado(html, enered_stations, departamento, provincia, combustible)
         except Exception as e:
             detalle.append({"archivo": f.filename, "ok": False, "error": f"No se pudo leer: {str(e)[:120]}"})

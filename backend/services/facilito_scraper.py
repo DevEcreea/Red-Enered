@@ -235,6 +235,10 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
         if len(cols) < 3:
             continue
 
+        # La página actual pone el Distrito en un <th scope="row"> (no <td>).
+        th_row = row.find("th")
+        distrito_th = th_row.get_text(strip=True) if th_row else ""
+
         # CORRECT column mapping for Facilito:
         # col[0]=Distrito, col[1]=Establecimiento, col[2]=Dirección, col[3]=Teléfono, col[4]=Precio
         if len(cols) >= 5:
@@ -244,13 +248,15 @@ def _parse_table(html: str, dpto: dict, combustible_label: str, enered_stations:
             telefono        = cols[3].strip()
             precio_raw      = cols[4].strip()
         elif len(cols) == 4:
-            distrito        = ""
+            distrito        = distrito_th
             establecimiento = cols[0].strip()
             direccion       = cols[1].strip()
             telefono        = cols[2].strip()
             precio_raw      = cols[3].strip()
         else:
             continue
+        if telefono == "\xa0":
+            telefono = ""
 
         precio = _parse_precio(precio_raw)
         if not establecimiento or precio is None:
@@ -293,22 +299,33 @@ def parsear_html_guardado(html: str, enered_stations: set = None,
     """
     soup = BeautifulSoup(html, "lxml")
 
-    def _selected(nombre: str):
-        sel = soup.find("select", attrs={"name": nombre}) or soup.find("select", id=nombre)
-        if not sel:
-            return None, None
-        opt = sel.find("option", selected=True)
-        if not opt:
-            return None, None
-        return (opt.get("value") or "").strip(), opt.get_text(strip=True).upper()
+    def _selected(*nombres):
+        """Primer <select> que exista entre los nombres dados, con su opción seleccionada."""
+        for nombre in nombres:
+            sel = soup.find("select", attrs={"name": nombre}) or soup.find("select", id=nombre)
+            if not sel:
+                continue
+            opt = sel.find("option", selected=True)
+            if opt:
+                return (opt.get("value") or "").strip(), opt.get_text(strip=True).upper()
+        return None, None
 
+    # Departamento: la página actual usa "departamentoAux" (+ hidden "departamento" con el código);
+    # versiones anteriores usaban "departamento_elegido".
     dpto_name = (departamento or "").upper().strip()
     if not dpto_name:
-        code, txt = _selected("departamento_elegido")
+        code, txt = _selected("departamentoAux", "departamento_elegido")
         if txt and "SELECCIONE" not in txt:
             dpto_name = txt
         elif code:
             dpto_name = next((d["name"] for d in DEPARTAMENTOS if d["code"] == code), "")
+    if not dpto_name:
+        hid = soup.find("input", attrs={"name": "departamento"})
+        if hid and hid.get("value"):
+            dpto_name = next((d["name"] for d in DEPARTAMENTOS if d["code"] == hid["value"].strip()), "")
+    # OSINERGMIN nombra al Callao "PROV. CONST. DEL CALLAO"
+    if dpto_name.startswith("PROV. CONST"):
+        dpto_name = "CALLAO"
 
     prov_name = (provincia or "").upper().strip()
     if not prov_name:
@@ -316,10 +333,14 @@ def parsear_html_guardado(html: str, enered_stations: set = None,
         if txt and "SELECCIONE" not in txt:
             prov_name = txt
 
+    # Combustible: la página actual usa "producto" con value numérico (40/126/127) y el nombre
+    # en el TEXTO de la opción; versiones anteriores usaban "combustible" con el nombre en value.
     comb = (combustible or "").strip()
     if not comb:
-        val, txt = _selected("combustible")
-        comb = (val or txt or "").strip()
+        val, txt = _selected("producto", "combustible")
+        comb = (txt if (val or "").isdigit() else (val or txt or "")).strip()
+        if "SELECCIONE" in comb.upper():
+            comb = ""
 
     if not dpto_name:
         return {"ok": False, "registros": [],
