@@ -2866,12 +2866,14 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
 
 
 @subsidio_router.get("/admin/subsidio/documents/{doc_id}/download")
-async def admin_download_document(doc_id: str, _: dict = Depends(_require_admin_enered)):
-    """Admin descarga cualquier documento del expediente."""
+async def admin_download_document(doc_id: str, dl: int = 0, _: dict = Depends(_require_admin_enered)):
+    """Admin descarga cualquier documento del expediente. dl=1 fuerza descarga (attachment)."""
     d = await db.subsidio_documents.find_one({"id": doc_id}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
-    return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
+    return storage.download_response(d["storage_key"], d["filename"],
+                                     d.get("content_type", "application/octet-stream"),
+                                     inline=not dl)
 
 
 @subsidio_router.put("/admin/subsidio/expedientes/{user_id}/stage")

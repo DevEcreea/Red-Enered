@@ -370,6 +370,7 @@ function ExpedienteDetalle({ userId, onBack }) {
             user={user}
             vehicles={vehicles}
             invoices={invoices}
+            documents={documents}
             onRefresh={async () => {
               const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
               setData(res);
@@ -799,7 +800,10 @@ const fmtDate = (s, withTime) => {
 /* ============================================================ */
 /* TAB EDITAR (EDICIÓN MANUAL)                                   */
 /* ============================================================ */
-function TabEditar({ user, vehicles, invoices, onRefresh }) {
+function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
+  // Archivos ORIGINALES que subió el cliente como comprobantes de combustible (cualquier
+  // formato). Sirven para cotejar una factura digitada a mano contra su documento real.
+  const comprobantesCliente = documents.filter((d) => (d.categoria || "").startsWith("comprobante"));
   const [subTab, setSubTab] = useState("empresa");
 
   // REPRESENTANTE STATE
@@ -1497,12 +1501,34 @@ function TabEditar({ user, vehicles, invoices, onRefresh }) {
 
                   {/* Previsualización del PDF */}
                   {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
-                    <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[500px] flex items-center justify-center">
-                      <iframe
-                        src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
-                        className="w-full h-full min-h-[500px] bg-white"
-                        title="Previsualización de factura"
-                      />
+                    <div className="space-y-3">
+                      <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[420px] flex items-center justify-center">
+                        <iframe
+                          src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                          className="w-full h-full min-h-[420px] bg-white"
+                          title="Previsualización de factura"
+                        />
+                      </div>
+                      {/* Archivos originales del cliente (cualquier formato) para cotejar */}
+                      {comprobantesCliente.length > 0 && (
+                        <div className="bg-white border border-neutral-200 rounded-lg p-3">
+                          <div className="text-[11px] font-bold text-neutral-600 uppercase tracking-wider mb-2">
+                            Archivos subidos por el cliente ({comprobantesCliente.length})
+                          </div>
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                            {comprobantesCliente.map((d) => (
+                              <div key={d.id} className="flex items-center gap-2 text-xs">
+                                <span className="flex-1 truncate text-neutral-700">{d.filename || d.categoria}</span>
+                                <a href={`${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="text-brand font-bold hover:underline flex-shrink-0">Ver</a>
+                                <a href={`${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}&dl=1`}
+                                  className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
