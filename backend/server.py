@@ -4822,7 +4822,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.2.1-diag",
+        "version": "1.2.2-manual-pdf",
     }
 
 # ============================================================
@@ -6225,18 +6225,19 @@ async def diag_precios(departamento: str = "LA LIBERTAD"):
     # ¿Qué variantes de 'departamento' existen? (case/espacios delatan cargas viejas)
     variantes = await db.precios_facilito.distinct("departamento", q)
     # Cargas por fuente y fecha
-    cargas = [c async for c in db.precios_facilito.aggregate([
+    _cur = db.precios_facilito.aggregate([
         {"$match": q},
         {"$group": {"_id": {"fuente": "$fuente",
                             "dia": {"$substr": [{"$ifNull": ["$scraped_at", "sin-fecha"]}, 0, 10]},
                             "con_gps": {"$cond": [{"$ne": ["$lat", None]}, True, False]}},
                     "n": {"$sum": 1}}},
-        {"$sort": {"n": -1}}, {"$limit": 12}])]
+        {"$sort": {"n": -1}}, {"$limit": 12}])
+    cargas = await _cur.to_list(12)
     # Muestra: AMERICA NORTE 1 (todas sus filas crudas)
-    muestra = [m async for m in db.precios_facilito.find(
+    muestra = await db.precios_facilito.find(
         {**q, "establecimiento": {"$regex": "AMERICA NORTE 1", "$options": "i"}},
         {"_id": 0, "establecimiento": 1, "combustible": 1, "precio_venta": 1,
-         "lat": 1, "fuente": 1, "scraped_at": 1, "departamento": 1}).to_list(20)]
+         "lat": 1, "fuente": 1, "scraped_at": 1, "departamento": 1}).to_list(20)
     return {"total": total, "variantes_departamento": variantes,
             "cargas": [{"fuente": c["_id"].get("fuente"), "dia": c["_id"].get("dia"),
                         "con_gps": c["_id"].get("con_gps"), "n": c["n"]} for c in cargas],

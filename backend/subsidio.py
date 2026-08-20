@@ -3078,7 +3078,57 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
                 break
 
     if not valid_key:
-        # CASO 4: ninguna referencia válida → 404. No se genera ningún documento.
+        # CASO 4a: registro MANUAL (el admin lo digitó; nunca hubo archivo) → se genera un
+        # PDF de REGISTRO INTERNO, claramente rotulado como tal. NO imita una factura:
+        # es la ficha de los datos digitados, para poder revisarla/descargarla.
+        es_manual = (not inv.get("factura_storage_key")) and (
+            (inv.get("factura_filename") or "").startswith("manual_entry")
+            or inv.get("raw_ocr_response") == "Manual Entry by Admin"
+        )
+        if es_manual:
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.pdfgen import canvas as _canvas
+                buf = io.BytesIO()
+                p = _canvas.Canvas(buf, pagesize=A4)
+                w, h = A4
+                p.setFillColorRGB(0.42, 0.16, 0.85)
+                p.rect(0, h - 70, w, 70, fill=True, stroke=False)
+                p.setFillColorRGB(1, 1, 1)
+                p.setFont("Helvetica-Bold", 16)
+                p.drawString(40, h - 45, "ENERED · Registro manual de consumo")
+                p.setFillColorRGB(0.75, 0.2, 0.2)
+                p.setFont("Helvetica-Bold", 11)
+                p.drawString(40, h - 95, "DOCUMENTO INTERNO — NO es el comprobante original del grifo.")
+                p.setFillColorRGB(0.2, 0.2, 0.2)
+                p.setFont("Helvetica", 10)
+                y = h - 130
+                for etiqueta, valor in [
+                    ("Empresa", inv.get("empresa")), ("N° de documento", n_doc),
+                    ("Fecha", inv.get("fecha")), ("Placa", inv.get("placa")),
+                    ("Producto", inv.get("producto")), ("Galones", inv.get("galones")),
+                    ("Importe total (S/)", inv.get("importe_total")),
+                    ("RUC del emisor", inv.get("ruc_emisor")), ("Estación", inv.get("estacion")),
+                    ("Ciudad", inv.get("ciudad")), ("Registrado", inv.get("created_at", "")[:10]),
+                    ("Origen", "Digitado manualmente por el equipo ENERED"),
+                ]:
+                    p.setFont("Helvetica-Bold", 10)
+                    p.drawString(40, y, f"{etiqueta}:")
+                    p.setFont("Helvetica", 10)
+                    p.drawString(170, y, str(valor if valor not in (None, "") else "—"))
+                    y -= 20
+                p.setFont("Helvetica-Oblique", 8)
+                p.setFillColorRGB(0.5, 0.5, 0.5)
+                p.drawString(40, 40, "Generado por ENERED como constancia del registro manual. "
+                                     "Para la ATU se requiere el comprobante original.")
+                p.showPage(); p.save()
+                pdf = buf.getvalue()
+                return Response(content=pdf, media_type="application/pdf",
+                                headers={"Content-Disposition":
+                                         f"inline; filename*=UTF-8''Registro_manual_{quote(str(n_doc))}.pdf"})
+            except Exception as e:
+                logger.error(f"[admin_download_invoice] error generando registro manual: {e}")
+        # CASO 4b: debía tener archivo y no se encontró → 404 informativo (no se inventa nada).
         logger.warning(f"[admin_download_invoice] no se encontró ningún archivo para id={clean_id!r}")
         return _html_not_found_msg(
             f"No se encontró el archivo original de la factura <b>{n_doc}</b>. "
