@@ -808,6 +808,21 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
   const facturasConArchivo = (invoices || []).filter(
     (i) => i.factura_storage_key || (i.factura_filename && !String(i.factura_filename).startsWith("manual_entry"))
   );
+  // Previsualizar un archivo del cliente en el visor del panel (en vez de abrir otra pestaña).
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  // Vincula el archivo del cliente a la factura que se está editando (quedará como SU archivo).
+  const vincularArchivo = async (invoiceId, origen) => {
+    if (!window.confirm("¿Usar este archivo como el documento de esta factura? El visor lo mostrará siempre.")) return;
+    try {
+      await api.put(`/admin/subsidio/invoices/${invoiceId}/usar-archivo`, origen);
+      setPreviewUrl(null);
+      await onRefresh?.();
+      alert("✅ Archivo vinculado a la factura.");
+    } catch (e) {
+      alert("Error: " + (e?.response?.data?.detail || e.message));
+    }
+  };
   const [subTab, setSubTab] = useState("empresa");
 
   // REPRESENTANTE STATE
@@ -1503,16 +1518,22 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                     </div>
                   </form>
 
-                  {/* Previsualización del PDF */}
+                  {/* Previsualización del PDF (o del archivo del cliente elegido abajo) */}
                   {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
                     <div className="space-y-3">
                       <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[420px] flex items-center justify-center">
                         <iframe
-                          src={`${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                          src={previewUrl || `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
                           className="w-full h-full min-h-[420px] bg-white"
                           title="Previsualización de factura"
                         />
                       </div>
+                      {previewUrl && (
+                        <button onClick={() => setPreviewUrl(null)}
+                          className="text-[11px] text-brand font-bold hover:underline">
+                          ← Volver al registro de esta factura
+                        </button>
+                      )}
                       {/* Archivos originales del cliente (cualquier formato) para cotejar */}
                       {(comprobantesCliente.length > 0 || facturasConArchivo.length > 0) && (
                         <div className="bg-white border border-neutral-200 rounded-lg p-3">
@@ -1520,27 +1541,54 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                             Archivos subidos por el cliente ({comprobantesCliente.length + facturasConArchivo.length})
                           </div>
                           <div className="space-y-1.5 max-h-44 overflow-y-auto">
-                            {comprobantesCliente.map((d) => (
-                              <div key={d.id} className="flex items-center gap-2 text-xs">
-                                <span className="flex-1 truncate text-neutral-700">{d.filename || d.categoria}</span>
-                                <a href={`${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
-                                  target="_blank" rel="noreferrer"
-                                  className="text-brand font-bold hover:underline flex-shrink-0">Ver</a>
-                                <a href={`${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}&dl=1`}
-                                  className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
-                              </div>
-                            ))}
-                            {facturasConArchivo.map((i) => (
-                              <div key={i.id} className="flex items-center gap-2 text-xs">
-                                <span className="flex-1 truncate text-neutral-700">
-                                  {i.factura_filename || i.numero_documento}
-                                  <span className="text-neutral-400"> · {i.numero_documento || i.fecha || ""}</span>
-                                </span>
-                                <a href={`${API}/admin/subsidio/invoices/${i.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
-                                  target="_blank" rel="noreferrer"
-                                  className="text-brand font-bold hover:underline flex-shrink-0">Ver</a>
-                              </div>
-                            ))}
+                            {comprobantesCliente.map((d) => {
+                              const base = `${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}`;
+                              return (
+                                <div key={d.id} className="flex items-center gap-2 text-xs">
+                                  <span className="flex-1 truncate text-neutral-700">{d.filename || d.categoria}</span>
+                                  <button onClick={() => setPreviewUrl(base)}
+                                    className="text-brand font-bold hover:underline flex-shrink-0">Ver</button>
+                                  <a href={`${base}&dl=1`}
+                                    className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
+                                  <button onClick={() => vincularArchivo(editingInvoice.id, { doc_id: d.id })}
+                                    className="text-emerald-600 font-bold hover:underline flex-shrink-0"
+                                    title="Usar este archivo como el documento de esta factura">Vincular</button>
+                                </div>
+                              );
+                            })}
+                            {facturasConArchivo
+                              .slice()
+                              .sort((a, b) => {
+                                // El archivo cuyo número coincide con la factura editada, primero.
+                                const n = (editingInvoice?.numero_documento || "").toUpperCase();
+                                const ma = n && (a.numero_documento || "").toUpperCase() === n ? 0 : 1;
+                                const mb = n && (b.numero_documento || "").toUpperCase() === n ? 0 : 1;
+                                return ma - mb;
+                              })
+                              .map((i) => {
+                                const base = `${API}/admin/subsidio/invoices/${i.id}/download?t=${localStorage.getItem("enered_token") || ""}`;
+                                const coincide = editingInvoice?.numero_documento &&
+                                  (i.numero_documento || "").toUpperCase() === editingInvoice.numero_documento.toUpperCase() &&
+                                  i.id !== editingInvoice.id;
+                                return (
+                                  <div key={i.id} className={`flex items-center gap-2 text-xs rounded px-1 ${coincide ? "bg-emerald-50 border border-emerald-200" : ""}`}>
+                                    <span className="flex-1 truncate text-neutral-700">
+                                      {coincide && <span className="text-emerald-700 font-bold">★ </span>}
+                                      {i.factura_filename || i.numero_documento}
+                                      <span className="text-neutral-400"> · {i.numero_documento || i.fecha || ""}</span>
+                                    </span>
+                                    <button onClick={() => setPreviewUrl(base)}
+                                      className="text-brand font-bold hover:underline flex-shrink-0">Ver</button>
+                                    <a href={`${base}&dl=1`}
+                                      className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
+                                    {i.id !== editingInvoice?.id && (
+                                      <button onClick={() => vincularArchivo(editingInvoice.id, { desde_invoice_id: i.id })}
+                                        className="text-emerald-600 font-bold hover:underline flex-shrink-0"
+                                        title="Usar este archivo como el documento de esta factura">Vincular</button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                           </div>
                         </div>
                       )}

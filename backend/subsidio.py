@@ -2865,6 +2865,41 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     }
 
 
+@subsidio_router.put("/admin/subsidio/invoices/{invoice_id}/usar-archivo")
+async def admin_vincular_archivo_invoice(invoice_id: str, payload: dict,
+                                         _: dict = Depends(_require_admin_enered)):
+    """Vincula a una factura (p. ej. digitada a mano) el archivo ORIGINAL del cliente,
+    tomándolo de otra factura subida ({"desde_invoice_id"}) o de un documento del
+    expediente ({"doc_id"}). Desde entonces el visor muestra el archivo real."""
+    destino = await db.consumos_subsidio.find_one({"id": invoice_id})
+    if not destino:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+
+    key = filename = ctype = None
+    if payload.get("desde_invoice_id"):
+        src = await db.consumos_subsidio.find_one({"id": payload["desde_invoice_id"]})
+        if not src or not src.get("factura_storage_key"):
+            raise HTTPException(status_code=404, detail="La factura origen no tiene archivo")
+        key, filename = src["factura_storage_key"], src.get("factura_filename")
+        ctype = src.get("factura_content_type")
+    elif payload.get("doc_id"):
+        src = await db.subsidio_documents.find_one({"id": payload["doc_id"]})
+        if not src or not src.get("storage_key"):
+            raise HTTPException(status_code=404, detail="El documento origen no tiene archivo")
+        key, filename, ctype = src["storage_key"], src.get("filename"), src.get("content_type")
+    else:
+        raise HTTPException(status_code=400, detail="Falta desde_invoice_id o doc_id")
+
+    await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": {
+        "factura_storage_key": key,
+        "factura_filename": filename or "archivo_cliente",
+        "factura_content_type": ctype or "application/pdf",
+        "archivo_vinculado_desde": payload.get("desde_invoice_id") or payload.get("doc_id"),
+        "archivo_vinculado_at": datetime.now(timezone.utc).isoformat(),
+    }})
+    return {"ok": True, "filename": filename}
+
+
 @subsidio_router.get("/admin/subsidio/documents/{doc_id}/download")
 async def admin_download_document(doc_id: str, dl: int = 0, _: dict = Depends(_require_admin_enered)):
     """Admin descarga cualquier documento del expediente. dl=1 fuerza descarga (attachment)."""
@@ -2900,7 +2935,7 @@ async def admin_update_stage(
 
 
 @subsidio_router.get("/admin/subsidio/invoices/{invoice_id}/download")
-async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_admin_enered)):
+async def admin_download_invoice(invoice_id: str, dl: int = 0, _: dict = Depends(_require_admin_enered)):
     """Admin descarga o previsualiza el archivo PDF/imagen de una factura de consumo."""
     from urllib.parse import unquote, quote
     from bson import ObjectId
@@ -2978,7 +3013,7 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
             return Response(
                 content=data,
                 media_type=content_type,
-                headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"},
+                headers={"Content-Disposition": f"{'attachment' if dl else 'inline'}; filename*=UTF-8''{encoded_name}"},
             )
         else:
             # CASO 2: key en MongoDB pero objeto no existe en R2 → continuar con búsqueda legacy
@@ -3127,7 +3162,7 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
                 pdf = buf.getvalue()
                 return Response(content=pdf, media_type="application/pdf",
                                 headers={"Content-Disposition":
-                                         f"inline; filename*=UTF-8''Registro_manual_{quote(str(n_doc))}.pdf"})
+                                         f"{'attachment' if dl else 'inline'}; filename*=UTF-8''Registro_manual_{quote(str(n_doc))}.pdf"})
             except Exception as e:
                 logger.error(f"[admin_download_invoice] error generando registro manual: {e}")
         # CASO 4b: debía tener archivo y no se encontró → 404 informativo (no se inventa nada).
@@ -3155,7 +3190,7 @@ async def admin_download_invoice(invoice_id: str, _: dict = Depends(_require_adm
     return Response(
         content=data,
         media_type=content_type,
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{encoded_name}"},
+        headers={"Content-Disposition": f"{'attachment' if dl else 'inline'}; filename*=UTF-8''{encoded_name}"},
     )
 
 
