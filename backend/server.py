@@ -480,8 +480,22 @@ async def get_precios(
         cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
         precios = await cursor.to_list(500)
 
-
-
+    # Dedup defensivo: si un mismo grifo (nombre + dirección) y combustible quedó cargado
+    # más de una vez (cargas viejas apiladas), se muestra SOLO el más reciente. Prioriza los
+    # que traen coordenadas GPS (fuente mapa de Facilito) sobre los viejos.
+    _dedup = {}
+    for _p in precios:
+        _k = ((_p.get("establecimiento") or "").strip().upper(),
+              (_p.get("direccion") or "").strip().upper()[:40],
+              (_p.get("combustible") or "").strip().upper())
+        _ex = _dedup.get(_k)
+        if _ex is None:
+            _dedup[_k] = _p; continue
+        _mejor = (_p.get("lat") is not None, _p.get("scraped_at") or "")
+        _actual = (_ex.get("lat") is not None, _ex.get("scraped_at") or "")
+        if _mejor > _actual:
+            _dedup[_k] = _p
+    precios = list(_dedup.values())
 
     # Cruzar con precios ENERED de db.estaciones_enered por (nombre, combustible)
     enered_map = {}
@@ -975,8 +989,13 @@ async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_r
         r["ciudad"] = r["distrito"] or r["departamento"]
         dptos.add(r["departamento"])
 
+    # Borra TODO lo viejo del departamento (regex case-insensitive para cubrir variantes de
+    # nombre/acentos) antes de insertar lo fresco → sin residuos ni duplicados.
+    borrados = 0
     for dep in dptos:
-        await db.precios_facilito.delete_many({"departamento": dep})
+        r = await db.precios_facilito.delete_many(
+            {"departamento": {"$regex": f"^{re.escape(dep)}$", "$options": "i"}})
+        borrados += r.deleted_count
     await db.precios_facilito.insert_many(registros)
     await db.precios_facilito.create_index("combustible")
     await db.precios_facilito.create_index("departamento")
@@ -984,7 +1003,7 @@ async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_r
     count = await db.precios_facilito.count_documents({})
     grifos = len({(r["establecimiento"], r["lat"], r["lon"]) for r in registros})
     return {"ok": True, "grifos_con_gps": grifos, "registros": len(registros),
-            "departamentos": sorted(dptos), "total_en_db": count}
+            "borrados_viejos": borrados, "departamentos": sorted(dptos), "total_en_db": count}
 
 
 @api.post("/admin/precios/importar-json")
