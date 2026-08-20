@@ -801,9 +801,13 @@ const fmtDate = (s, withTime) => {
 /* TAB EDITAR (EDICIÓN MANUAL)                                   */
 /* ============================================================ */
 function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
-  // Archivos ORIGINALES que subió el cliente como comprobantes de combustible (cualquier
-  // formato). Sirven para cotejar una factura digitada a mano contra su documento real.
+  // Archivos ORIGINALES que subió el cliente, en cualquier formato y por cualquier vía:
+  // (a) documentos "comprobante_*" del expediente, y (b) facturas subidas con archivo real
+  // (fotos/PDFs individuales). Sirven para cotejar una factura digitada a mano.
   const comprobantesCliente = documents.filter((d) => (d.categoria || "").startsWith("comprobante"));
+  const facturasConArchivo = (invoices || []).filter(
+    (i) => i.factura_storage_key || (i.factura_filename && !String(i.factura_filename).startsWith("manual_entry"))
+  );
   const [subTab, setSubTab] = useState("empresa");
 
   // REPRESENTANTE STATE
@@ -1510,12 +1514,12 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                         />
                       </div>
                       {/* Archivos originales del cliente (cualquier formato) para cotejar */}
-                      {comprobantesCliente.length > 0 && (
+                      {(comprobantesCliente.length > 0 || facturasConArchivo.length > 0) && (
                         <div className="bg-white border border-neutral-200 rounded-lg p-3">
                           <div className="text-[11px] font-bold text-neutral-600 uppercase tracking-wider mb-2">
-                            Archivos subidos por el cliente ({comprobantesCliente.length})
+                            Archivos subidos por el cliente ({comprobantesCliente.length + facturasConArchivo.length})
                           </div>
-                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          <div className="space-y-1.5 max-h-44 overflow-y-auto">
                             {comprobantesCliente.map((d) => (
                               <div key={d.id} className="flex items-center gap-2 text-xs">
                                 <span className="flex-1 truncate text-neutral-700">{d.filename || d.categoria}</span>
@@ -1524,6 +1528,17 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                                   className="text-brand font-bold hover:underline flex-shrink-0">Ver</a>
                                 <a href={`${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}&dl=1`}
                                   className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
+                              </div>
+                            ))}
+                            {facturasConArchivo.map((i) => (
+                              <div key={i.id} className="flex items-center gap-2 text-xs">
+                                <span className="flex-1 truncate text-neutral-700">
+                                  {i.factura_filename || i.numero_documento}
+                                  <span className="text-neutral-400"> · {i.numero_documento || i.fecha || ""}</span>
+                                </span>
+                                <a href={`${API}/admin/subsidio/invoices/${i.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="text-brand font-bold hover:underline flex-shrink-0">Ver</a>
                               </div>
                             ))}
                           </div>
