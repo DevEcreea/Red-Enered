@@ -481,13 +481,18 @@ async def get_precios(
         precios = await cursor.to_list(500)
 
     # Dedup defensivo: si un mismo grifo (nombre + dirección) y combustible quedó cargado
-    # más de una vez (cargas viejas apiladas), se muestra SOLO el más reciente. Prioriza los
-    # que traen coordenadas GPS (fuente mapa de Facilito) sobre los viejos.
+    # más de una vez (cargas viejas apiladas), se muestra SOLO el mejor registro (con GPS y
+    # más reciente). Claves NORMALIZADAS para que coincidan aunque las cargas viejas tengan
+    # el combustible con otro nombre ("DB5 S-50 UV" vs "Diesel B5 UV") o la dirección con
+    # caracteres corruptos de encoding ("N�" vs "N°"). Los locales distintos de una misma
+    # cadena tienen direcciones distintas y se conservan.
+    def _alfanum(s):
+        return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
     _dedup = {}
     for _p in precios:
-        _k = ((_p.get("establecimiento") or "").strip().upper(),
-              (_p.get("direccion") or "").strip().upper()[:40],
-              (_p.get("combustible") or "").strip().upper())
+        _k = (_alfanum(_p.get("establecimiento")),
+              _alfanum(_p.get("direccion"))[:30],
+              normalizar_combustible(_p.get("combustible")))
         _ex = _dedup.get(_k)
         if _ex is None:
             _dedup[_k] = _p; continue
@@ -4816,7 +4821,8 @@ async def health():
         "status": "ok" if mongo_ok else "degraded",
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
-        "version": "1.0.0",
+        # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
+        "version": "1.1.0-dedup-precios",
     }
 
 # ============================================================
