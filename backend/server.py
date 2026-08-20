@@ -4822,7 +4822,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.2.0-facilito-proxy",
+        "version": "1.2.1-diag",
     }
 
 # ============================================================
@@ -6197,6 +6197,12 @@ async def subsidio_diag_red():
     proxy = _os.getenv("MTC_PROXY") or None
     if proxy:
         targets["mtc_via_proxy"] = (MTC_URL, proxy)
+        targets["facilito_via_proxy"] = (
+            "https://www.facilito.gob.pe/facilito/actions/MapaAction.do"
+            "?departamento=130000&provincia=130100&distrito=9999999&producto=40"
+            "&method=mostrarMapa&tipo=LIQ", proxy)
+    targets["facilito_directo"] = (
+        "https://www.facilito.gob.pe/facilito/pages/facilito/buscadorEESS.jsp", None)
     out = {"proxy_configurado": bool(proxy)}
     for k, (url, px) in targets.items():
         t = _t.time()
@@ -6208,6 +6214,33 @@ async def subsidio_diag_red():
         except Exception as e:
             out[k] = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:100]}", "ms": int((_t.time() - t) * 1000)}
     return out
+
+
+@api.get("/subsidio/diag-precios")
+async def diag_precios(departamento: str = "LA LIBERTAD"):
+    """TEMPORAL: radiografía de precios_facilito para diagnosticar cargas apiladas en
+    producción. Solo agregados y una muestra (los precios de Facilito son públicos)."""
+    q = {"departamento": {"$regex": departamento, "$options": "i"}}
+    total = await db.precios_facilito.count_documents(q)
+    # ¿Qué variantes de 'departamento' existen? (case/espacios delatan cargas viejas)
+    variantes = await db.precios_facilito.distinct("departamento", q)
+    # Cargas por fuente y fecha
+    cargas = [c async for c in db.precios_facilito.aggregate([
+        {"$match": q},
+        {"$group": {"_id": {"fuente": "$fuente",
+                            "dia": {"$substr": [{"$ifNull": ["$scraped_at", "sin-fecha"]}, 0, 10]},
+                            "con_gps": {"$cond": [{"$ne": ["$lat", None]}, True, False]}},
+                    "n": {"$sum": 1}}},
+        {"$sort": {"n": -1}}, {"$limit": 12}])]
+    # Muestra: AMERICA NORTE 1 (todas sus filas crudas)
+    muestra = [m async for m in db.precios_facilito.find(
+        {**q, "establecimiento": {"$regex": "AMERICA NORTE 1", "$options": "i"}},
+        {"_id": 0, "establecimiento": 1, "combustible": 1, "precio_venta": 1,
+         "lat": 1, "fuente": 1, "scraped_at": 1, "departamento": 1}).to_list(20)]
+    return {"total": total, "variantes_departamento": variantes,
+            "cargas": [{"fuente": c["_id"].get("fuente"), "dia": c["_id"].get("dia"),
+                        "con_gps": c["_id"].get("con_gps"), "n": c["n"]} for c in cargas],
+            "muestra_america_norte_1": muestra}
 
 
 @api.get("/subsidio/resumen")
