@@ -13,6 +13,7 @@ por 100 (Trujillo 1301 → 130100); el de departamento es ubigeo·10000 (La Libe
 guardan solo las que devuelven grifos.
 """
 from __future__ import annotations
+import os
 import re
 import json
 import logging
@@ -23,6 +24,10 @@ from typing import Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Los .gob.pe bloquean servidores extranjeros (Render da timeout directo). Se reutiliza el
+# mismo proxy peruano que ya usa el MTC en producción; en local queda None (conexión directa).
+_PROXY = os.getenv("FACILITO_PROXY") or os.getenv("MTC_PROXY") or None
 
 MAPA_URL = "https://www.facilito.gob.pe/facilito/actions/MapaAction.do"
 MAIN_URL = "https://www.facilito.gob.pe/facilito/pages/facilito/buscadorEESS.jsp"
@@ -84,7 +89,8 @@ async def traer_precios_con_gps(departamentos: Optional[list[str]] = None) -> li
     objetivo = [d.upper() for d in departamentos] if departamentos else list(DEPARTAMENTOS.keys())
     salida = []
 
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30.0, follow_redirects=True) as client:
+    async with httpx.AsyncClient(headers=HEADERS, timeout=30.0, follow_redirects=True,
+                                 proxy=_PROXY, verify=False) as client:
         try:
             await client.get(MAIN_URL)  # establece la cookie de sesión
         except Exception:

@@ -4822,7 +4822,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.1.0-dedup-precios",
+        "version": "1.2.0-facilito-proxy",
     }
 
 # ============================================================

@@ -50,8 +50,13 @@ def _fila_a_doc(r: dict) -> dict | None:
 
 async def sincronizar(db) -> dict:
     """Descarga el padrón y lo carga en Mongo. Devuelve un resumen."""
+    import os
     import httpx
-    async with httpx.AsyncClient(timeout=120.0, verify=False, headers=_HEADERS, follow_redirects=True) as c:
+    # Los .gob.pe bloquean servidores extranjeros: en producción se sale por el proxy peruano
+    # (el mismo del MTC); en local queda None (conexión directa).
+    proxy = os.getenv("FACILITO_PROXY") or os.getenv("MTC_PROXY") or None
+    async with httpx.AsyncClient(timeout=120.0, verify=False, headers=_HEADERS,
+                                 follow_redirects=True, proxy=proxy) as c:
         r = await c.get(CSV_URL)
         if r.status_code != 200:
             raise RuntimeError(f"OSINERGMIN respondió {r.status_code}")
