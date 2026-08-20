@@ -55,6 +55,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     try {
       const body = dep ? { departamentos: [dep.toUpperCase()] } : {};
       const { data } = await api.post("/admin/precios/sync-mapa", body, { timeout: 600000 });
+      setLastSync(new Date().toISOString());
       alert(`✅ ${data.grifos_con_gps} grifos con GPS real actualizados (${data.departamentos.join(", ")}).`);
       await fetchPrecios();
     } catch (err) {
@@ -367,42 +368,37 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
               </span>
             )}
             {user?.role === "admin_enered" && (
-              <>
-                <input ref={importInputRef} type="file" hidden multiple accept=".html,.htm,.json"
-                  onChange={(e) => importarHtml(e.target.files)} data-testid="precios-importar-input" />
-                <a href="/facilito-recolector.js" target="_blank" rel="noreferrer"
-                  className="text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg border border-neutral-300 text-neutral-600 font-bold hover:bg-neutral-50">
-                  Ver recolector
-                </a>
-                <button
-                  onClick={() => {
-                    if (window.confirm(
-                      "Actualizar precios de Facilito\n\n" +
-                      "FORMA RÁPIDA (todo Perú de una vez):\n" +
-                      "1. Abre facilito.gob.pe (Diesel y Gasolina) y pulsa F12 → Console.\n" +
-                      "2. Pega el archivo del botón 'Ver recolector' y Enter.\n" +
-                      "3. Espera; descarga 'facilito-precios.json' y súbelo aquí.\n\n" +
-                      "FORMA MANUAL (una región): guarda la página de Facilito con ⌘+S y sube el .html.\n\n" +
-                      "¿Elegir archivo (.json o .html) para subir?"
-                    )) importInputRef.current?.click();
-                  }}
-                  disabled={importing}
-                  className="text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg border-2 border-brand text-brand font-bold hover:bg-brand/5 disabled:opacity-60"
-                  data-testid="precios-importar-btn"
-                >
-                  <Upload className={`w-3 h-3 ${importing ? "animate-pulse" : ""}`} />
-                  {importing ? "Importando…" : "Actualizar precios"}
-                </button>
+              <div className="flex items-center gap-2">
+                {lastSync && (
+                  <span className="text-[10px] text-neutral-400 font-semibold hidden sm:inline">
+                    Actualizado: {new Date(lastSync).toLocaleDateString("es-PE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
+                {/* Botón principal: precios + GPS reales de Facilito (sin captcha). */}
                 <button
                   onClick={actualizarConGps}
                   disabled={syncGps}
-                  className="btn-brand text-xs px-3 py-1.5 flex items-center gap-1.5 rounded-lg"
+                  className="btn-brand text-xs px-4 py-1.5 flex items-center gap-1.5 rounded-lg font-bold disabled:opacity-60"
                   title="Trae precios y ubicación GPS real desde el mapa de Facilito"
                 >
-                  <MapPin className={`w-3 h-3 ${syncGps ? "animate-pulse" : ""}`} />
-                  {syncGps ? "Trayendo GPS…" : selDepartamento ? `Actualizar ${selDepartamento}` : "Actualizar todo (GPS)"}
+                  <MapPin className={`w-3.5 h-3.5 ${syncGps ? "animate-pulse" : ""}`} />
+                  {syncGps ? "Actualizando…" : selDepartamento ? `Actualizar ${selDepartamento}` : "Actualizar precios"}
                 </button>
-              </>
+                {/* Opción secundaria: importar desde archivo (recolector/HTML) — plan B. */}
+                <input ref={importInputRef} type="file" hidden multiple accept=".html,.htm,.json"
+                  onChange={(e) => importarHtml(e.target.files)} data-testid="precios-importar-input" />
+                <div className="relative group">
+                  <button className="text-xs px-2 py-1.5 rounded-lg border border-neutral-300 text-neutral-500 font-bold hover:bg-neutral-50" title="Más opciones">⋯</button>
+                  <div className="absolute right-0 mt-1 w-52 bg-white border border-neutral-200 rounded-lg shadow-lg p-1 z-20 hidden group-hover:block">
+                    <button onClick={() => importInputRef.current?.click()} disabled={importing}
+                      className="w-full text-left text-xs px-3 py-2 rounded hover:bg-neutral-50 flex items-center gap-2">
+                      <Upload className="w-3.5 h-3.5" /> {importing ? "Importando…" : "Importar archivo (.json/.html)"}
+                    </button>
+                    <a href="/facilito-recolector.js" target="_blank" rel="noreferrer"
+                      className="block text-xs px-3 py-2 rounded hover:bg-neutral-50 text-neutral-600">Ver script recolector</a>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
