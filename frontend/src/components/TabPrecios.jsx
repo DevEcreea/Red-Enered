@@ -106,7 +106,10 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   const [selDepartamento, setSelDepartamento] = useState("");
   const [selProvincia, setSelProvincia] = useState("");
   const [selDistrito, setSelDistrito] = useState("");
-  const [selCombustible, setSelCombustible] = useState("");
+  // Por defecto DIESEL (lo que cargan las flotas). OJO: antes iniciaba en "" y el select
+  // MOSTRABA "Diesel B5 UV" sin filtrar → la tabla mezclaba los 3 combustibles y parecía
+  // que había precios viejos o grifos duplicados.
+  const [selCombustible, setSelCombustible] = useState("Diesel B5 UV");
   const [selEstacion, setSelEstacion] = useState("");
   const [soloEnered, setSoloEnered] = useState(false);
 
@@ -467,6 +470,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
               {combustiblesDisponibles.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
+              <option value="">Todos los combustibles</option>
             </select>
           </div>
 
@@ -643,6 +647,9 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                       {/* 4. Precio Pizarra */}
                       <td className="px-4 py-3 text-right font-semibold text-neutral-900 text-xs">
                         {precioPizarra > 0 ? formatSoles(precioPizarra) : "—"}
+                        {/* Combustible visible por fila: sin esto, al ver "Todos" los 3 productos
+                            del mismo grifo parecían precios viejos o duplicados. */}
+                        <div className="text-[9px] text-neutral-400 font-medium">{p.combustible || ""}</div>
                       </td>
 
                       {/* 5. Precio ENERED */}
