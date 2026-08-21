@@ -439,27 +439,34 @@ export default function Layout({ children }) {
     <div className="min-h-screen bg-[#F6F7FB]">
       {/* Modal: elegir ingresar como Admin o como empresa (impersonación) */}
       {showChooser && (
-        <div className="fixed inset-0 z-[200] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" data-testid="admin-chooser">
-            <h3 className="font-cabinet font-black text-xl text-neutral-900 mb-1">¿Cómo querés ingresar?</h3>
-            <p className="text-sm text-neutral-500 mb-5">Operá como Administrador ENERED, o entrá en el contexto de una empresa para ver su información y módulos.</p>
+        <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 overflow-hidden" data-testid="admin-chooser">
+            <h3 className="font-cabinet font-black text-xl text-neutral-900 mb-1">¿Cómo quieres ingresar?</h3>
+            <p className="text-sm text-neutral-500 mb-5 leading-relaxed">Opera como Administrador ENERED, o entra al contexto de una empresa para ver su información y módulos.</p>
             <button
               onClick={() => { sessionStorage.setItem("enered_admin_choice", "1"); setShowChooser(false); }}
-              className="w-full mb-4 px-4 py-3 rounded-xl border-2 border-brand bg-brand/5 hover:bg-brand/10 text-left transition-colors"
+              className="w-full mb-5 px-4 py-3.5 rounded-xl border-2 border-brand bg-brand/5 hover:bg-brand/10 text-left transition-colors"
               data-testid="chooser-admin">
               <div className="font-bold text-brand">Ingresar como Administrador</div>
-              <div className="text-xs text-neutral-500">Acceso total: todas las empresas y módulos de administración.</div>
+              <div className="text-xs text-neutral-500 mt-0.5">Acceso total: todas las empresas y módulos de administración.</div>
             </button>
-            <div className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide mb-2">Entrar como empresa</div>
-            <div className="flex gap-2">
+            <div className="relative mb-3">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-neutral-200" /></div>
+              <div className="relative flex justify-center">
+                <span className="bg-white px-3 text-[11px] font-bold text-neutral-400 uppercase tracking-wide">o entrar como empresa</span>
+              </div>
+            </div>
+            <div className="flex gap-2 items-stretch">
+              {/* min-w-0: sin esto, un nombre de empresa largo revienta la fila y empuja el botón fuera */}
               <select value={chooserEmpresa} onChange={(e) => setChooserEmpresa(e.target.value)}
-                className="flex-1 h-10 px-3 border border-neutral-300 rounded-lg text-sm" data-testid="chooser-empresa-select">
-                <option value="">Elegí una empresa…</option>
+                className="flex-1 min-w-0 h-11 px-3 border border-neutral-300 rounded-lg text-sm bg-white truncate focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/10"
+                data-testid="chooser-empresa-select">
+                <option value="">Elige una empresa…</option>
                 {empresasList.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
               <button disabled={!chooserEmpresa}
                 onClick={async () => { await enterEmpresa(chooserEmpresa); setShowChooser(false); navigate("/dashboard"); }}
-                className="px-4 h-10 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm disabled:opacity-50"
+                className="flex-shrink-0 px-5 h-11 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm disabled:opacity-50 transition-colors"
                 data-testid="chooser-entrar">Entrar</button>
             </div>
           </div>

@@ -363,7 +363,7 @@ function ExpedienteDetalle({ userId, onBack }) {
         {tab === "banco" && <TabBanco bank={bank_account} />}
         {tab === "documentos" && <TabDocumentos docs={companyDocs} onDelete={deleteDoc} />}
         {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
-        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} />}
+        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} />}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
         {tab === "editar" && (
           <TabEditar
@@ -589,35 +589,126 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
   );
 }
 
-function TabFacturas({ invoices, onDelete }) {
-  if (!invoices?.length) return <Empty msg="Sin facturas cargadas." />;
+function TabFacturas({ invoices, onDelete, userId }) {
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
   const downloadHref = (id) => {
     const tk = localStorage.getItem("enered_token") || "";
     return `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${tk}`;
   };
 
+  // Filtros EN LAS CABECERAS (estilo Excel): cada columna filtra directo desde su encabezado.
+  const [fPlaca, setFPlaca] = useState("");
+  const [fEstado, setFEstado] = useState("");
+  const [fMes, setFMes] = useState("");          // YYYY-MM
+  const [fProducto, setFProducto] = useState("");
+  const [fRuc, setFRuc] = useState("");
+  const [fEstacion, setFEstacion] = useState("");
+  const [fDoc, setFDoc] = useState("");
+
+  const unicos = (campo) => [...new Set((invoices || []).map((i) => i[campo]).filter(Boolean))].sort();
+  const placas = useMemo(() => unicos("placa"), [invoices]);
+  const productos = useMemo(() => unicos("producto"), [invoices]);
+  const rucs = useMemo(() => unicos("ruc_emisor"), [invoices]);
+  const meses = useMemo(
+    () => [...new Set((invoices || []).map((i) => (i.fecha || "").slice(0, 7)).filter(Boolean))].sort(),
+    [invoices]);
+
+  const filtradas = useMemo(() => (invoices || []).filter((i) => {
+    if (fPlaca && i.placa !== fPlaca) return false;
+    if (fEstado && i.status !== fEstado) return false;
+    if (fMes && (i.fecha || "").slice(0, 7) !== fMes) return false;
+    if (fProducto && i.producto !== fProducto) return false;
+    if (fRuc && i.ruc_emisor !== fRuc) return false;
+    if (fEstacion && !(i.estacion || "").toLowerCase().includes(fEstacion.toLowerCase())) return false;
+    if (fDoc && !(i.numero_documento || "").toLowerCase().includes(fDoc.toLowerCase())) return false;
+    return true;
+  }), [invoices, fPlaca, fEstado, fMes, fProducto, fRuc, fEstacion, fDoc]);
+  const hayFiltros = fPlaca || fEstado || fMes || fProducto || fRuc || fEstacion || fDoc;
+
+  const totGal = filtradas.reduce((a, i) => a + (Number(i.galones) || 0), 0);
+  const totImp = filtradas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
+
+  const zipHref = () => {
+    const tk = localStorage.getItem("enered_token") || "";
+    const p = new URLSearchParams({ t: tk });
+    if (fPlaca) p.set("placa", fPlaca);
+    if (fMes) { p.set("desde", `${fMes}-01`); p.set("hasta", `${fMes}-31`); }
+    if (fDoc) p.set("q", fDoc);
+    else if (fEstacion) p.set("q", fEstacion);
+    else if (fRuc) p.set("q", fRuc);
+    return `${API_BASE}/api/admin/subsidio/expedientes/${userId}/invoices/zip?${p.toString()}`;
+  };
+
+  if (!invoices?.length) return <Empty msg="Sin facturas cargadas." />;
+
+  // Select/input compactos que viven DENTRO de la cabecera (estilo filtro de Excel).
+  const hSel = "mt-1 w-full h-7 px-1 border border-neutral-200 rounded text-[10px] bg-white font-medium normal-case tracking-normal text-neutral-700";
+  const activo = "border-brand ring-1 ring-brand/30";
   return (
-    <div className="overflow-auto">
+    <div className="space-y-3">
+      <div className="flex items-center justify-end gap-3">
+        {hayFiltros && (
+          <button onClick={() => { setFPlaca(""); setFEstado(""); setFMes(""); setFProducto(""); setFRuc(""); setFEstacion(""); setFDoc(""); }}
+            className="text-xs font-bold text-neutral-500 hover:text-neutral-700">✕ Limpiar filtros</button>
+        )}
+        <a href={zipHref()} className="h-9 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center gap-1.5"
+          title="Descarga en un ZIP los archivos filtrados + resumen.xlsx con totales">
+          <Download className="w-3.5 h-3.5" /> Descargar ZIP ({filtradas.length})
+        </a>
+      </div>
+
+      <div className="overflow-auto">
       <table className="w-full text-xs">
         <thead className="bg-neutral-50 text-[10px] uppercase tracking-widest font-bold text-neutral-500 border-b">
-          <tr>
-            <th className="text-left px-3 py-2">Estado</th>
-            <th className="text-left px-3 py-2">Fecha</th>
-            <th className="text-left px-3 py-2">Placa</th>
-            <th className="text-left px-3 py-2">Producto</th>
+          <tr className="align-top">
+            <th className="text-left px-3 py-2">Estado
+              <select value={fEstado} onChange={(e) => setFEstado(e.target.value)} className={`${hSel} ${fEstado ? activo : ""}`}>
+                <option value="">Todos</option>
+                <option value="confirmed">CONF</option>
+                <option value="draft">DRAFT</option>
+              </select>
+            </th>
+            <th className="text-left px-3 py-2">Fecha
+              <select value={fMes} onChange={(e) => setFMes(e.target.value)} className={`${hSel} ${fMes ? activo : ""}`}>
+                <option value="">Todas</option>
+                {meses.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </th>
+            <th className="text-left px-3 py-2">Placa
+              <select value={fPlaca} onChange={(e) => setFPlaca(e.target.value)} className={`${hSel} ${fPlaca ? activo : ""}`}>
+                <option value="">Todas</option>
+                {placas.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </th>
+            <th className="text-left px-3 py-2">Producto
+              <select value={fProducto} onChange={(e) => setFProducto(e.target.value)} className={`${hSel} ${fProducto ? activo : ""}`}>
+                <option value="">Todos</option>
+                {productos.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </th>
             <th className="text-right px-3 py-2">Galones</th>
             <th className="text-right px-3 py-2">Importe</th>
-            <th className="text-left px-3 py-2">RUC emisor</th>
-            <th className="text-left px-3 py-2">Estación</th>
-            <th className="text-left px-3 py-2">N° Doc</th>
+            <th className="text-left px-3 py-2">RUC emisor
+              <select value={fRuc} onChange={(e) => setFRuc(e.target.value)} className={`${hSel} ${fRuc ? activo : ""}`}>
+                <option value="">Todos</option>
+                {rucs.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </th>
+            <th className="text-left px-3 py-2">Estación
+              <input value={fEstacion} onChange={(e) => setFEstacion(e.target.value)} placeholder="Filtrar…"
+                className={`${hSel} ${fEstacion ? activo : ""}`} />
+            </th>
+            <th className="text-left px-3 py-2">N° Doc
+              <input value={fDoc} onChange={(e) => setFDoc(e.target.value)} placeholder="Filtrar…"
+                className={`${hSel} ${fDoc ? activo : ""}`} />
+            </th>
             <th className="text-center px-3 py-2">OCR</th>
             <th className="text-left px-3 py-2">Archivo</th>
             <th className="text-center px-3 py-2">Acciones</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-neutral-100">
-          {invoices.map((i) => (
+          {filtradas.map((i) => (
             <tr key={i.id} data-testid={`invoice-row-${i.id}`}>
               <td className="px-3 py-1.5">
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
@@ -663,7 +754,19 @@ function TabFacturas({ invoices, onDelete }) {
             </tr>
           ))}
         </tbody>
+        {/* TOTALES de lo filtrado */}
+        <tfoot>
+          <tr className="bg-neutral-50 border-t-2 border-neutral-200 font-bold">
+            <td className="px-3 py-2.5 text-neutral-500 uppercase text-[10px] tracking-widest" colSpan={4}>
+              Total · {filtradas.length} factura{filtradas.length === 1 ? "" : "s"}
+            </td>
+            <td className="px-3 py-2.5 text-right text-brand">{num(totGal)} gal</td>
+            <td className="px-3 py-2.5 text-right text-emerald-700">S/ {num(totImp)}</td>
+            <td colSpan={6} />
+          </tr>
+        </tfoot>
       </table>
+    </div>
     </div>
   );
 }

@@ -38,7 +38,10 @@ export default function SubsidioPublico() {
 
   // Un cliente REAL ya logueado va directo a su expediente (el invitado sí puede consultar).
   if (checking) return null;
-  if (user && user.role === "cliente_subsidio" && !user.es_guest) return <Navigate to="/subsidio/documentos" replace />;
+  // ?ver=1 fuerza mostrar la página pública aunque haya sesión de cliente activa
+  // (útil para el equipo ENERED al demostrar el diagnóstico sin cerrar sesión).
+  const forzarVista = new URLSearchParams(window.location.search).get("ver") === "1";
+  if (!forzarVista && user && user.role === "cliente_subsidio" && !user.es_guest) return <Navigate to="/subsidio/documentos" replace />;
 
   async function consultar() {
     const r = ruc.trim();

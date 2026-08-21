@@ -2865,6 +2865,90 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     }
 
 
+@subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
+async def admin_zip_invoices(
+    user_id: str,
+    placa: str = "", desde: str = "", hasta: str = "", q: str = "",
+    _: dict = Depends(_require_admin_enered),
+):
+    """Descarga en UN ZIP los archivos de las facturas del expediente (respetando los
+    filtros), cada uno nombrado PLACA_NroDoc.ext, más un resumen.xlsx con totales.
+    Agiliza armar el paquete operativo para la ATU."""
+    import zipfile
+    import tempfile
+    from fastapi.responses import FileResponse
+
+    filtro = {"user_id": user_id}
+    if placa:
+        filtro["placa"] = placa.upper().strip()
+    if desde or hasta:
+        rango = {}
+        if desde:
+            rango["$gte"] = desde
+        if hasta:
+            rango["$lte"] = hasta
+        filtro["fecha"] = rango
+    if q:
+        rq = {"$regex": _re.escape(q.strip()), "$options": "i"}
+        filtro["$or"] = [{"numero_documento": rq}, {"estacion": rq}, {"ruc_emisor": rq}]
+
+    rows = await db.consumos_subsidio.find(filtro, {"_id": 0}).sort("fecha", 1).to_list(2000)
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay facturas con esos filtros")
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Facturas"
+    ws.append(["Fecha", "Placa", "Producto", "Galones", "Importe (S/)", "RUC emisor",
+               "Estación", "N° Doc", "Archivo en ZIP", "Estado"])
+    tot_gal = tot_imp = 0.0
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    con_archivo = sin_archivo = 0
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+        usados = set()
+        for r in rows:
+            nombre_zip = ""
+            key = r.get("factura_storage_key")
+            if key and storage.object_exists(key):
+                fname = r.get("factura_filename") or "archivo"
+                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "pdf"
+                base = f"{r.get('placa') or 'SIN-PLACA'}_{(r.get('numero_documento') or r.get('id'))}".replace("/", "-")
+                nombre_zip = f"{base}.{ext}"
+                k2 = 2
+                while nombre_zip in usados:
+                    nombre_zip = f"{base}_{k2}.{ext}"; k2 += 1
+                usados.add(nombre_zip)
+                try:
+                    zf.writestr(nombre_zip, storage.get_object_bytes(key))
+                    con_archivo += 1
+                except Exception as e:
+                    logger.warning(f"[zip_invoices] error leyendo {key}: {e}")
+                    nombre_zip = "(error al leer)"
+            else:
+                sin_archivo += 1
+                nombre_zip = "(sin archivo — registro manual)"
+            g = float(r.get("galones") or 0)
+            imp = float(r.get("importe_total") or 0)
+            tot_gal += g
+            tot_imp += imp
+            ws.append([r.get("fecha"), r.get("placa"), r.get("producto"), g, imp,
+                       r.get("ruc_emisor"), r.get("estacion"), r.get("numero_documento"),
+                       nombre_zip, r.get("status")])
+        ws.append([])
+        ws.append(["TOTAL", "", "", round(tot_gal, 3), round(tot_imp, 2), "", "",
+                   f"{len(rows)} facturas", f"{con_archivo} con archivo / {sin_archivo} sin archivo", ""])
+        xbuf = io.BytesIO()
+        wb.save(xbuf)
+        zf.writestr("resumen.xlsx", xbuf.getvalue())
+    tmp.close()
+
+    etiqueta = f"facturas_{(placa or 'todas')}_{desde or 'inicio'}_{hasta or 'fin'}.zip".replace(" ", "")
+    return FileResponse(tmp.name, media_type="application/zip", filename=etiqueta,
+                        background=None)
+
+
 @subsidio_router.put("/admin/subsidio/invoices/{invoice_id}/usar-archivo")
 async def admin_vincular_archivo_invoice(invoice_id: str, payload: dict,
                                          _: dict = Depends(_require_admin_enered)):
