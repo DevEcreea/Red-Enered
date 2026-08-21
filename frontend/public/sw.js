@@ -1,8 +1,8 @@
 /* Service worker mínimo para PWA instalable (ENERED).
    Estrategia: network-first para la navegación (siempre datos frescos),
    con fallback al índice cacheado si no hay red. No cachea la API. */
-const CACHE = "enered-pwa-v1";
-const APP_SHELL = ["/", "/index.html", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const CACHE = "enered-pwa-v2";   // v2: fuerza purgar los íconos viejos cacheados
+const APP_SHELL = ["/", "/index.html", "/manifest.json", "/icon-192.png?v=2", "/icon-512.png?v=2"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(APP_SHELL)).catch(() => {}));

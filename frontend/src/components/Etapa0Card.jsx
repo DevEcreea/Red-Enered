@@ -70,7 +70,7 @@ function Chk({ ok, pend, children }) {
  * MÓDULO 0 (Etapa 0): diagnóstico integrado de los DOS subsidios abiertos —
  * DU 004 (presentación única) y DU 007 (3 periodos, solo N1/N2/N3, mismo S/ por galón).
  */
-export default function Etapa0Card({ onResumen, ruc: rucProp }) {
+export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
   const { user } = useAuth();
   const ruc = rucProp || user?.ruc;   // rucProp: uso público en /subsidio (sin login)
   const [data, setData] = useState(null);
@@ -79,6 +79,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
   const [pct, setPct] = useState(8);
   const [periodo, setPeriodo] = useState(0);
   const [verPlacas, setVerPlacas] = useState(false);
+  const [verPlacas7, setVerPlacas7] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const iv = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(iv); }, []);
 
@@ -195,6 +196,10 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
 
   // DU 007: SOLO N1, N2 y N3 — mismos topes de galones y mismo S/ por galón, por periodo.
   const unidades007 = unidades.filter((u) => DU007_CATS.includes(u.categoria));
+  // Desglose de placas del 007 (SOLO N1/N2/N3; el resto —M2, M3, O4…— no aplica a este decreto)
+  const aceptadas007 = unidades007.filter((u) => u.cumple);
+  const regularizables007 = unidades007.filter((u) => !u.cumple);
+  const noAplican007 = unidades.filter((u) => !DU007_CATS.includes(u.categoria));
   const galones007 = unidades007.reduce((a, u) => a + (topePorCat[u.categoria] || 0), 0);
   const monto007 = galones007 * factor;
   const catsExcluidas007 = [...new Set(unidades.filter((u) => topePorCat[u.categoria] && !DU007_CATS.includes(u.categoria)).map((u) => u.categoria))];
@@ -227,8 +232,9 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
   const wsp007 = encodeURIComponent(`Hola ENERED, soy ${empresa} (RUC ${ruc}). Quiero blindar mis facturas del subsidio DU 007 desde el periodo 1 (consumo ya está corriendo).`);
 
   return (
-    <div className="e0k">
+    <div className={solo === "du007" ? "e0k e0k-uno" : "e0k"}>
       {/* ══════════ DU 004 ══════════ */}
+      {solo !== "du007" && (
       <article className="e0k-deck">
         <div className="e0k-eyebrow">D.U. 004-2026 <span className="tag one">PRESENTACIÓN ÚNICA</span></div>
 
@@ -319,6 +325,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
           Recuperar mis {fmtSoles(s.total_monto)} del DU 004
         </a>
       </article>
+      )}
 
       {/* ══════════ DU 007 ══════════ */}
       <article className="e0k-deck">
@@ -359,6 +366,61 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Placas que entran al DU 007 — SOLO N1, N2 y N3 */}
+        <div className="e0k-box">
+          <div className="bh"><h4>De tus {unidades.length} placa{unidades.length === 1 ? "" : "s"}, <b className="g">{unidades007.length} entra{unidades007.length === 1 ? "" : "n"} al DU 007</b></h4>
+            <em>solo N1, N2 y N3</em></div>
+          <div className="bars">
+            {aceptadas007.length > 0 && <i style={{ flex: aceptadas007.length, background: "#0EA46B" }} />}
+            {regularizables007.length > 0 && <i style={{ flex: regularizables007.length, background: "#D97706" }} />}
+            {noAplican007.length > 0 && <i style={{ flex: noAplican007.length, background: "#D9D5E8" }} />}
+          </div>
+          <div className="legend">
+            {aceptadas007.length > 0 && (
+              <div className="li"><span className="dot" style={{ background: "#0EA46B" }} />
+                <div><span className="k">{aceptadas007.length} con TUC aceptado</span>
+                  <span className="d">{aceptadas007.slice(0, 3).map((u) => u.placa).join(" · ")}{aceptadas007.length > 3 ? "…" : ""}</span></div>
+                <span className="v ok">{fmtSoles(monto(aceptadas007))}</span></div>
+            )}
+            {regularizables007.length > 0 && (
+              <div className="li"><span className="dot" style={{ background: "#D97706" }} />
+                <div><span className="k">{regularizables007.length} regularizable{regularizables007.length === 1 ? "" : "s"}</span>
+                  <span className="d">{regularizables007.slice(0, 3).map((u) => `${u.placa} · ${u.categoria}`).join("  ·  ")}{regularizables007.length > 3 ? "…" : ""} — {regularizables007[0]?.motivo || "se puede corregir"}</span></div>
+                <span className="v warn">{fmtSoles(monto(regularizables007))}</span></div>
+            )}
+            {noAplican007.length > 0 && (
+              <div className="li"><span className="dot" style={{ background: "#D9D5E8" }} />
+                <div><span className="k">{noAplican007.length} no aplica{noAplican007.length === 1 ? "" : "n"} al 007</span>
+                  <span className="d">Categoría {[...new Set(noAplican007.map((u) => u.categoria || "sin categoría"))].join(", ")} · el DU 007 solo cubre N1, N2 y N3</span></div>
+                <span className="v mute">S/ 0.00</span></div>
+            )}
+          </div>
+          <button className="e0k-toggle" onClick={() => setVerPlacas7(!verPlacas7)}>
+            {verPlacas7 ? <ChevronUp /> : <ChevronDown />} {verPlacas7 ? "Ocultar" : "Ver"} detalle por placa
+          </button>
+          {verPlacas7 && (
+            <div className="e0k-tabla">
+              <table>
+                <thead><tr>{["Placa", "Cat.", "TUC", "¿Acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {unidades007.map((u, i) => (
+                    <tr key={i}>
+                      <td className="pl">{u.placa}</td>
+                      <td>{u.categoria || "—"}</td>
+                      <td>{u.tuc || "—"}</td>
+                      <td>{u.cumple ? <span className="st ok"><CheckCircle2 /> Aceptada</span>
+                        : u.estado === "por_verificar" ? <span className="st wa"><AlertTriangle /> Por verificar</span>
+                        : <span className="st no"><XCircle /> No aceptada</span>}</td>
+                      <td className="mo">{u.cumple ? "—" : u.motivo}</td>
+                      <td>{u.vigencia || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="e0k-box">
@@ -508,6 +570,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp }) {
 .e0k-cta.ghost{background:#fff;color:var(--vi6);border:1.5px solid #C4B5FD}
 .e0k-cta.ghost:hover{background:var(--vi05);box-shadow:0 12px 24px -14px rgba(109,40,217,.4)}
 
+.e0k-uno{grid-template-columns:1fr;max-width:880px;margin:0 auto}
 @media (max-width:1180px){.e0k{grid-template-columns:1fr}}
 @media (max-width:520px){
   .e0k-amount .big{font-size:30px}

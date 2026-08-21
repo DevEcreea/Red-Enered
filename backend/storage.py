@@ -131,6 +131,29 @@ def object_exists(key: str) -> bool:
     else:
         return (LOCAL_BASE / key).exists()
 
+def list_keys(prefix: str = "") -> list:
+    """List every object key under a prefix (one bucket scan; cache the result
+    when you need to match many filenames against the same prefix)."""
+    backend = _backend()
+    if backend == "r2":
+        try:
+            keys = []
+            paginator = _get_r2().get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=_bucket(), Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    keys.append(obj['Key'])
+            return keys
+        except Exception:
+            return []
+    else:
+        try:
+            base = LOCAL_BASE / prefix if prefix else LOCAL_BASE
+            return [str(p.relative_to(LOCAL_BASE)).replace("\\", "/")
+                    for p in base.rglob("*") if p.is_file()]
+        except Exception:
+            return []
+
+
 def find_by_suffix(suffix: str, prefix: str = "") -> Optional[str]:
     """Search for the first object matching a suffix (case-insensitive)."""
     backend = _backend()

@@ -25,8 +25,8 @@ const MENU = [
     // Clic en el grupo → abre directo el DU-004 (el 007 aún no está activo); la flecha despliega.
     clickTo: "/subsidio/documentos",
     submenu: [
-      { to: "/subsidio/documentos", label: "DU - 004", testid: "nav-du004" },
-      { to: "/subsidio/du007", label: "DU - 007 🔒", testid: "nav-du007" },
+      { to: "/subsidio/documentos", label: "DU - 004", testid: "nav-du004", badge: "POR VENCER", badgeColor: "amber" },
+      { to: "/subsidio/du007", label: "DU - 007", testid: "nav-du007", badge: "NUEVO", badgeColor: "cyan" },
     ],
   },
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ALL_REGULAR_ROLES, testid: "nav-dashboard", mkey: "dashboard" },
@@ -171,12 +171,19 @@ function SidebarLink({ item, onClick, isCollapsed }) {
                 onClick={onClick}
                 data-testid={sub.testid}
                 className={({ isActive }) =>
-                  `block px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                  `flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium transition-all ${
                     isActive ? "bg-white/15 text-cyan-300" : "text-white/80 hover:bg-white/10 hover:text-white"
                   }`
                 }
               >
-                {sub.label}
+                <span className="flex-1">{sub.label}</span>
+                {sub.badge && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black tracking-wider flex-shrink-0 ${
+                    sub.badgeColor === "cyan" ? "bg-cyan-400 text-[#2D0A4E]" : "bg-amber-400 text-[#2D0A4E]"
+                  }`}>
+                    {sub.badge}
+                  </span>
+                )}
               </NavLink>
             ))}
           </div>

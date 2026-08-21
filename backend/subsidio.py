@@ -1773,6 +1773,7 @@ class InvoiceUpdateIn(BaseModel):
 @subsidio_router.post("/subsidio/invoices/upload")
 async def invoices_upload(
     files: List[UploadFile] = File(...),
+    programa: str = Form("du004"),
     user: dict = Depends(_require_subsidio),
 ):
     """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
@@ -1785,6 +1786,7 @@ async def invoices_upload(
         raise HTTPException(status_code=400, detail="Sin archivos")
     if len(files) > 60:
         raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
+    programa = programa if programa in ("du004", "du007") else "du004"
 
     # Cargar placas del usuario para auto-match
     vehicles = await db.subsidio_vehicles.find(
@@ -1929,16 +1931,20 @@ async def invoices_upload(
             "grifo_inscrito": bool((_grifo or {}).get("inscrito")),
             "fuentes": base.get("fuentes") or {},
             "origin": "individual",
+            "programa": programa,   # du004 | du007 — cada subsidio lleva su propio bucket
         }
 
-        # ── Validación automática contra las reglas del DU 004-2026 (lo que la ATU revisa a mano)
+        # ── Validación automática contra las reglas del decreto correspondiente
         try:
             _val = _validar(doc, placas_flota=placas_norm,
                             categoria_por_placa=categoria_por_placa,
-                            numeros_existentes=numeros_existentes)
+                            numeros_existentes=numeros_existentes,
+                            programa=programa)
             doc["validacion"] = _val
             doc["validacion_estado"] = _val["estado"]          # CONFORME | OBSERVADA | RECHAZADA
             doc["requiere_revision"] = _val["requiere_revision"]
+            if programa == "du007":
+                doc["periodo_du007"] = _val.get("periodo_du007")
             # Evita que dos archivos de la MISMA carga se dupliquen entre sí.
             if doc.get("numero_documento"):
                 numeros_existentes.add((str(doc.get("ruc_emisor") or "").strip(),
@@ -1966,11 +1972,13 @@ async def invoices_upload(
 
 
 @subsidio_router.get("/subsidio/invoices/preview")
-async def invoices_preview(user: dict = Depends(_require_subsidio)):
-    """Devuelve facturas en draft (pendientes de confirmar) del usuario."""
+async def invoices_preview(programa: str = "du004", user: dict = Depends(_require_subsidio)):
+    """Devuelve facturas en draft (pendientes de confirmar) del usuario, por programa."""
     uids = await _get_company_uids(user["id"])
+    # Las filas antiguas no tienen campo "programa": cuentan como du004.
+    filtro_prog = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "status": "draft"},
+        {"user_id": {"$in": uids}, "status": "draft", **filtro_prog},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("created_at", -1).to_list(500)
     # Placas registradas para mostrar dropdown de corrección
@@ -2034,10 +2042,13 @@ async def invoices_update(
         vistos = {(str(o.get("ruc_emisor") or "").strip(),
                    str(o.get("numero_documento") or "").strip().upper(), _npu(o.get("placa")))
                   for o in otras if o.get("numero_documento")}
-        _v = _validar_upd(futuro, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos)
+        _v = _validar_upd(futuro, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos,
+                          programa=inv.get("programa") or "du004")
         patch["validacion"] = _v
         patch["validacion_estado"] = _v["estado"]
         patch["requiere_revision"] = _v["requiere_revision"]
+        if (inv.get("programa") or "du004") == "du007":
+            patch["periodo_du007"] = _v.get("periodo_du007")
     except Exception as _e:
         logger.warning(f"Revalidación tras editar falló: {_e}")
 
@@ -2161,12 +2172,89 @@ def _combustible_to_subsidio(r: dict) -> dict:
         "_origen": "combustible"
     }
 
-@subsidio_router.get("/subsidio/invoices/confirmed")
-async def invoices_confirmed(user: dict = Depends(_require_subsidio)):
-    """Lista facturas confirmadas (para módulos del cliente_subsidio)."""
+@subsidio_router.get("/subsidio/du007/estado")
+async def du007_estado(user: dict = Depends(_require_subsidio)):
+    """Estado del DU 007 del cliente: facturas por periodo (conteo, galones, monto) y
+    declaraciones ya firmadas. Alimenta las 3 etapas del módulo DU-007."""
     uids = await _get_company_uids(user["id"])
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "status": "confirmed"},
+        {"user_id": {"$in": uids}, "programa": "du007"},
+        {"_id": 0, "periodo_du007": 1, "galones": 1, "importe_total": 1, "validacion_estado": 1},
+    ).to_list(2000)
+    periodos = {1: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0},
+                2: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0},
+                3: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0}}
+    fuera_periodo = rechazadas = 0
+    for r in rows:
+        p = r.get("periodo_du007")
+        if p not in periodos:
+            # Fecha de emisión fuera de los 3 periodos: no se agrupa ni suma.
+            fuera_periodo += 1
+            continue
+        if r.get("validacion_estado") == "RECHAZADA":
+            # Dentro de un periodo pero rechazada por otra regla: tampoco suma.
+            rechazadas += 1
+            continue
+        periodos[p]["facturas"] += 1
+        periodos[p]["galones"] += float(r.get("galones") or 0)
+        periodos[p]["importe"] += float(r.get("importe_total") or 0)
+        if r.get("validacion_estado") == "CONFORME":
+            periodos[p]["conformes"] += 1
+    decls = await db.declaraciones_du007.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "periodo": 1, "accepted_at": 1, "representante": 1},
+    ).to_list(10)
+    return {"periodos": [{"periodo": k, **{kk: round(vv, 2) if isinstance(vv, float) else vv
+                                            for kk, vv in v.items()}} for k, v in periodos.items()],
+            "fuera_periodo": fuera_periodo, "rechazadas": rechazadas,
+            "declaraciones": decls}
+
+
+@subsidio_router.post("/subsidio/du007/declaracion")
+async def du007_declaracion(payload: dict, request: Request, user: dict = Depends(_require_subsidio)):
+    """Firma la declaración jurada del DU 007 para UN periodo (cada periodo se presenta
+    por separado). Requiere al menos una factura válida de ese periodo."""
+    try:
+        periodo = int(payload.get("periodo"))
+    except (TypeError, ValueError):
+        periodo = 0
+    if periodo not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="Periodo inválido (1, 2 o 3)")
+    uids = await _get_company_uids(user["id"])
+    n = await db.consumos_subsidio.count_documents(
+        {"user_id": {"$in": uids}, "programa": "du007", "periodo_du007": periodo,
+         "validacion_estado": {"$ne": "RECHAZADA"}})
+    if n == 0:
+        raise HTTPException(status_code=400,
+                            detail=f"Aún no tienes facturas válidas del periodo {periodo}. Carga tu combustible primero.")
+    ya = await db.declaraciones_du007.find_one({"user_id": {"$in": uids}, "periodo": periodo})
+    if ya:
+        raise HTTPException(status_code=409, detail=f"La declaración del periodo {periodo} ya fue firmada.")
+    rec = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "empresa": user.get("empresa"),
+        "ruc": user.get("ruc"),
+        "periodo": periodo,
+        "facturas_incluidas": n,
+        "representante": payload.get("representante") or user.get("contacto") or user.get("name"),
+        "accepted_at": datetime.now(timezone.utc).isoformat(),
+        "ip": (request.client.host if request.client else None),
+        "user_agent": request.headers.get("user-agent", ""),
+        "texto": ("Declaro bajo juramento que los consumos de combustible presentados para el "
+                  f"periodo {periodo} del DU 007-2026 son exactos y corresponden a unidades N1/N2/N3 "
+                  "con habilitación vigente."),
+    }
+    await db.declaraciones_du007.insert_one(rec)
+    return {"ok": True, "periodo": periodo, "facturas_incluidas": n}
+
+
+@subsidio_router.get("/subsidio/invoices/confirmed")
+async def invoices_confirmed(programa: str = "du004", user: dict = Depends(_require_subsidio)):
+    """Lista facturas confirmadas (para módulos del cliente_subsidio), por programa."""
+    uids = await _get_company_uids(user["id"])
+    filtro_prog = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
+    rows = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}, "status": "confirmed", **filtro_prog},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(2000)
 
@@ -2865,6 +2953,58 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     }
 
 
+async def _buscar_key_archivo(inv: dict, keys_cache: Optional[list] = None) -> Optional[str]:
+    """Localiza el archivo de una factura con la MISMA tolerancia que la descarga individual:
+    primero la referencia directa; si está rota, busca por nombre de archivo (con y sin
+    espacios) y por número de documento en el almacenamiento, y cruza las colecciones de
+    facturación por si el archivo se subió por otra vía.
+    keys_cache: listado completo de keys 'subsidio/' pre-cargado — obligatorio cuando se
+    procesan muchas facturas (evita re-listar el bucket por cada una)."""
+    cache_set = set(keys_cache) if keys_cache is not None else None
+
+    def _existe(k: str) -> bool:
+        if cache_set is not None and k in cache_set:
+            return True
+        return storage.object_exists(k)
+
+    def _por_sufijo(suffix: str, prefix: str) -> Optional[str]:
+        if keys_cache is not None:
+            s = suffix.lower()
+            for k in keys_cache:
+                if k.startswith(prefix) and k.lower().endswith(s):
+                    return k
+            return None
+        return storage.find_by_suffix(suffix, prefix=prefix)
+
+    key = inv.get("factura_storage_key")
+    if key and _existe(key):
+        return key
+    fname = inv.get("factura_filename") or inv.get("pdf_filename")
+    n_doc = (inv.get("numero_documento") or inv.get("n_doc") or "").strip()
+    uid = inv.get("user_id")
+    candidatos = [c for c in [fname, (fname or "").replace(" ", ""),
+                              f"{n_doc}.pdf" if n_doc else ""] if c]
+    for cand in candidatos:
+        try:
+            k = _por_sufijo(cand, f"subsidio/{uid}/") if uid else None
+            if not k:
+                k = _por_sufijo(cand, "subsidio/")
+            if k:
+                return k
+        except Exception:
+            pass
+    if n_doc:
+        q = {"$or": [{"n_doc": n_doc}, {"numero_documento": n_doc}]}
+        for col in (db.invoices, db.empresas_invoices):
+            alt = await col.find_one(q)
+            if alt:
+                for kk in ("factura_storage_key", "storage_key", "pdf_key"):
+                    k = alt.get(kk)
+                    if k and _existe(k):
+                        return k
+    return None
+
+
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
 async def admin_zip_invoices(
     user_id: str,
@@ -2878,7 +3018,9 @@ async def admin_zip_invoices(
     import tempfile
     from fastapi.responses import FileResponse
 
-    filtro = {"user_id": user_id}
+    # Todas las cuentas de la MISMA empresa (las facturas pueden estar repartidas entre ellas).
+    uids = await _get_company_uids(user_id)
+    filtro = {"user_id": {"$in": uids}}
     if placa:
         filtro["placa"] = placa.upper().strip()
     if desde or hasta:
@@ -2906,12 +3048,14 @@ async def admin_zip_invoices(
 
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     con_archivo = sin_archivo = 0
+    # Un solo listado del bucket para resolver archivos de TODAS las facturas.
+    _keys = storage.list_keys("subsidio/")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         usados = set()
         for r in rows:
             nombre_zip = ""
-            key = r.get("factura_storage_key")
-            if key and storage.object_exists(key):
+            key = await _buscar_key_archivo(r, keys_cache=_keys)
+            if key:
                 fname = r.get("factura_filename") or "archivo"
                 ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "pdf"
                 base = f"{r.get('placa') or 'SIN-PLACA'}_{(r.get('numero_documento') or r.get('id'))}".replace("/", "-")
@@ -2928,7 +3072,12 @@ async def admin_zip_invoices(
                     nombre_zip = "(error al leer)"
             else:
                 sin_archivo += 1
-                nombre_zip = "(sin archivo — registro manual)"
+                # Distinguir el registro digitado a mano (nunca tuvo archivo) del archivo
+                # que debía existir y no se encontró en el almacenamiento.
+                if r.get("factura_storage_key") or (r.get("factura_filename") and not str(r.get("factura_filename")).startswith("manual_entry")):
+                    nombre_zip = "(archivo no encontrado en almacenamiento)"
+                else:
+                    nombre_zip = "(sin archivo — registro manual)"
             g = float(r.get("galones") or 0)
             imp = float(r.get("importe_total") or 0)
             tot_gal += g

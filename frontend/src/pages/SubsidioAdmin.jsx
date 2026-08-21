@@ -615,7 +615,8 @@ function TabFacturas({ invoices, onDelete, userId }) {
 
   const filtradas = useMemo(() => (invoices || []).filter((i) => {
     if (fPlaca && i.placa !== fPlaca) return false;
-    if (fEstado && i.status !== fEstado) return false;
+    if (fEstado === "invalida") { if (!i.invalida) return false; }
+    else if (fEstado && (i.status !== fEstado || i.invalida)) return false;
     if (fMes && (i.fecha || "").slice(0, 7) !== fMes) return false;
     if (fProducto && i.producto !== fProducto) return false;
     if (fRuc && i.ruc_emisor !== fRuc) return false;
@@ -666,6 +667,7 @@ function TabFacturas({ invoices, onDelete, userId }) {
                 <option value="">Todos</option>
                 <option value="confirmed">CONF</option>
                 <option value="draft">DRAFT</option>
+                <option value="invalida">NO APLICA</option>
               </select>
             </th>
             <th className="text-left px-3 py-2">Fecha
@@ -711,8 +713,8 @@ function TabFacturas({ invoices, onDelete, userId }) {
           {filtradas.map((i) => (
             <tr key={i.id} data-testid={`invoice-row-${i.id}`}>
               <td className="px-3 py-1.5">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  {i.status === "confirmed" ? "CONF" : "DRAFT"}
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700" : i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                  {i.invalida ? "NO APLICA" : i.status === "confirmed" ? "CONF" : "DRAFT"}
                 </span>
               </td>
               <td className="px-3 py-1.5">{i.fecha || "—"}</td>
@@ -913,6 +915,10 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
   );
   // Previsualizar un archivo del cliente en el visor del panel (en vez de abrir otra pestaña).
   const [previewUrl, setPreviewUrl] = useState(null);
+  // Al CREAR un consumo manual: archivo del cliente elegido para asociarlo al guardar.
+  // Se mantiene tras guardar porque una misma factura puede cubrir varias placas
+  // (varios consumos manuales asociados al mismo documento).
+  const [invArchivoSel, setInvArchivoSel] = useState(null);
 
   // Vincula el archivo del cliente a la factura que se está editando (quedará como SU archivo).
   const vincularArchivo = async (invoiceId, origen) => {
@@ -1092,6 +1098,8 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
     setInvInvalida(false);
     setInvMotivos([]);
     setInvMotivoOtros("");
+    setInvArchivoSel(null);
+    setPreviewUrl(null);
     setShowInvoiceForm(true);
   };
 
@@ -1124,6 +1132,8 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
     setInvInvalida(!!inv.invalida);
     setInvMotivos(inv.motivos_invalidez || []);
     setInvMotivoOtros(inv.motivo_invalidez_otros || "");
+    setInvArchivoSel(null);
+    setPreviewUrl(null);
     setShowInvoiceForm(true);
   };
 
@@ -1154,15 +1164,23 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
         motivo_invalidez_otros: invInvalida && invMotivos.includes("otros") ? invMotivoOtros.trim() : "",
       };
 
+      let vinculadoA = "";
       if (editingInvoice) {
         await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${editingInvoice.id}`, payload);
       } else {
-        await api.post(`/admin/subsidio/expedientes/${user.id}/invoices`, payload);
+        const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices`, payload);
+        const nuevoId = res?.data?.invoice?.id;
+        if (nuevoId && invArchivoSel) {
+          // Asocia el documento elegido al consumo recién creado. La selección se
+          // conserva para registrar la siguiente placa de la misma factura.
+          await api.put(`/admin/subsidio/invoices/${nuevoId}/usar-archivo`, invArchivoSel.origen);
+          vinculadoA = invArchivoSel.nombre;
+        }
       }
-      
-      // En lugar de ocultar el form y correr el riesgo de perder foco o estado, 
+
+      // En lugar de ocultar el form y correr el riesgo de perder foco o estado,
       // limpiamos los campos si es nueva factura, o simplemente refrescamos.
-      alert("Factura guardada correctamente.");
+      alert(vinculadoA ? `Factura guardada y asociada al archivo "${vinculadoA}".` : "Factura guardada correctamente.");
       
       if (!editingInvoice) {
         setInvNumero("");
@@ -1429,7 +1447,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                   </button>
                 </div>
                 
-                <div className={`grid gap-6 ${editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
+                <div className={`grid gap-6 ${(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key || (!editingInvoice && (comprobantesCliente.length > 0 || facturasConArchivo.length > 0))) ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
                   {/* Formulario */}
                   <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4 h-min">
                     <div className="space-y-1">
@@ -1622,20 +1640,38 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                   </form>
 
                   {/* Previsualización del PDF (o del archivo del cliente elegido abajo) */}
-                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key) && (
+                  {(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key ||
+                    (!editingInvoice && (comprobantesCliente.length > 0 || facturasConArchivo.length > 0))) && (
                     <div className="space-y-3">
-                      <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[420px] flex items-center justify-center">
-                        <iframe
-                          src={previewUrl || `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
-                          className="w-full h-full min-h-[420px] bg-white"
-                          title="Previsualización de factura"
-                        />
-                      </div>
+                      {(previewUrl || editingInvoice) ? (
+                        <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[420px] flex items-center justify-center">
+                          <iframe
+                            src={previewUrl || `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                            className="w-full h-full min-h-[420px] bg-white"
+                            title="Previsualización de factura"
+                          />
+                        </div>
+                      ) : (
+                        <div className="bg-neutral-100 border border-dashed border-neutral-300 rounded-lg min-h-[200px] flex items-center justify-center text-xs text-neutral-500 text-center px-6">
+                          Una misma factura puede cubrir varias placas: elige "Asociar" en un archivo
+                          del cliente y cada consumo manual que guardes quedará vinculado a ese documento.
+                          Usa "Ver" para previsualizarlo aquí.
+                        </div>
+                      )}
                       {previewUrl && (
                         <button onClick={() => setPreviewUrl(null)}
                           className="text-[11px] text-brand font-bold hover:underline">
-                          ← Volver al registro de esta factura
+                          {editingInvoice ? "← Volver al registro de esta factura" : "← Cerrar previsualización"}
                         </button>
+                      )}
+                      {!editingInvoice && invArchivoSel && (
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs flex items-center gap-2">
+                          <span className="flex-1 truncate text-emerald-800">
+                            <b>Se asociará al guardar:</b> {invArchivoSel.nombre}
+                          </span>
+                          <button onClick={() => setInvArchivoSel(null)}
+                            className="text-neutral-500 font-bold hover:underline flex-shrink-0">Quitar</button>
+                        </div>
                       )}
                       {/* Archivos originales del cliente (cualquier formato) para cotejar */}
                       {(comprobantesCliente.length > 0 || facturasConArchivo.length > 0) && (
@@ -1653,26 +1689,34 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                                     className="text-brand font-bold hover:underline flex-shrink-0">Ver</button>
                                   <a href={`${base}&dl=1`}
                                     className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
-                                  <button onClick={() => vincularArchivo(editingInvoice.id, { doc_id: d.id })}
-                                    className="text-emerald-600 font-bold hover:underline flex-shrink-0"
-                                    title="Usar este archivo como el documento de esta factura">Vincular</button>
+                                  {editingInvoice ? (
+                                    <button onClick={() => vincularArchivo(editingInvoice.id, { doc_id: d.id })}
+                                      className="text-emerald-600 font-bold hover:underline flex-shrink-0"
+                                      title="Usar este archivo como el documento de esta factura">Vincular</button>
+                                  ) : (
+                                    <button onClick={() => setInvArchivoSel({ origen: { doc_id: d.id }, nombre: d.filename || d.categoria })}
+                                      className={`font-bold hover:underline flex-shrink-0 ${invArchivoSel?.origen?.doc_id === d.id ? "text-emerald-700" : "text-emerald-600"}`}
+                                      title="El consumo manual que guardes quedará asociado a este documento">
+                                      {invArchivoSel?.origen?.doc_id === d.id ? "✓ Asociado" : "Asociar"}</button>
+                                  )}
                                 </div>
                               );
                             })}
                             {facturasConArchivo
                               .slice()
                               .sort((a, b) => {
-                                // El archivo cuyo número coincide con la factura editada, primero.
-                                const n = (editingInvoice?.numero_documento || "").toUpperCase();
+                                // El archivo cuyo número coincide con la factura editada (o digitada), primero.
+                                const n = (editingInvoice?.numero_documento || invNumero || "").toUpperCase();
                                 const ma = n && (a.numero_documento || "").toUpperCase() === n ? 0 : 1;
                                 const mb = n && (b.numero_documento || "").toUpperCase() === n ? 0 : 1;
                                 return ma - mb;
                               })
                               .map((i) => {
                                 const base = `${API}/admin/subsidio/invoices/${i.id}/download?t=${localStorage.getItem("enered_token") || ""}`;
-                                const coincide = editingInvoice?.numero_documento &&
-                                  (i.numero_documento || "").toUpperCase() === editingInvoice.numero_documento.toUpperCase() &&
-                                  i.id !== editingInvoice.id;
+                                const nRef = (editingInvoice?.numero_documento || invNumero || "").toUpperCase();
+                                const coincide = nRef &&
+                                  (i.numero_documento || "").toUpperCase() === nRef &&
+                                  i.id !== editingInvoice?.id;
                                 return (
                                   <div key={i.id} className={`flex items-center gap-2 text-xs rounded px-1 ${coincide ? "bg-emerald-50 border border-emerald-200" : ""}`}>
                                     <span className="flex-1 truncate text-neutral-700">
@@ -1684,10 +1728,15 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                                       className="text-brand font-bold hover:underline flex-shrink-0">Ver</button>
                                     <a href={`${base}&dl=1`}
                                       className="text-neutral-500 font-bold hover:underline flex-shrink-0">Descargar</a>
-                                    {i.id !== editingInvoice?.id && (
+                                    {editingInvoice ? (i.id !== editingInvoice.id && (
                                       <button onClick={() => vincularArchivo(editingInvoice.id, { desde_invoice_id: i.id })}
                                         className="text-emerald-600 font-bold hover:underline flex-shrink-0"
                                         title="Usar este archivo como el documento de esta factura">Vincular</button>
+                                    )) : (
+                                      <button onClick={() => setInvArchivoSel({ origen: { desde_invoice_id: i.id }, nombre: i.factura_filename || i.numero_documento })}
+                                        className={`font-bold hover:underline flex-shrink-0 ${invArchivoSel?.origen?.desde_invoice_id === i.id ? "text-emerald-700" : "text-emerald-600"}`}
+                                        title="El consumo manual que guardes quedará asociado a este documento">
+                                        {invArchivoSel?.origen?.desde_invoice_id === i.id ? "✓ Asociado" : "Asociar"}</button>
                                     )}
                                   </div>
                                 );
@@ -1725,8 +1774,8 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                     invoices.map((i) => (
                       <tr key={i.id} className="hover:bg-neutral-50/50" data-testid={`manual-invoice-row-${i.id}`}>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                            {i.status === "confirmed" ? "CONF" : "DRAFT"}
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700" : i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                            {i.invalida ? "NO APLICA" : i.status === "confirmed" ? "CONF" : "DRAFT"}
                           </span>
                         </td>
                         <td className="px-3 py-2 font-mono font-bold text-neutral-900">{i.numero_documento || "—"}</td>

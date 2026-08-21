@@ -21,6 +21,23 @@ PERIODO_FIN = date(2026, 7, 29)
 # Tope de galones por categoría de unidad habilitada (DU 004-2026).
 TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
 
+# DU 007-2026: tres periodos de consumo, cada uno se presenta por separado.
+# Mismo S/ por galón y mismos topes, pero SOLO categorías N1, N2 y N3.
+DU007_PERIODOS = [
+    (1, date(2026, 8, 16), date(2026, 9, 15)),
+    (2, date(2026, 9, 16), date(2026, 10, 15)),
+    (3, date(2026, 10, 16), date(2026, 11, 15)),
+]
+TOPES_DU007 = {k: v for k, v in TOPES_GALONES.items() if k in ("N1", "N2", "N3")}
+
+
+def periodo_du007(f: date) -> Optional[int]:
+    """Número de periodo DU 007 (1..3) al que pertenece una fecha, o None si está fuera."""
+    for n, ini, fin in DU007_PERIODOS:
+        if ini <= f <= fin:
+            return n
+    return None
+
 # Combustibles reconocidos para el subsidio.
 _PRODUCTO_OK = re.compile(r"DIES?EL|DB5|B5|S-?50|GASOHOL|GASOLINA", re.IGNORECASE)
 
@@ -47,7 +64,8 @@ def _check(codigo: str, nombre: str, ok: Optional[bool], detalle: str, bloqueant
 
 def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
                     categoria_por_placa: dict[str, str] | None = None,
-                    numeros_existentes: set[tuple] | None = None) -> dict:
+                    numeros_existentes: set[tuple] | None = None,
+                    programa: str = "du004") -> dict:
     """
     Valida una factura ya extraída (por OCR/QR/XML) contra las reglas del DU 004-2026.
 
@@ -69,11 +87,21 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
         else f"No se pudo leer: {', '.join(faltantes)}. Revisa la calidad del archivo.",
     ))
 
-    # 2) Periodo de compra permitido
+    # 2) Periodo de compra permitido (DU 004: ventana única; DU 007: alguno de los 3 periodos)
     f = _parse_fecha(doc.get("fecha"))
+    periodo_n = None
     if f is None:
-        checks.append(_check("periodo", "Fecha dentro del periodo DU 004", None,
+        checks.append(_check("periodo", f"Fecha dentro del periodo {'DU 007' if programa == 'du007' else 'DU 004'}", None,
                              "No se pudo leer la fecha de emisión."))
+    elif programa == "du007":
+        periodo_n = periodo_du007(f)
+        checks.append(_check(
+            "periodo", "Fecha dentro de un periodo DU 007", periodo_n is not None,
+            f"Emitida el {f.strftime('%d/%m/%Y')} — Periodo {periodo_n} del DU 007." if periodo_n
+            else f"Emitida el {f.strftime('%d/%m/%Y')}: fuera de los 3 periodos del DU 007 "
+                 f"(16/08–15/09, 16/09–15/10, 16/10–15/11 de 2026).",
+            bloqueante=True,
+        ))
     else:
         dentro = PERIODO_INICIO <= f <= PERIODO_FIN
         checks.append(_check(
@@ -100,19 +128,21 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
             bloqueante=True,
         ))
 
-    # 4) Categoría subsidiable + tope de galones
+    # 4) Categoría subsidiable + tope de galones (DU 007 solo cubre N1, N2 y N3)
+    topes = TOPES_DU007 if programa == "du007" else TOPES_GALONES
+    cats_txt = "N1, N2 y N3" if programa == "du007" else "M2, M3, N1, N2, N3"
     cat = categoria_por_placa.get(placa)
     galones = doc.get("galones")
     try:
         galones = float(galones) if galones is not None else None
     except (TypeError, ValueError):
         galones = None
-    if cat and cat not in TOPES_GALONES:
+    if cat and cat not in topes:
         checks.append(_check("categoria", "Categoría con derecho a subsidio", False,
-                             f"La unidad es categoría {cat}: no recibe subsidio (solo M2, M3, N1, N2, N3).",
+                             f"La unidad es categoría {cat}: no recibe este subsidio (solo {cats_txt}).",
                              bloqueante=True))
     elif cat and galones:
-        tope = TOPES_GALONES[cat]
+        tope = topes[cat]
         dentro = galones <= tope
         checks.append(_check(
             "tope_galones", "Galones dentro del tope de la categoría", dentro,
@@ -155,4 +185,5 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
         "checks": checks,
         "motivos": [c["detalle"] for c in fallidos] or ([c["detalle"] for c in pendientes] if pendientes else []),
         "requiere_revision": estado != "CONFORME",
+        "periodo_du007": periodo_n,   # 1..3 si programa=du007 y la fecha cae en un periodo
     }

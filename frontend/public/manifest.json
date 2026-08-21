@@ -3,10 +3,10 @@
   "name": "ENERED · Soluciones para Flotas",
   "description": "Gestiona tu flota, combustible y subsidio con ENERED.",
   "icons": [
-    { "src": "/favicon.png", "sizes": "2084x2084", "type": "image/png" },
-    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/favicon.png?v=2", "sizes": "2084x2084", "type": "image/png" },
+    { "src": "/icon-192.png?v=2", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png?v=2", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "start_url": "/",
   "scope": "/",
