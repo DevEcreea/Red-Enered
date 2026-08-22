@@ -185,6 +185,17 @@ async def user_public_with_servicios(u: dict) -> dict:
     base["servicios"] = info["servicios"]
     base["tipo_cliente"] = info["tipo_cliente"]
     base["wialon_configurado"] = info["wialon_configurado"]
+    # Usuarios creados sin RUC propio: heredan el de su empresa (empresas_config o
+    # cualquier usuario hermano que sí lo tenga) para que el diagnóstico Etapa 0 cargue.
+    if not base.get("ruc") and empresa:
+        cfg = await db.empresas_config.find_one({"empresa": empresa}, {"_id": 0, "ruc": 1})
+        ruc_emp = (cfg or {}).get("ruc") or ""
+        if not ruc_emp:
+            hermano = await db.users.find_one(
+                {"empresa": empresa, "ruc": {"$nin": [None, ""]}}, {"_id": 0, "ruc": 1})
+            ruc_emp = (hermano or {}).get("ruc") or ""
+        if ruc_emp:
+            base["ruc"] = ruc_emp
     return base
 
 
@@ -241,6 +252,11 @@ async def get_current_user(request: Request) -> dict:
             if user.get("role") == "admin_enered":
                 eff = await _impersonate_context(user, imp)
                 if eff:
+                    # Identidad real del admin: los endpoints exclusivos del panel
+                    # (require_roles/require_permiso) la recuperan aunque el header
+                    # de impersonación siga activo en otra pestaña.
+                    eff["_admin_id"] = user.get("id")
+                    eff["_admin_role"] = user.get("role")
                     return eff
             else:
                 # b) Cliente con varias empresas: SOLO puede alternar entre las asignadas.
@@ -278,11 +294,26 @@ async def get_current_user_optional(request: Request) -> dict:
     return {"role": "admin_enered", "email": "admin@enered.com", "empresa": "GENERAL"}
 
 
+async def _admin_real(user: dict) -> Optional[dict]:
+    """Si el usuario efectivo es una empresa impersonada por un admin_enered,
+    devuelve al admin real (para endpoints del panel que no son de la empresa)."""
+    if user.get("_impersonando") and user.get("_admin_role") == "admin_enered" and user.get("_admin_id"):
+        original = await db.users.find_one({"id": user["_admin_id"]}, {"_id": 0, "password_hash": 0})
+        if original and original.get("role") == "admin_enered":
+            return original
+    return None
+
+
 def require_roles(*roles):
     async def checker(user: dict = Depends(get_current_user)):
-        if user["role"] not in roles:
-            raise HTTPException(status_code=403, detail="Permiso denegado")
-        return user
+        if user["role"] in roles:
+            return user
+        # Admin ENERED "dentro de una empresa": para el panel sigue siendo admin.
+        if "admin_enered" in roles:
+            original = await _admin_real(user)
+            if original:
+                return original
+        raise HTTPException(status_code=403, detail="Permiso denegado")
     return checker
 
 
@@ -300,9 +331,13 @@ def user_has_module(user: dict, module: str) -> bool:
 def require_permiso(module: str):
     """Requiere admin_enered CON permiso al módulo (o super-admin)."""
     async def checker(user: dict = Depends(get_current_user)):
-        if not user_has_module(user, module):
-            raise HTTPException(status_code=403, detail=f"Sin permiso para el módulo '{module}'")
-        return user
+        if user_has_module(user, module):
+            return user
+        # Admin ENERED "dentro de una empresa": valida con su identidad real.
+        original = await _admin_real(user)
+        if original and user_has_module(original, module):
+            return original
+        raise HTTPException(status_code=403, detail=f"Sin permiso para el módulo '{module}'")
     return checker
 
 
