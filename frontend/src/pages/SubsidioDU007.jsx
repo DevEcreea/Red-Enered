@@ -1,22 +1,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import Etapa0Card from "../components/Etapa0Card";
 import ComprobantesTabla from "../components/ComprobantesTabla";
 import {
-  Search, Fuel, FileCheck2, Loader2, Upload, CheckCircle2, AlertTriangle,
+  Fuel, FileCheck2, Loader2, Upload, CheckCircle2, AlertTriangle,
   MessageCircle, Lock, ShieldCheck,
 } from "lucide-react";
 
 const WSP = "51997389536";
 const fmtNum = (n) => (Number(n) || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
 
-/* Las 3 etapas del DU 007. La carga de combustible funciona igual que en el DU 004,
-   pero en su propio bucket (programa=du007) y validada contra los 3 periodos del decreto. */
+/* Las 2 etapas del DU 007 (el diagnóstico vive en Subsidios → Diagnóstico).
+   La carga de combustible funciona igual que en el DU 004, pero en su propio
+   bucket (programa=du007) y validada contra los 3 periodos del decreto. */
 const ETAPAS = [
-  { id: "diagnostico", n: "Etapa 1", titulo: "Diagnóstico", sub: "Cálculo del subsidio 007", icon: Search },
-  { id: "combustible", n: "Etapa 2", titulo: "Combustible", sub: "Solo PDF · por periodo", icon: Fuel },
-  { id: "declaracion", n: "Etapa 3", titulo: "Declaración", sub: "Una por periodo", icon: FileCheck2 },
+  { id: "combustible", n: "Etapa 1", titulo: "Combustible", sub: "Solo PDF · por periodo", icon: Fuel },
+  { id: "declaracion", n: "Etapa 2", titulo: "Declaración", sub: "Una por periodo", icon: FileCheck2 },
 ];
 
 const PERIODOS_INFO = {
@@ -28,7 +27,7 @@ const PERIODOS_INFO = {
 export default function SubsidioDU007() {
   const { user } = useAuth();
   const esGuest = !!user?.es_guest;
-  const [etapa, setEtapa] = useState("diagnostico");
+  const [etapa, setEtapa] = useState("combustible");
   const [items, setItems] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [estado, setEstado] = useState(null);   // { periodos, declaraciones }
@@ -112,13 +111,13 @@ export default function SubsidioDU007() {
 
   return (
     <div className="space-y-5">
-      {/* Encabezado + las 3 etapas */}
+      {/* Encabezado + las 2 etapas */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-1">Asistente de subsidio · DU 007-2026</div>
         <h1 className="font-cabinet font-black text-3xl text-neutral-900">Subsidio DU-007</h1>
-        <p className="text-neutral-500 mt-1 text-sm">Tres periodos, una presentación por periodo. Completa las 3 etapas.</p>
+        <p className="text-neutral-500 mt-1 text-sm">Tres periodos, una presentación por periodo. Tu diagnóstico está en Subsidios → Diagnóstico.</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
           {ETAPAS.map((e) => {
             const Ic = e.icon;
             const activa = etapa === e.id;
@@ -140,12 +139,7 @@ export default function SubsidioDU007() {
         </div>
       </div>
 
-      {/* ETAPA 1 · Diagnóstico: SOLO la tarjeta del 007 */}
-      {etapa === "diagnostico" && (
-        <Etapa0Card solo="du007" />
-      )}
-
-      {/* ETAPA 2 · Combustible: misma modalidad de carga que el 004, bucket del 007 */}
+      {/* ETAPA 1 · Combustible: misma modalidad de carga que el 004, bucket del 007 */}
       {etapa === "combustible" && (esGuest ? <BloquGuest titulo="Carga de combustible" /> : (
         <div className="space-y-4">
           <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
@@ -212,7 +206,7 @@ export default function SubsidioDU007() {
         </div>
       ))}
 
-      {/* ETAPA 3 · Declaración: una por periodo */}
+      {/* ETAPA 2 · Declaración: una por periodo */}
       {etapa === "declaracion" && (esGuest ? <BloquGuest titulo="Declaración jurada" /> : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {(estado?.periodos || []).map((p) => {

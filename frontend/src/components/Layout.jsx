@@ -25,6 +25,7 @@ const MENU = [
     // Clic en el grupo → abre directo el DU-004 (el 007 aún no está activo); la flecha despliega.
     clickTo: "/subsidio/documentos",
     submenu: [
+      { to: "/subsidio/diagnostico", label: "Diagnóstico", testid: "nav-diagnostico" },
       { to: "/subsidio/documentos", label: "DU - 004", testid: "nav-du004", badge: "POR VENCER", badgeColor: "amber" },
       { to: "/subsidio/du007", label: "DU - 007", testid: "nav-du007", badge: "NUEVO", badgeColor: "cyan" },
     ],

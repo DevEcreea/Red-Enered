@@ -4,12 +4,11 @@ import {
   Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle,
   Trash2, Plus, Building2, Truck, Fuel,
   Banknote, FileText, Save, ScanLine, ShieldCheck,
-  Send, Lock, FileCheck2, PartyPopper, Coins,
+  Send, Lock, FileCheck2, PartyPopper,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
-import Etapa0Card from "../components/Etapa0Card";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 
 // --- Factura subida: muestra lo que ENERED leyó del comprobante y su validación ---
@@ -84,8 +83,8 @@ function InvoiceRow({ item, deleteRow }) {
   );
 }
 
+/* El diagnóstico por RUC vive ahora en su propia página: Subsidios → Diagnóstico. */
 const ETAPAS = [
-  { id: "etapa0",       n: 0, label: "Diagnóstico subsidio", icon: Coins,     short: "Diagnóstico subsidio", hint: "Análisis por RUC" },
   { id: "empresa",      n: 1, label: "Verificación empresa",     icon: Building2,  short: "Verificación empresa", hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Verificación flota",       icon: Truck,      short: "Verificación flota",   hint: "PDF, PNG o JPG" },
   { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF" },
@@ -100,7 +99,9 @@ export default function SubsidioDocumentos() {
   const { user, setUser } = useAuth();
   const bloqueaEtapas = user?.acceso_etapa0 === true;  // entró solo por RUC → Etapa 1+ bloqueadas
   const [data, setData] = useState(null);
-  const [estimadoResumen, setEstimadoResumen] = useState(null);  // total_monto del /subsidio/resumen (Etapa 0)
+  // Máximo recuperable del subsidio (total_monto del diagnóstico por RUC); el
+  // dashboard solo se usa de respaldo mientras llega o si no hay RUC.
+  const [estimadoResumen, setEstimadoResumen] = useState(null);
   const [loading, setLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
   const pad = (num) => String(num).padStart(2, '0');
@@ -123,7 +124,7 @@ export default function SubsidioDocumentos() {
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
-  const [activeEtapa, setActiveEtapa] = useState("etapa0");
+  const [activeEtapa, setActiveEtapa] = useState("empresa");
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [createdDeclaracion, setCreatedDeclaracion] = useState(null);
 
@@ -145,6 +146,17 @@ export default function SubsidioDocumentos() {
     }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  // Ahorro estimado = máximo recuperable según el diagnóstico por RUC (cacheado en backend).
+  useEffect(() => {
+    if (!user?.ruc) return;
+    let alive = true;
+    api.get("/subsidio/resumen", { params: { ruc: user.ruc } })
+      .then(({ data: r }) => { if (alive && r?.subsidio?.total_monto != null) setEstimadoResumen(r.subsidio.total_monto); })
+      .catch(() => {});
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.ruc]);
 
   // ---------- Progress totals (memoized; before early-return) ----------
   const totals = useMemo(() => calcTotals(data), [data]);
@@ -195,7 +207,7 @@ export default function SubsidioDocumentos() {
           <div>
             <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Asistente de subsidio · DU 004-2026</span>
             <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Subsidio DU-004</h2>
-            <p className="text-neutral-500 mt-1 max-w-2xl text-sm">Completa las 5 etapas para enviar tu expediente a la ATU.</p>
+            <p className="text-neutral-500 mt-1 max-w-2xl text-sm">Completa las 4 etapas para enviar tu expediente a la ATU. Tu diagnóstico está en Subsidios → Diagnóstico.</p>
           </div>
           <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
             <div className="px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -251,13 +263,12 @@ export default function SubsidioDocumentos() {
         </div>
 
         {/* Línea de etapas */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
           {ETAPAS.map((e) => {
             const Ic = e.icon;
             const active = activeEtapa === e.id;
             const done = isComplete(e.id) || (e.id === "declaracion" && enviado);
-            // Si entró solo por RUC, solo puede ver Etapa 0; el resto queda bloqueado.
-            const canVisit = e.id === "etapa0" || !bloqueaEtapas;
+            const canVisit = !bloqueaEtapas;
             return (
               <button
                 key={e.id}
@@ -304,8 +315,29 @@ export default function SubsidioDocumentos() {
       </div>
 
       {/* CONTENIDO de la etapa activa */}
-      {activeEtapa === "etapa0" ? (
-        <Etapa0Card onResumen={(res) => setEstimadoResumen(res?.subsidio?.total_monto ?? null)} />
+      {bloqueaEtapas ? (
+        /* Sesión invitada (entró solo por RUC): puede ver el módulo, pero las etapas
+           se activan con el equipo ENERED. Su diagnóstico vive en Subsidios → Diagnóstico. */
+        <div className="bg-white border border-neutral-200 rounded-2xl p-10 text-center shadow-sm" data-testid="du004-guest-gate">
+          <Lock className="w-10 h-10 text-brand mx-auto" />
+          <h3 className="font-cabinet font-black text-xl text-neutral-900 mt-3">Activa tu expediente DU-004</h3>
+          <p className="text-sm text-neutral-500 mt-2 max-w-md mx-auto">
+            Ya tienes tu diagnóstico en <b>Subsidios → Diagnóstico</b>. Para cargar los documentos
+            de tu empresa y flota, y presentar tu expediente a la ATU, activa tu cuenta con el equipo ENERED.
+          </p>
+          <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
+            <a
+              href={`https://wa.me/51997389536?text=${encodeURIComponent(`Hola ENERED, soy ${user?.empresa || ""} (RUC ${user?.ruc || ""}). Quiero activar mi expediente del DU 004.`)}`}
+              target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black px-6 py-3 rounded-xl text-sm">
+              Activar por WhatsApp
+            </a>
+            <button onClick={() => navigate("/subsidio/diagnostico")}
+              className="px-5 py-3 rounded-xl text-sm font-bold text-brand hover:bg-brand/5 border border-brand/30">
+              Ver mi diagnóstico
+            </button>
+          </div>
+        </div>
       ) : (
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm" data-testid={`etapa-content-${activeEtapa}`}>
         {activeEtapa === "empresa" && (

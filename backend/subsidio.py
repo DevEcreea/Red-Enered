@@ -1092,12 +1092,17 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     # Vehículos
     vehicles_dict = {}
     
+    # Placas que el cliente quitó del expediente (la flota principal no se toca).
+    _excl = await db.subsidio_vehicles_excluidos.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+    excluidas = {e.get("placa") for e in _excl}
+
     # Traer primero los de la flota principal si hay empresa
     if user.get("empresa"):
         main_veh = await db.vehiculos.find({"empresa": user.get("empresa")}, {"_id": 0}).to_list(1000)
         for mv in main_veh:
             placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
-            if not placa: continue
+            if not placa or placa in excluidas: continue
             vehicles_dict[placa] = {
                 "id": mv.get("id", str(uuid.uuid4())),
                 "placa": placa,
@@ -1512,6 +1517,8 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
     uids = await _get_company_uids(user["id"])
     if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa}):
         raise HTTPException(status_code=409, detail="La placa ya está registrada en la empresa")
+    # Si estaba excluida del expediente (se borró antes), re-agregarla la reactiva.
+    await db.subsidio_vehicles_excluidos.delete_many({"user_id": {"$in": uids}, "placa": placa})
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -1669,6 +1676,15 @@ async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
     placa_norm = placa.upper().strip()
     uids = await _get_company_uids(user["id"])
     await db.subsidio_vehicles.delete_one({"user_id": {"$in": uids}, "placa": placa_norm})
+    # La placa puede venir "prestada" de la flota principal (db.vehiculos), que NO se
+    # toca desde aquí (la usa el monitoreo). Se marca como excluida del expediente para
+    # que el dashboard no la vuelva a mostrar; re-agregarla quita la exclusión.
+    await db.subsidio_vehicles_excluidos.update_one(
+        {"placa": placa_norm, "user_id": {"$in": uids}},
+        {"$set": {"placa": placa_norm, "user_id": user["id"], "empresa": user.get("empresa"),
+                  "excluded_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
     # Borra docs de esa placa
     docs = await db.subsidio_documents.find(
         {"user_id": {"$in": uids}, "placa": placa_norm}, {"_id": 0}
@@ -2845,12 +2861,15 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
     
     # Merge vehicles from both main fleet and subsidio
+    _excl = await db.subsidio_vehicles_excluidos.find(
+        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+    excluidas = {e.get("placa") for e in _excl}
     vehicles_dict = {}
     if u.get("empresa"):
         main_veh = await db.vehiculos.find({"empresa": u.get("empresa")}, {"_id": 0}).to_list(1000)
         for mv in main_veh:
             placa = (mv.get("placa") or mv.get("veh") or "").strip().upper()
-            if not placa: continue
+            if not placa or placa in excluidas: continue
             vehicles_dict[placa] = {
                 "id": mv.get("id", str(uuid.uuid4())),
                 "placa": placa,
