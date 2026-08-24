@@ -29,10 +29,11 @@ export default function SubsidioPublico() {
     if (!/^\d{11}$/.test(r)) { setError("Ingresa un RUC válido de 11 dígitos"); return; }
     setLoading(true); setError("");
     try {
-      // Sesión INVITADA: entra a la plataforma (Etapa 0) SIN crear usuario en la BD.
+      // Sesión INVITADA: entra a la plataforma SIN crear usuario en la BD.
+      // La primera vista de la evaluación es el submódulo Diagnóstico.
       const { data } = await api.post("/subsidio/entrar", { ruc: r });
       if (data.access_token) localStorage.setItem("enered_token", data.access_token);
-      window.location.href = "/subsidio/documentos";
+      window.location.href = "/subsidio/diagnostico";
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudo consultar. Intenta de nuevo.");
       setLoading(false);
