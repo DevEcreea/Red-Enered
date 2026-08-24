@@ -7,6 +7,22 @@ import {
 } from "lucide-react";
 import { api, API } from "../lib/api";
 
+/** Token EFÍMERO de descarga (5 min) para las URLs de iframe/descarga/ZIP, en vez del
+ *  token de sesión de 8 h. Se refresca cada 4 min. Devuelve "" hasta que llega el primero. */
+function useDownloadToken() {
+  const [dlToken, setDlToken] = useState("");
+  useEffect(() => {
+    let alive = true;
+    const pedir = () => api.get("/auth/download-token")
+      .then(({ data }) => { if (alive) setDlToken(data.token || ""); })
+      .catch(() => {});
+    pedir();
+    const iv = setInterval(pedir, 4 * 60 * 1000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
+  return dlToken;
+}
+
 const ESTADO_BADGE = {
   uploading:  { label: "En carga",   color: "bg-amber-100 text-amber-700 border-amber-200" },
   confirmed:  { label: "Confirmado", color: "bg-blue-100 text-blue-700 border-blue-200" },
@@ -448,12 +464,10 @@ function TabBanco({ bank }) {
 }
 
 function TabDocumentos({ docs, onDelete }) {
+  const dlToken = useDownloadToken();
   if (!docs?.length) return <Empty msg="Sin documentos subidos." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => {
-    const tk = localStorage.getItem("enered_token") || "";
-    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
-  };
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${dlToken}`;
   return (
     <table className="w-full text-sm">
       <thead className="bg-neutral-50 text-[10px] uppercase tracking-widest font-bold text-neutral-500 border-b">
@@ -497,12 +511,10 @@ function TabDocumentos({ docs, onDelete }) {
 }
 
 function TabFlota({ vehicles, docs = [], onDelete }) {
+  const dlToken = useDownloadToken();
   if (!vehicles?.length) return <Empty msg="Sin unidades registradas." />;
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => {
-    const tk = localStorage.getItem("enered_token") || "";
-    return `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${tk}`;
-  };
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${dlToken}`;
 
   return (
     <table className="w-full text-sm">
@@ -590,11 +602,9 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
 }
 
 function TabFacturas({ invoices, onDelete, userId }) {
+  const dlToken = useDownloadToken();
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
-  const downloadHref = (id) => {
-    const tk = localStorage.getItem("enered_token") || "";
-    return `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${tk}`;
-  };
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${dlToken}`;
 
   // Filtros EN LAS CABECERAS (estilo Excel): cada columna filtra directo desde su encabezado.
   const [fPlaca, setFPlaca] = useState("");
@@ -630,8 +640,7 @@ function TabFacturas({ invoices, onDelete, userId }) {
   const totImp = filtradas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
 
   const zipHref = () => {
-    const tk = localStorage.getItem("enered_token") || "";
-    const p = new URLSearchParams({ t: tk });
+    const p = new URLSearchParams({ t: dlToken });
     if (fPlaca) p.set("placa", fPlaca);
     if (fMes) { p.set("desde", `${fMes}-01`); p.set("hasta", `${fMes}-31`); }
     if (fDoc) p.set("q", fDoc);
@@ -915,6 +924,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
   );
   // Previsualizar un archivo del cliente en el visor del panel (en vez de abrir otra pestaña).
   const [previewUrl, setPreviewUrl] = useState(null);
+  const dlToken = useDownloadToken();
   // Al CREAR un consumo manual: archivo del cliente elegido para asociarlo al guardar.
   // Se mantiene tras guardar porque una misma factura puede cubrir varias placas
   // (varios consumos manuales asociados al mismo documento).
@@ -1646,7 +1656,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                       {(previewUrl || editingInvoice) ? (
                         <div className="bg-neutral-200 rounded-lg overflow-hidden border border-neutral-300 min-h-[420px] flex items-center justify-center">
                           <iframe
-                            src={previewUrl || `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${localStorage.getItem("enered_token") || ""}`}
+                            src={previewUrl || `${API}/admin/subsidio/invoices/${editingInvoice.id}/download?t=${dlToken}`}
                             className="w-full h-full min-h-[420px] bg-white"
                             title="Previsualización de factura"
                           />
@@ -1681,7 +1691,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                           </div>
                           <div className="space-y-1.5 max-h-44 overflow-y-auto">
                             {comprobantesCliente.map((d) => {
-                              const base = `${API}/admin/subsidio/documents/${d.id}/download?t=${localStorage.getItem("enered_token") || ""}`;
+                              const base = `${API}/admin/subsidio/documents/${d.id}/download?t=${dlToken}`;
                               return (
                                 <div key={d.id} className="flex items-center gap-2 text-xs">
                                   <span className="flex-1 truncate text-neutral-700">{d.filename || d.categoria}</span>
@@ -1712,7 +1722,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
                                 return ma - mb;
                               })
                               .map((i) => {
-                                const base = `${API}/admin/subsidio/invoices/${i.id}/download?t=${localStorage.getItem("enered_token") || ""}`;
+                                const base = `${API}/admin/subsidio/invoices/${i.id}/download?t=${dlToken}`;
                                 const nRef = (editingInvoice?.numero_documento || invNumero || "").toUpperCase();
                                 const coincide = nRef &&
                                   (i.numero_documento || "").toUpperCase() === nRef &&

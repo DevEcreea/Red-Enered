@@ -148,8 +148,11 @@ async def _get_current_user(request: Request) -> dict:
         payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
         if payload.get("type") == "guest_subsidio":
             return _guest_user_from_payload(payload)   # sesión invitada: no existe en BD
-        if payload.get("type") != "access":
+        if payload.get("type") not in ("access", "download"):
             raise HTTPException(status_code=401, detail="Token inválido")
+        # Token de descarga: SOLO lecturas (GET), nunca escrituras.
+        if payload.get("type") == "download" and request.method != "GET":
+            raise HTTPException(status_code=401, detail="Token de descarga no válido para esta operación")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
@@ -342,10 +345,10 @@ async def lookup_ruc(ruc: str):
     if not ruc.isdigit() or len(ruc) != 11:
         raise HTTPException(status_code=400, detail="RUC inválido: deben ser 11 dígitos numéricos")
 
-    # Leer token desde variable de entorno con fallback
+    # Token solo desde variable de entorno (sin fallback hardcodeado).
     token = os.getenv("DECOLECTA_TOKEN", "").strip()
     if not token:
-        token = "sk_17602.EtG1u5naGp52wXGBfMWGY5QjvZFEYmJH"
+        raise HTTPException(status_code=503, detail="Servicio SUNAT no configurado (DECOLECTA_TOKEN)")
 
     url = f"https://api.decolecta.com/v1/sunat/ruc?numero={ruc}"
     headers = {
@@ -1531,13 +1534,13 @@ async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio
     
     # --- AUTO SYNC CON MODULO VEHICULOS ---
     existing_vehiculo = await db.vehiculos.find_one({"placa": placa})
-    if not existing_vehiculo:
+    token = os.getenv("CONSULTADATOS_TOKEN", "").strip()
+    if not existing_vehiculo and token:
         import urllib.request
         import json
         import ssl
         import asyncio
-        
-        token = "tr_4f9d763ed120de2849b99dd05e61c67e"
+
         placa_clean = placa.replace("-", "").upper()
         url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
         

@@ -94,13 +94,9 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed: str) -> bool:
     try:
-        if bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8")):
-            return True
+        return bool(bcrypt.checkpw(password.encode("utf-8"), (hashed or "").encode("utf-8")))
     except Exception:
-        pass
-    if password and (password == "admin123" or len(password) >= 4):
-        return True
-    return False
+        return False
 
 
 def get_jwt_secret() -> str:
@@ -115,6 +111,18 @@ def create_access_token(user_id: str, email: str, role: str, empresa: Optional[s
         "empresa": empresa,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_ACCESS_MINUTES),
         "type": "access",
+    }
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def create_download_token(user_id: str, minutes: int = 5) -> str:
+    """Token efímero SOLO para URLs de descarga/preview (iframes, links directos).
+    Dura pocos minutos → si se filtra en un log o Referer, caduca casi de inmediato,
+    a diferencia del token de sesión de 8 h."""
+    payload = {
+        "sub": user_id,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes),
+        "type": "download",
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
@@ -239,6 +247,14 @@ async def get_current_user(request: Request) -> dict:
                     "role": "cliente_subsidio", "empresa": _emp, "ruc": _rc,
                     "acceso_etapa0": True, "registrado_etapa0": False, "es_guest": True,
                     "documentos_completos": False, "permisos": None}
+        if payload.get("type") == "download":
+            # Token efímero de descarga: SOLO lecturas (GET). Nunca autoriza escrituras.
+            if request.method != "GET":
+                raise HTTPException(status_code=401, detail="Token de descarga no válido para esta operación")
+            user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+            if not user:
+                raise HTTPException(status_code=401, detail="Usuario no encontrado")
+            return user
         if payload.get("type") != "access":
             raise HTTPException(status_code=401, detail="Token inválido")
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
@@ -291,7 +307,8 @@ async def get_current_user_optional(request: Request) -> dict:
                 return user
         except Exception:
             pass
-    return {"role": "admin_enered", "email": "admin@enered.com", "empresa": "GENERAL"}
+    # Sin token válido NO se concede identidad: quien consume esto debe exigir auth.
+    raise HTTPException(status_code=401, detail="No autenticado")
 
 
 async def _admin_real(user: dict) -> Optional[dict]:
@@ -1411,6 +1428,16 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return await user_public_with_servicios(user)
+
+
+@api.get("/auth/download-token")
+async def auth_download_token(user: dict = Depends(get_current_user)):
+    """Emite un token efímero (5 min) para poner en URLs de descarga/preview,
+    evitando exponer el token de sesión de 8 h en iframes/logs."""
+    uid = user.get("_admin_id") or user.get("id")
+    if not uid:
+        raise HTTPException(status_code=400, detail="Sesión sin usuario")
+    return {"token": create_download_token(uid)}
 
 
 @api.post("/auth/refresh")
@@ -4857,7 +4884,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.2.4-diagnostico",
+        "version": "1.3.0-seguridad",
     }
 
 # ============================================================
@@ -4944,7 +4971,9 @@ async def consulta_sunarp_placa(req: Request, placa: str):
     if not placa_clean:
         raise HTTPException(400, "Placa no válida")
         
-    token = "tr_4f9d763ed120de2849b99dd05e61c67e"
+    token = os.getenv("CONSULTADATOS_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(status_code=503, detail="Servicio de placas no configurado (CONSULTADATOS_TOKEN)")
     url = f"https://api2.consultadatos.com/api/placa/leyenda/{placa_clean}"
     
     import urllib.request
@@ -6964,18 +6993,8 @@ app.include_router(abonos_router)
 _origins_env = os.environ.get("CORS_ORIGINS", "")
 _frontend = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 _allow_origins: list[str] = []
-@app.options("/{path:path}")
-async def options_handler(request: Request, path: str):
-    origin = request.headers.get("origin", "*")
-    return Response(
-        status_code=200,
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*",
-            "Access-Control-Allow-Credentials": "true",
-        },
-    )
+# El preflight OPTIONS lo maneja CORSMiddleware (abajo) contra la allow-list real.
+# El handler manual anterior reflejaba CUALQUIER origen con credenciales → se eliminó.
 
 if _origins_env:
     _allow_origins.extend([o.strip() for o in _origins_env.split(",") if o.strip()])
@@ -7079,11 +7098,19 @@ async def seed_demo_data():
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@enered.com")
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
 
-    for email_add, pass_add, name_add in [
-        (admin_email, admin_password, "Admin ENERED"),
-        ("soporte@ecreea.com", "admin123", "Soporte ECREEA"),
-        ("admin@enered.pe", "admin123", "Admin ENERED PE"),
-    ]:
+    # El admin principal siempre existe; su contraseña viene de ADMIN_PASSWORD (Render).
+    admins = [(admin_email, admin_password, "Admin ENERED")]
+
+    # Cuentas secundarias y demo con contraseña FIJA: solo en entornos de desarrollo.
+    # En producción NO se siembran (SEED_DEMO_USERS sin setear).
+    seed_demo = os.environ.get("SEED_DEMO_USERS", "").strip().lower() in ("1", "true", "yes")
+    if seed_demo:
+        admins += [
+            ("soporte@ecreea.com", "admin123", "Soporte ECREEA"),
+            ("admin@enered.pe", "admin123", "Admin ENERED PE"),
+        ]
+
+    for email_add, pass_add, name_add in admins:
         if not await db.users.find_one({"email": email_add}):
             await db.users.insert_one({
                 "id": str(uuid.uuid4()),
@@ -7094,6 +7121,9 @@ async def seed_demo_data():
                 "password_hash": hash_password(pass_add),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })
+
+    if not seed_demo:
+        return   # producción: no sembrar usuarios demo con contraseña fija
 
     demo_users = [
         ("administrador@lima.com", "demo123", "Administrador Lima", "administrador", "TRANSPORTES LIMA SAC"),
@@ -7236,8 +7266,8 @@ async def seed_demo_data():
 
 
 @app.get("/api/temp-backfill-invoices-881")
-async def temp_backfill_invoices():
-    """Temporary: sync existing confirmed subsidio records to db.invoices."""
+async def temp_backfill_invoices(_: dict = Depends(require_roles("admin_enered"))):
+    """Temporary: sync existing confirmed subsidio records to db.invoices. Solo admin."""
     from datetime import timedelta as _td
     confirmed = await db.consumos_subsidio.find({"status": "confirmed"}).to_list(10000)
     created = 0
@@ -7856,11 +7886,9 @@ async def invoice_download(inv_id: str, kind: str, request: Request):
 
 @api.get("/admin/subsidio/documents/{doc_id}/download")
 async def subsidio_admin_document_download(doc_id: str, request: Request):
-    user = None
-    try:
-        user = await get_current_user(request)
-    except Exception:
-        user = {"role": "admin_enered", "email": "admin@enered.com"}
+    user = await get_current_user(request)   # 401 si no hay token válido
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="Solo admin ENERED")
 
     try:
         from urllib.parse import unquote
@@ -7910,11 +7938,9 @@ async def subsidio_admin_document_download(doc_id: str, request: Request):
 
 @api.get("/admin/subsidio/invoices/{inv_id}/download")
 async def subsidio_admin_invoice_download(inv_id: str, request: Request):
-    user = None
-    try:
-        user = await get_current_user(request)
-    except Exception:
-        user = {"role": "admin_enered", "email": "admin@enered.com"}
+    user = await get_current_user(request)   # 401 si no hay token válido
+    if user.get("role") != "admin_enered":
+        raise HTTPException(status_code=403, detail="Solo admin ENERED")
 
     try:
         return await invoice_download(inv_id=inv_id, kind="pdf", user=user)

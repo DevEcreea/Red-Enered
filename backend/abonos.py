@@ -200,9 +200,14 @@ async def rechazar_abono(abono_id: str, motivo: str = Form(...), user: dict = De
 
 
 @abonos_router.get("/files/{file_id}")
-async def get_file(file_id: str):
+async def get_file(file_id: str, user: dict = Depends(get_current_user_dynamic)):
     db = _get_db()
     doc = await db.files.find_one({"id": file_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    # Solo admin ENERED o alguien de la misma empresa dueña del abono ve el archivo.
+    if user.get("role") != "admin_enered":
+        abono = await db.abonos.find_one({"voucher_url": f"/api/abonos/files/{file_id}"})
+        if not abono or abono.get("empresa") != user.get("empresa"):
+            raise HTTPException(status_code=403, detail="Sin acceso a este archivo")
     return Response(content=doc["data"], media_type=doc.get("content_type", "application/pdf"))
