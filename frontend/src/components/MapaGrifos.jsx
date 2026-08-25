@@ -9,38 +9,24 @@ import { Loader2, MapPin } from "lucide-react";
    verde = más barato, ámbar = medio, gris = más caro. Morado = mis unidades. */
 const COL = { mejor: "#059669", medio: "#EA8104", caro: "#6B7280", enered: "#059669" };
 
-function chip(precio, color, estrella) {
-  const p = precio != null ? Number(precio).toFixed(2) : "—";
+// Pin PEQUEÑO por estación (estilo Facilito): una gotita coloreada por nivel de precio
+// (verde barato · ámbar medio · gris caro), ★ dorada si aplica ENERED. Es chico para que
+// se puedan ver TODAS las estaciones del país sin apilarse; el precio y el detalle salen
+// al hacer clic (en el Popup).
+function pin(color, estrella) {
+  const centro = estrella
+    ? '<text x="11" y="14.5" text-anchor="middle" font-size="11" font-weight="700" fill="#EAB308">★</text>'
+    : '<circle cx="11" cy="11" r="3.6" fill="#fff"/>';
   return L.divIcon({
     className: "",
-    html: `<div style="transform:translate(-50%,-100%);white-space:nowrap;">
-      <div style="background:${color};color:#fff;font-weight:800;font-size:12px;
-        padding:4px 9px;border-radius:9px;box-shadow:0 4px 10px -3px rgba(0,0,0,.4);
-        display:inline-flex;align-items:center;gap:4px;">
-        ${estrella ? '<span style="color:#FDE047">★</span>' : ""}${p}</div>
-      <div style="width:0;height:0;margin:0 auto;border-left:5px solid transparent;
-        border-right:5px solid transparent;border-top:6px solid ${color};"></div>
-    </div>`,
-    iconSize: [0, 0], iconAnchor: [0, 0],
+    html: `<svg width="22" height="28" viewBox="0 0 22 28" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">
+      <path d="M11 0C4.9 0 0 4.8 0 10.7 0 18.7 11 28 11 28s11-9.3 11-17.3C22 4.8 17.1 0 11 0z"
+        fill="${color}" stroke="#fff" stroke-width="1.6"/>
+      ${centro}
+    </svg>`,
+    iconSize: [22, 28], iconAnchor: [11, 28], popupAnchor: [0, -26],
   });
 }
-
-// Pin agrupado (varios grifos que solo ubicamos a nivel de zona): círculo con contador.
-function cluster(n, desde) {
-  return L.divIcon({
-    className: "",
-    html: `<div style="transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;">
-      <div style="background:#4C1D95;color:#fff;font-weight:800;font-size:13px;width:38px;height:38px;
-        border-radius:50%;display:flex;align-items:center;justify-content:center;
-        box-shadow:0 4px 12px -3px rgba(0,0,0,.5);border:2px solid #fff;">${n}</div>
-      <div style="margin-top:2px;background:#fff;color:#4C1D95;font-weight:700;font-size:10px;
-        padding:1px 6px;border-radius:6px;box-shadow:0 2px 6px -2px rgba(0,0,0,.4);white-space:nowrap;">
-        desde S/ ${desde}</div>
-    </div>`,
-    iconSize: [0, 0], iconAnchor: [0, 0],
-  });
-}
-
 
 export default function MapaGrifos({ filtros }) {
   const [grifos, setGrifos] = useState([]);
@@ -77,21 +63,14 @@ export default function MapaGrifos({ filtros }) {
     return (p) => (p <= t1 ? "mejor" : p >= t2 ? "caro" : "medio");
   }, [grifos]);
 
-  // PRECISOS: dirección exacta → pin individual con su precio, en su posición real.
-  // IMPRECISOS: solo ubicados a nivel de zona → se agrupan por punto en un pin contador,
-  // sin fingir posiciones individuales (evita la densidad falsa).
-  const { precisos, clusters } = useMemo(() => {
-    const precisos = grifos.filter((g) => g.preciso);
-    const porZona = {};
-    grifos.filter((g) => !g.preciso).forEach((g) => {
-      const k = `${g.lat.toFixed(3)},${g.lon.toFixed(3)}`;
-      (porZona[k] = porZona[k] || { lat: g.lat, lon: g.lon, items: [] }).items.push(g);
-    });
-    return { precisos, clusters: Object.values(porZona) };
-  }, [grifos]);
+  // Cada estación se dibuja con su etiqueta de precio en su ubicación real. NUNCA se
+  // agrupan en un contador: se quiere ver dónde está cada una (en zonas densas las
+  // etiquetas se apilan, y se separan al hacer zoom). Solo se omiten las que no tienen
+  // ninguna ubicación (quedan en la tabla).
+  const conUbicacion = useMemo(
+    () => grifos.filter((g) => g.lat != null && g.lon != null), [grifos]);
   const puntos = useMemo(
-    () => [...precisos.map((g) => [g.lat, g.lon]), ...clusters.map((c) => [c.lat, c.lon])],
-    [precisos, clusters]);
+    () => conUbicacion.map((g) => [g.lat, g.lon]), [conUbicacion]);
 
   // Reencuadra el mapa cada vez que cambian los puntos visibles.
   useEffect(() => {
@@ -132,36 +111,16 @@ export default function MapaGrifos({ filtros }) {
           <TileLayer attribution="&copy; OpenStreetMap &copy; CARTO"
             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
             subdomains="abcd" maxZoom={20} />
-          {/* Grifos con posición exacta */}
-          {precisos.map((g, i) => {
+          {/* Una etiqueta de precio por estación, en su ubicación real. */}
+          {conUbicacion.map((g, i) => {
             const color = g.es_enered ? COL.enered : COL[nivel(g.precio_venta)];
             return (
-              <Marker key={`p${i}`} position={[g.lat, g.lon]} icon={chip(g.precio_venta, color, g.es_enered)}>
+              <Marker key={`g${i}`} position={[g.lat, g.lon]} icon={pin(color, g.es_enered)}>
                 <Popup>
                   <b>{g.establecimiento}</b>
                   {g.direccion ? <><br />{g.direccion}</> : null}
                   <br />S/ {Number(g.precio_venta).toFixed(2)} · {g.combustible}
                   {g.es_enered && <><br /><span style={{ color: "#059669", fontWeight: 700 }}>★ Aplica ENERED</span></>}
-                </Popup>
-              </Marker>
-            );
-          })}
-          {/* Grifos ubicados solo a nivel de zona → agrupados */}
-          {clusters.map((c, i) => {
-            const desde = Math.min(...c.items.map((g) => g.precio_venta || Infinity));
-            const ordenados = [...c.items].sort((a, b) => (a.precio_venta || 0) - (b.precio_venta || 0));
-            return (
-              <Marker key={`c${i}`} position={[c.lat, c.lon]} icon={cluster(c.items.length, desde.toFixed(2))}>
-                <Popup maxHeight={220}>
-                  <b>{c.items.length} grifos en {c.items[0].distrito || c.items[0].provincia}</b>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>ubicación aproximada por zona</div>
-                  {ordenados.slice(0, 12).map((g, k) => (
-                    <div key={k} style={{ fontSize: 12, padding: "2px 0", borderTop: k ? "1px solid #eee" : "none" }}>
-                      <b>S/ {Number(g.precio_venta).toFixed(2)}</b> · {g.establecimiento?.slice(0, 34)}
-                      {g.es_enered && <span style={{ color: "#059669" }}> ★</span>}
-                    </div>
-                  ))}
-                  {ordenados.length > 12 && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>y {ordenados.length - 12} más…</div>}
                 </Popup>
               </Marker>
             );
@@ -179,12 +138,6 @@ export default function MapaGrifos({ filtros }) {
         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
           <span style={{ color: "#FDE047", background: COL.enered }} className="px-1 rounded text-[10px]">★</span> Aplica ENERED
         </span>
-        {clusters.length > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-neutral-600">
-            <span style={{ background: "#4C1D95" }} className="w-3.5 h-3.5 rounded-full text-white text-[8px] flex items-center justify-center font-bold">N</span>
-            Grifos agrupados por zona
-          </span>
-        )}
       </div>
     </div>
   );

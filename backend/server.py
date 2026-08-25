@@ -473,9 +473,12 @@ async def get_precios(
     provincia: Optional[str] = None,
     distrito: Optional[str] = None,
     solo_enered: bool = False,
+    limite: int = 500,
 ):
     """Devuelve precios de estaciones de servicio con soporte para 4 filtros:
     departamento, provincia, distrito y combustible.
+    `limite`: tope de registros. La tabla usa 500 (los más baratos); el mapa pide
+    muchos más para pintar TODO el país, no solo la franja más barata.
     """
     facilito_count = await db.precios_facilito.count_documents({})
     if facilito_count < 1:
@@ -517,8 +520,8 @@ async def get_precios(
         query["establecimiento"] = {"$in": _enered_names or ["__NINGUNA__"]}
 
     # 1. Consulta estricta
-    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-    precios = await cursor.to_list(500)
+    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+    precios = await cursor.to_list(limite)
 
     # 2. Si no hay resultados para provincia/distrito específico, relajar a Departamento
     if not precios and departamento:
@@ -529,8 +532,8 @@ async def get_precios(
         if solo_enered:
             _en = await db.estaciones_enered.distinct("nombre_facilito")
             fallback_query["establecimiento"] = {"$in": _en or ["__NINGUNA__"]}
-        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-        precios = await cursor.to_list(500)
+        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+        precios = await cursor.to_list(limite)
 
     # Dedup defensivo: si un mismo grifo (nombre + dirección) y combustible quedó cargado
     # más de una vez (cargas viejas apiladas), se muestra SOLO el mejor registro (con GPS y
@@ -723,8 +726,11 @@ async def precios_mapa(
     geocodifica (con caché) las direcciones. Para no exceder el límite de Nominatim (1/seg),
     geocodifica pocas direcciones nuevas por llamada y reporta cuántas quedan pendientes; el
     frontend reintenta hasta completar (a partir de la 2ª vez todo sale de la caché, instantáneo)."""
+    # El mapa pinta TODO el país (con agrupación por zoom en el front), no solo los 500
+    # más baratos: pide un tope alto para no quedarse con la franja de Lima/Ica.
     datos = await get_precios(user=user, combustible=combustible, departamento=departamento,
-                              provincia=provincia, distrito=distrito, solo_enered=solo_enered)
+                              provincia=provincia, distrito=distrito, solo_enered=solo_enered,
+                              limite=20000)
     precios = datos.get("precios") or []
 
     # Vía rápida: si los precios ya traen coordenadas GPS reales (sincronizadas desde el mapa
@@ -4884,7 +4890,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.4.0-categorias",
+        "version": "1.5.0-mapa-nacional",
     }
 
 # ============================================================
@@ -7439,9 +7445,12 @@ async def get_precios(
     provincia: Optional[str] = None,
     distrito: Optional[str] = None,
     solo_enered: bool = False,
+    limite: int = 500,
 ):
     """Devuelve precios de estaciones de servicio con soporte para 4 filtros:
     departamento, provincia, distrito y combustible.
+    `limite`: tope de registros. La tabla usa 500 (los más baratos); el mapa pide
+    muchos más para pintar TODO el país, no solo la franja más barata.
     """
     # Eliminar cualquier registro antiguo de prueba ("ES NUEVO CHIMBOTE", "ES CASMA", etc.)
     await db.precios_facilito.delete_many({"establecimiento": {"$regex": "^ES ", "$options": "i"}})
@@ -7487,8 +7496,8 @@ async def get_precios(
         query["establecimiento"] = {"$in": _enered_names or ["__NINGUNA__"]}
 
     # 1. Consulta estricta
-    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-    precios = await cursor.to_list(500)
+    cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+    precios = await cursor.to_list(limite)
 
     # 2. Si no hay resultados para provincia/distrito específico, relajar a Departamento
     if not precios and departamento:
@@ -7499,19 +7508,19 @@ async def get_precios(
         if solo_enered:
             _en = await db.estaciones_enered.distinct("nombre_facilito")
             fallback_query["establecimiento"] = {"$in": _en or ["__NINGUNA__"]}
-        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-        precios = await cursor.to_list(500)
+        cursor = db.precios_facilito.find(fallback_query, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+        precios = await cursor.to_list(limite)
 
     # 3. Si aún no hay resultados, auto-seed y re-consultar de inmediato
     if not precios:
         try:
             from seed_facilito_precios import seed
             await seed(db)
-            cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(500)
-            precios = await cursor.to_list(500)
+            cursor = db.precios_facilito.find(query, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+            precios = await cursor.to_list(limite)
             if not precios:
-                cursor = db.precios_facilito.find({}, {"_id": 0}).sort("precio_venta", 1).limit(500)
-                precios = await cursor.to_list(500)
+                cursor = db.precios_facilito.find({}, {"_id": 0}).sort("precio_venta", 1).limit(limite)
+                precios = await cursor.to_list(limite)
         except Exception as se:
             logger.warning(f"Fallback seed exception: {se}")
 
