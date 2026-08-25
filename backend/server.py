@@ -4884,7 +4884,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.3.0-seguridad",
+        "version": "1.4.0-categorias",
     }
 
 # ============================================================
@@ -6215,6 +6215,7 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
 
 # Tope de galones máximos a reclamar por categoría de unidad (DU 004). × factor = monto.
 _TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
+from services.validador_facturas import clase_base_categoria
 _FACTOR_SUBSIDIO = 4  # galones máximos × 4 = monto máximo a reclamar
 _RESUMEN_CACHE = {}   # ruc -> (timestamp, payload, ttl) para /subsidio/resumen
 
@@ -6406,7 +6407,9 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
     for u in mtc_unidades:
         pn = u["placa"].replace("-", "").upper()
         au = atu_by_placa.get(pn)
-        cat = u["categoria"]
+        # El MTC entrega variantes con sufijo (N2C2, M2C3…); se reduce a la clase base
+        # (N2, M2…) para decidir el subsidio. Solo M1* y O* quedan fuera (no tienen tope).
+        cat = clase_base_categoria(u["categoria"])
         cat_ok = cat in _TOPES_GALONES
         # Solo M2, M3, N1, N2, N3 reciben subsidio. Otras categorías (O4, etc.) no califican.
         cumple = cat_ok and bool(au) and au.get("tuc_estado") == "ok"
@@ -6440,12 +6443,13 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
     no_aplican = {}
     total_galones = 0.0
     for u in mtc_unidades:
-        tope = _TOPES_GALONES.get(u["categoria"])
+        cb = clase_base_categoria(u["categoria"])
+        tope = _TOPES_GALONES.get(cb)
         if not tope:
-            cat = u["categoria"] or "(sin categoría)"
+            cat = cb or "(sin categoría)"
             no_aplican[cat] = no_aplican.get(cat, 0) + 1
             continue
-        d = por_cat.setdefault(u["categoria"], {"categoria": u["categoria"], "unidades": 0, "tope": tope})
+        d = por_cat.setdefault(cb, {"categoria": cb, "unidades": 0, "tope": tope})
         d["unidades"] += 1
         total_galones += tope
     por_categoria = [{

@@ -41,6 +41,25 @@ def periodo_du007(f: date) -> Optional[int]:
 # Combustibles reconocidos para el subsidio.
 _PRODUCTO_OK = re.compile(r"DIES?EL|DB5|B5|S-?50|GASOHOL|GASOLINA", re.IGNORECASE)
 
+_CAT_BASE = re.compile(r"^([MN][123])")
+
+
+def clase_base_categoria(cat: Optional[str]) -> str:
+    """Reduce una categoría del MTC a su clase base para decidir el subsidio.
+    El MTC entrega variantes con sufijo de carrocería (N2C2, M2C3, M1C2…); lo que
+    define el derecho al subsidio es la clase base (N2, M2, M1…), no el sufijo.
+    Regla: califican M2, M3, N1, N2, N3 y sus variantes; se descartan TODAS las M1
+    (M1, M1C2…) y TODAS las O (O, O1…O4). El descarte sale solo: M1 y O no tienen tope.
+      'N2C2' → 'N2'   'M2C3' → 'M2'   'M1C2' → 'M1'   'O4' → 'O'   'N3' → 'N3'
+    """
+    c = re.sub(r"[^A-Z0-9]", "", (cat or "").upper())
+    m = _CAT_BASE.match(c)               # M1,M2,M3,N1,N2,N3 (toma la N2 de "N2C2")
+    if m:
+        return m.group(1)
+    if c.startswith("O"):
+        return "O"                        # O, O1..O4 → no aplica
+    return c[:2] if len(c) >= 2 and c[1:2].isdigit() else c[:1]
+
 
 def _norm_placa(p: Optional[str]) -> str:
     return re.sub(r"[^A-Z0-9]", "", (p or "").upper())
@@ -131,7 +150,9 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
     # 4) Categoría subsidiable + tope de galones (DU 007 solo cubre N1, N2 y N3)
     topes = TOPES_DU007 if programa == "du007" else TOPES_GALONES
     cats_txt = "N1, N2 y N3" if programa == "du007" else "M2, M3, N1, N2, N3"
-    cat = categoria_por_placa.get(placa)
+    # La categoría llega del MTC con sufijo de carrocería (N2C2, M2C3…); se reduce a su
+    # clase base para decidir el tope: 'M2C3' → 'M2'. Así no se rechazan variantes válidas.
+    cat = clase_base_categoria(categoria_por_placa.get(placa)) or None
     galones = doc.get("galones")
     try:
         galones = float(galones) if galones is not None else None
