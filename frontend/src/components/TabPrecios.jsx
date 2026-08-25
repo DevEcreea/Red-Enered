@@ -14,6 +14,9 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   const [selClienteModal, setSelClienteModal] = useState("GENERAL");
   const [listaClientes, setListaClientes] = useState([]);
   const [savingEnered, setSavingEnered] = useState(false);
+  // Selección múltiple para asignar un precio corporativo a varias estaciones a la vez.
+  const [seleccionadas, setSeleccionadas] = useState({});   // clave -> estación
+  const [modalMasivo, setModalMasivo] = useState(false);
 
   // Filtros y datos principales
   const [precios, setPrecios] = useState([]);
@@ -242,6 +245,42 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     if (soloEnered) f.solo_enered = true;
     return f;
   }, [selDepartamento, selProvincia, selDistrito, selCombustible, soloEnered]);
+
+  // --- Selección múltiple (precio corporativo a varias estaciones) ---
+  const keyEst = (p) => `${(p.establecimiento || p.estacion || "").toUpperCase()}|${p.combustible || selCombustible}`;
+  const toggleSel = (p) => setSeleccionadas((prev) => {
+    const k = keyEst(p); const n = { ...prev };
+    if (n[k]) delete n[k]; else n[k] = p;
+    return n;
+  });
+  const numSel = Object.keys(seleccionadas).length;
+
+  const handleSaveMasivo = async (e) => {
+    e.preventDefault();
+    const precioVal = parseFloat(inputPrecioEnered);
+    if (isNaN(precioVal) || precioVal <= 0) return alert("Ingresa un precio válido mayor a 0");
+    const ests = Object.values(seleccionadas).map((p) => ({
+      nombre_facilito: p.establecimiento || p.estacion,
+      departamento: p.departamento || "", provincia: p.provincia || "",
+      distrito: p.distrito || p.ciudad || "",
+    }));
+    try {
+      setSavingEnered(true);
+      const { data } = await api.post("/admin/precios/estaciones-enered/masivo", {
+        estaciones: ests,
+        combustible: selCombustible || "Diesel B5 UV",
+        precio_enered: precioVal,
+        cliente: selClienteModal,
+      });
+      alert(`✅ Precio S/ ${precioVal.toFixed(2)} asignado a ${data.asignadas} estaciones (${selClienteModal === "GENERAL" ? "todos los clientes" : "cliente " + selClienteModal}).`);
+      setModalMasivo(false); setSeleccionadas({}); setInputPrecioEnered("");
+      await fetchPrecios();
+    } catch (err) {
+      alert("Error asignando precio: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setSavingEnered(false);
+    }
+  };
 
   const handleSavePrecioEnered = async (e) => {
     e.preventDefault();
@@ -521,13 +560,45 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
       {/* MAPA DE LA RED DE GRIFOS */}
       <MapaGrifos filtros={mapaFiltros} />
 
+      {/* Barra de asignación masiva (aparece al marcar estaciones) */}
+      {user?.role === "admin_enered" && numSel > 0 && (
+        <div className="flex items-center justify-between gap-3 bg-brand/10 border border-brand/30 rounded-xl px-4 py-2.5 flex-wrap">
+          <span className="text-xs font-bold text-brand">
+            {numSel} {numSel === 1 ? "estación seleccionada" : "estaciones seleccionadas"}
+          </span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setSeleccionadas({})}
+              className="text-xs font-semibold text-neutral-500 hover:text-neutral-700">Quitar selección</button>
+            <button onClick={() => { setInputPrecioEnered(""); setSelClienteModal("GENERAL"); setModalMasivo(true); }}
+              className="btn-brand text-xs px-4 py-2 rounded-lg font-bold flex items-center gap-1.5">
+              <Plus className="w-3.5 h-3.5" /> Asignar precio corporativo
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* TABLA DE PRECIOS */}
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               <tr className="bg-[#211A36] text-white text-[11px] uppercase tracking-wider">
-                <th className="px-4 py-3 font-semibold rounded-tl-xl">Estación</th>
+                {user?.role === "admin_enered" && (
+                  <th className="px-3 py-3 font-semibold rounded-tl-xl text-center w-9">
+                    <input type="checkbox" title="Seleccionar todas las visibles"
+                      className="w-3.5 h-3.5 accent-brand rounded align-middle"
+                      checked={paginatedPrecios.length > 0 && paginatedPrecios.every((p) => seleccionadas[keyEst(p)])}
+                      onChange={(e) => {
+                        setSeleccionadas((prev) => {
+                          const n = { ...prev };
+                          if (e.target.checked) paginatedPrecios.forEach((p) => { n[keyEst(p)] = p; });
+                          else paginatedPrecios.forEach((p) => { delete n[keyEst(p)]; });
+                          return n;
+                        });
+                      }} />
+                  </th>
+                )}
+                <th className={`px-4 py-3 font-semibold ${user?.role === "admin_enered" ? "" : "rounded-tl-xl"}`}>Estación</th>
                 <th className="px-4 py-3 font-semibold">Ciudad</th>
                 <th className="px-4 py-3 font-semibold text-center">Calidad</th>
                 <th className="px-4 py-3 font-semibold text-right">Pizarra</th>
@@ -541,18 +612,18 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
             <tbody className="divide-y divide-neutral-100 text-xs">
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-neutral-400">
+                  <td colSpan="10" className="p-8 text-center text-neutral-400">
                     <RefreshCw className="w-5 h-5 animate-spin inline mr-2" />
                     Cargando lista de estaciones y precios...
                   </td>
                 </tr>
               ) : errorMsg ? (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-red-500 font-bold">{errorMsg}</td>
+                  <td colSpan="10" className="p-8 text-center text-red-500 font-bold">{errorMsg}</td>
                 </tr>
               ) : filteredPrecios.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="p-8 text-center text-neutral-400">
+                  <td colSpan="10" className="p-8 text-center text-neutral-400">
                     No se encontraron estaciones para los filtros seleccionados.
                   </td>
                 </tr>
@@ -569,8 +640,16 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                   return (
                     <tr
                       key={idx}
-                      className={`hover:bg-neutral-50/80 transition-colors ${esEnered ? "bg-emerald-50/20" : ""}`}
+                      className={`hover:bg-neutral-50/80 transition-colors ${seleccionadas[keyEst(p)] ? "bg-brand/5" : esEnered ? "bg-emerald-50/20" : ""}`}
                     >
+                      {user?.role === "admin_enered" && (
+                        <td className="px-3 py-3 text-center">
+                          <input type="checkbox"
+                            className="w-3.5 h-3.5 accent-brand rounded align-middle"
+                            checked={!!seleccionadas[keyEst(p)]}
+                            onChange={() => toggleSel(p)} />
+                        </td>
+                      )}
                       {/* 1. Estación */}
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
@@ -887,6 +966,70 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                   className="btn-brand text-xs px-5 py-2 rounded-lg font-bold flex items-center gap-1.5"
                 >
                   {savingEnered ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Guardar Precio"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: asignar precio corporativo a VARIAS estaciones */}
+      {modalMasivo && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <h3 className="font-bold text-neutral-900 text-base flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-brand-600" />
+                Precio corporativo · {numSel} {numSel === 1 ? "estación" : "estaciones"}
+              </h3>
+              <button onClick={() => setModalMasivo(false)} className="text-neutral-400 hover:text-neutral-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveMasivo} className="space-y-4">
+              <div className="bg-neutral-50 border border-neutral-200 rounded-lg px-3 py-2 max-h-28 overflow-y-auto">
+                <div className="text-[10px] uppercase tracking-wider font-bold text-neutral-400 mb-1">
+                  Se asignará a estas estaciones ({selCombustible})
+                </div>
+                {Object.values(seleccionadas).slice(0, 40).map((p, i) => (
+                  <div key={i} className="text-[11px] text-neutral-700 truncate">• {p.establecimiento || p.estacion}</div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-neutral-600 mb-1">Asignar a Cliente / Empresa</label>
+                <select
+                  value={selClienteModal}
+                  onChange={(e) => setSelClienteModal(e.target.value)}
+                  className="w-full border border-neutral-300 rounded-lg px-3 py-2 text-xs font-medium text-neutral-800 focus:ring-2 focus:ring-brand-500 bg-white"
+                >
+                  <option value="GENERAL">-- Todos los Clientes (Precio General ENERED) --</option>
+                  {listaClientes.map((c) => (<option key={c} value={c}>{c}</option>))}
+                </select>
+                <p className="text-[10px] text-neutral-500 mt-1">
+                  💡 Si eliges una empresa, el precio aplicará <strong>solo para ese cliente</strong>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-emerald-600 mb-1">Precio corporativo ENERED *</label>
+                <input
+                  type="number" step="0.01" required placeholder="Ej. 24.50"
+                  value={inputPrecioEnered}
+                  onChange={(e) => setInputPrecioEnered(e.target.value)}
+                  className="w-full bg-emerald-50 border-2 border-emerald-400 rounded-lg px-3 py-2 text-sm font-bold text-emerald-900 focus:outline-none focus:border-emerald-600"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button type="button" onClick={() => setModalMasivo(false)}
+                  className="px-4 py-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 rounded-lg">
+                  Cancelar
+                </button>
+                <button type="submit" disabled={savingEnered}
+                  className="btn-brand text-xs px-5 py-2 rounded-lg font-bold flex items-center gap-1.5">
+                  {savingEnered ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : `Asignar a ${numSel}`}
                 </button>
               </div>
             </form>

@@ -1190,6 +1190,54 @@ async def upsert_estacion_enered(
     return {"ok": True, "nombre_facilito": nombre, "precio_enered": precio, "cliente": cliente}
 
 
+@api.post("/admin/precios/estaciones-enered/masivo")
+async def upsert_estaciones_enered_masivo(data: dict, user: dict = Depends(require_roles("admin_enered"))):
+    """Asigna el MISMO precio ENERED (corporativo) a VARIAS estaciones de una vez.
+    Body: {estaciones: [{nombre_facilito|establecimiento, departamento, provincia, distrito}],
+           combustible, precio_enered, cliente}. El precio puede ser por cliente."""
+    estaciones = data.get("estaciones") or []
+    if not estaciones:
+        raise HTTPException(status_code=400, detail="No hay estaciones seleccionadas")
+    comb = normalizar_combustible(data.get("combustible") or "Diesel B5 UV")
+    precio = float(data.get("precio_enered") or 0)
+    if precio <= 0:
+        raise HTTPException(status_code=400, detail="Ingresa un precio válido mayor a 0")
+    cliente = (data.get("cliente") or "GENERAL").strip().upper()
+
+    nombres = []
+    for est in estaciones:
+        nombre = (est.get("nombre_facilito") or est.get("establecimiento") or "").strip()
+        if not nombre:
+            continue
+        existing = await db.estaciones_enered.find_one({"nombre_facilito": nombre, "combustible": comb})
+        precios_cliente = existing.get("precios_cliente", {}) if existing else {}
+        if cliente and cliente != "GENERAL":
+            precios_cliente[cliente] = precio
+        else:
+            precios_cliente["GENERAL"] = precio
+        doc = {
+            "nombre_facilito": nombre,
+            "combustible": comb,
+            "precio_enered": precio if not cliente or cliente == "GENERAL" else (existing.get("precio_enered", precio) if existing else precio),
+            "cliente_asignado": cliente,
+            "precios_cliente": precios_cliente,
+            "departamento": est.get("departamento", ""),
+            "provincia": est.get("provincia", ""),
+            "distrito": est.get("distrito", "") or est.get("ciudad", ""),
+            "acepta_factura": True, "acepta_tarjeta": True, "activa": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.estaciones_enered.update_one(
+            {"nombre_facilito": nombre, "combustible": comb}, {"$set": doc}, upsert=True)
+        nombres.append(nombre)
+
+    if nombres:
+        await db.precios_facilito.update_many(
+            {"establecimiento": {"$in": nombres}},
+            {"$set": {"es_enered": True, "acepta_tarjeta": True, "calidad": 5}})
+    return {"ok": True, "asignadas": len(nombres), "precio_enered": precio, "cliente": cliente}
+
+
 @api.get("/admin/sire/compras")
 async def admin_sire_compras(periodo: str = "202606", user: dict = Depends(require_roles("admin_enered"))):
     """
@@ -4890,7 +4938,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.5.0-mapa-nacional",
+        "version": "1.6.0-precios-corp",
     }
 
 # ============================================================

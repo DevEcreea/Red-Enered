@@ -9,22 +9,22 @@ import { Loader2, MapPin } from "lucide-react";
    verde = más barato, ámbar = medio, gris = más caro. Morado = mis unidades. */
 const COL = { mejor: "#059669", medio: "#EA8104", caro: "#6B7280", enered: "#059669" };
 
-// Pin PEQUEÑO por estación (estilo Facilito): una gotita coloreada por nivel de precio
-// (verde barato · ámbar medio · gris caro), ★ dorada si aplica ENERED. Es chico para que
-// se puedan ver TODAS las estaciones del país sin apilarse; el precio y el detalle salen
-// al hacer clic (en el Popup).
-function pin(color, estrella) {
-  const centro = estrella
-    ? '<text x="11" y="14.5" text-anchor="middle" font-size="11" font-weight="700" fill="#EAB308">★</text>'
-    : '<circle cx="11" cy="11" r="3.6" fill="#fff"/>';
+// Pin por estación con su PRECIO visible: burbuja compacta coloreada por nivel
+// (verde barato · ámbar medio · gris caro), ★ dorada si aplica ENERED. Compacta para
+// apilarse lo menos posible; el detalle completo sale al hacer clic (Popup).
+function pin(precio, color, estrella) {
+  const p = precio != null ? Number(precio).toFixed(2) : "—";
   return L.divIcon({
     className: "",
-    html: `<svg width="22" height="28" viewBox="0 0 22 28" style="filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))">
-      <path d="M11 0C4.9 0 0 4.8 0 10.7 0 18.7 11 28 11 28s11-9.3 11-17.3C22 4.8 17.1 0 11 0z"
-        fill="${color}" stroke="#fff" stroke-width="1.6"/>
-      ${centro}
-    </svg>`,
-    iconSize: [22, 28], iconAnchor: [11, 28], popupAnchor: [0, -26],
+    html: `<div style="transform:translate(-50%,-100%);white-space:nowrap;line-height:1;">
+      <div style="background:${color};color:#fff;font-weight:800;font-size:10.5px;
+        padding:2px 6px;border-radius:7px;box-shadow:0 2px 5px -1px rgba(0,0,0,.4);
+        border:1.5px solid #fff;display:inline-flex;align-items:center;gap:3px;">
+        ${estrella ? '<span style="color:#FDE047;font-size:9px">★</span>' : ""}${p}</div>
+      <div style="width:0;height:0;margin:0 auto;border-left:4px solid transparent;
+        border-right:4px solid transparent;border-top:5px solid ${color};"></div>
+    </div>`,
+    iconSize: [0, 0], iconAnchor: [0, 0], popupAnchor: [0, -8],
   });
 }
 
@@ -115,7 +115,7 @@ export default function MapaGrifos({ filtros }) {
           {conUbicacion.map((g, i) => {
             const color = g.es_enered ? COL.enered : COL[nivel(g.precio_venta)];
             return (
-              <Marker key={`g${i}`} position={[g.lat, g.lon]} icon={pin(color, g.es_enered)}>
+              <Marker key={`g${i}`} position={[g.lat, g.lon]} icon={pin(g.precio_venta, color, g.es_enered)}>
                 <Popup>
                   <b>{g.establecimiento}</b>
                   {g.direccion ? <><br />{g.direccion}</> : null}
