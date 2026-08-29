@@ -1023,6 +1023,104 @@ async def subsidio_confirmar_masiva(payload: dict, user: dict = Depends(_require
     return {"guardadas": len(docs), "omitidas": len(filas) - len(docs)}
 
 
+@subsidio_router.get("/subsidio/carga-masiva/pendientes-factura")
+async def subsidio_masiva_pendientes(user: dict = Depends(_require_subsidio)):
+    """Comprobantes cargados por plantilla (Excel) que aún no tienen su PDF adjunto."""
+    uids = await _get_company_uids(user["id"])
+    pend = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}, "origin": "carga_masiva",
+         "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1, "ruc_emisor": 1, "fecha": 1, "galones": 1},
+    ).sort("fecha", 1).to_list(2000)
+    return {"pendientes": pend, "total": len(pend)}
+
+
+@subsidio_router.post("/subsidio/carga-masiva/adjuntar-facturas")
+async def subsidio_masiva_adjuntar(
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(_require_subsidio),
+):
+    """Adjunta los PDF a los comprobantes ya cargados por plantilla (Excel).
+
+    Cada PDF se identifica por su QR/XML (serie-número exactos, norma SUNAT) y
+    se engancha a la fila de carga masiva que le corresponde. Así el cliente
+    carga rápido por Excel y luego sube los respaldos sin duplicar registros.
+    """
+    from services.extractor_comprobante import extraer as _extraer_comprobante
+
+    if not files:
+        raise HTTPException(status_code=400, detail="Sin archivos")
+    if len(files) > 60:
+        raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
+
+    uids = await _get_company_uids(user["id"])
+    _norm = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
+
+    # Índice de comprobantes de carga masiva SIN factura, por número normalizado.
+    pendientes = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}, "origin": "carga_masiva",
+         "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1},
+    ).to_list(4000)
+    por_numero: dict = {}
+    for p in pendientes:
+        if p.get("numero_documento"):
+            por_numero.setdefault(_norm(p["numero_documento"]), []).append(p)
+
+    ahora = datetime.now(timezone.utc).isoformat()
+    resultados = []
+    adjuntadas = 0
+    for f in files:
+        content = await f.read()
+        if len(content) > 20 * 1024 * 1024:
+            resultados.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
+            continue
+        if not (content[:4] == b"%PDF"):
+            resultados.append({"filename": f.filename, "ok": False, "error": "Solo se aceptan facturas en PDF"})
+            continue
+
+        # QR/XML del PDF → serie-número exacto
+        try:
+            base = _extraer_comprobante(content, f.filename or "")
+        except Exception as e:
+            logger.warning(f"Extracción QR/XML falló en {f.filename}: {e}")
+            base = {}
+        num_doc = base.get("numero_documento")
+        if not num_doc:
+            resultados.append({"filename": f.filename, "ok": False,
+                               "error": "No se pudo leer el número del comprobante (QR/XML)"})
+            continue
+
+        candidatos = por_numero.get(_norm(num_doc)) or []
+        # Si hay varios con el mismo número, desempatar por RUC del emisor.
+        objetivo = None
+        if len(candidatos) == 1:
+            objetivo = candidatos[0]
+        elif len(candidatos) > 1 and base.get("ruc_emisor"):
+            objetivo = next((c for c in candidatos
+                             if _norm(c.get("ruc_emisor")) == _norm(base["ruc_emisor"])), None)
+        if not objetivo:
+            resultados.append({"filename": f.filename, "ok": False, "numero_documento": num_doc,
+                               "error": "Sin coincidencia en la carga masiva (ya tiene factura o no fue cargado)"})
+            continue
+
+        key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
+        storage.save_object(key, content, "application/pdf")
+        await db.consumos_subsidio.update_one(
+            {"id": objetivo["id"]},
+            {"$set": {"factura_filename": f.filename, "factura_storage_key": key,
+                      "factura_content_type": "application/pdf", "factura_size": len(content),
+                      "factura_adjunta_at": ahora}},
+        )
+        # Evitar readjuntar a la misma fila si llegan dos PDF con el mismo número.
+        por_numero[_norm(num_doc)] = [c for c in candidatos if c["id"] != objetivo["id"]]
+        adjuntadas += 1
+        resultados.append({"filename": f.filename, "ok": True, "numero_documento": num_doc,
+                           "consumo_id": objetivo["id"]})
+
+    return {"adjuntadas": adjuntadas, "total": len(files), "resultados": resultados}
+
+
 @subsidio_router.post("/subsidio/padron-grifos/sync")
 async def subsidio_sync_padron(user: dict = Depends(_require_subsidio)):
     """Descarga el padrón de grifos de OSINERGMIN (Datos Abiertos) y lo carga en la base."""

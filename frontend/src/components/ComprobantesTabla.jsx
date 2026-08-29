@@ -532,6 +532,9 @@ export function CargaMasiva({ onDone }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const fileRef = useRef();
+  // Paso 2: adjuntar los PDF a las filas ya guardadas por Excel.
+  const [facturas, setFacturas] = useState(null); // { guardadas, pendientes, resultado }
+  const pdfRef = useRef();
 
   const descargar = async () => {
     setBusy(true);
@@ -565,11 +568,105 @@ export function CargaMasiva({ onDone }) {
       const { data } = await api.post("/subsidio/carga-masiva/confirmar", { filas: preview.filas });
       setPreview(null);
       onDone?.(data);
+      // Pasar al paso de adjuntar los PDF a lo recién guardado.
+      let pendientes = data.guardadas || 0;
+      try {
+        const p = await api.get("/subsidio/carga-masiva/pendientes-factura");
+        pendientes = p.data?.total ?? pendientes;
+      } catch { /* si falla, usamos el conteo de guardadas */ }
+      setFacturas({ guardadas: data.guardadas || 0, pendientes, resultado: null });
     } catch (e2) { setErr(e2?.response?.data?.detail || "No se pudo guardar"); }
     finally { setBusy(false); }
   };
 
+  const subirFacturas = async (e) => {
+    const list = Array.from(e.target.files || []);
+    if (!list.length) return;
+    setBusy(true); setErr("");
+    try {
+      const fd = new FormData();
+      list.forEach((f) => fd.append("files", f));
+      const { data } = await api.post("/subsidio/carga-masiva/adjuntar-facturas", fd,
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 300000 });
+      setFacturas((prev) => ({
+        ...prev,
+        pendientes: Math.max(0, (prev?.pendientes || 0) - (data.adjuntadas || 0)),
+        resultado: data,
+      }));
+      onDone?.({ guardadas: 0, omitidas: 0 }); // refresca la tabla del padre
+    } catch (e2) { setErr(e2?.response?.data?.detail || "No se pudieron adjuntar las facturas"); }
+    finally { setBusy(false); e.target.value = ""; }
+  };
+
+  const cerrarFacturas = () => { setFacturas(null); setErr(""); };
+
   const r = preview?.resumen || {};
+
+  // ── Paso 2: adjuntar PDFs a los comprobantes cargados por Excel ──
+  if (facturas) {
+    const res = facturas.resultado;
+    const sinMatch = (res?.resultados || []).filter((x) => !x.ok);
+    return (
+      <div className="bg-white border border-neutral-200 rounded-xl p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-bold text-sm flex items-center gap-2">
+              <FileText className="w-4 h-4 text-brand" /> Adjunta las facturas (PDF)
+            </div>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Guardamos {facturas.guardadas} comprobante(s). Sube los PDF y los enganchamos
+              automáticamente a cada fila por su número (QR/XML). {facturas.pendientes > 0
+                ? `Faltan ${facturas.pendientes} por adjuntar.` : "¡Todos tienen su PDF! 🎉"}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => pdfRef.current?.click()} disabled={busy}
+              className="btn-brand px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />} Subir facturas PDF
+            </button>
+            <input ref={pdfRef} type="file" hidden multiple accept="application/pdf,.pdf" onChange={subirFacturas} />
+            <button onClick={cerrarFacturas}
+              className="px-3 py-2 border border-neutral-300 rounded-lg text-xs font-bold hover:bg-neutral-50">
+              {facturas.pendientes > 0 ? "Terminar luego" : "Listo"}
+            </button>
+          </div>
+        </div>
+
+        {err && <div className="mt-3 text-xs text-red-600 font-semibold">{err}</div>}
+
+        {res && (
+          <div className="mt-4">
+            <div className="flex items-center gap-3 flex-wrap text-xs font-bold mb-2">
+              {res.adjuntadas > 0 && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{res.adjuntadas} adjuntada(s)</span>}
+              {sinMatch.length > 0 && <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-full flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{sinMatch.length} sin coincidencia</span>}
+            </div>
+            {sinMatch.length > 0 && (
+              <div className="max-h-56 overflow-y-auto border border-neutral-200 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-neutral-50 sticky top-0">
+                    <tr className="text-[10px] uppercase text-neutral-500">
+                      <th className="px-3 py-2 text-left">Archivo</th>
+                      <th className="px-3 py-2 text-left">Comprobante</th>
+                      <th className="px-3 py-2 text-left">Motivo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {sinMatch.map((x, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-2 truncate max-w-[180px]">{x.filename}</td>
+                        <td className="px-3 py-2 font-bold">{x.numero_documento || "—"}</td>
+                        <td className="px-3 py-2 text-amber-700">{x.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white border border-neutral-200 rounded-xl p-4">
