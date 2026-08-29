@@ -1060,7 +1060,7 @@ async def subsidio_masiva_adjuntar(
     pendientes = await db.consumos_subsidio.find(
         {"user_id": {"$in": uids}, "origin": "carga_masiva",
          "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
-        {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1},
+        {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1, "placa": 1},
     ).to_list(4000)
     por_numero: dict = {}
     for p in pendientes:
@@ -1092,31 +1092,37 @@ async def subsidio_masiva_adjuntar(
             continue
 
         candidatos = por_numero.get(_norm(num_doc)) or []
-        # Si hay varios con el mismo número, desempatar por RUC del emisor.
-        objetivo = None
-        if len(candidatos) == 1:
-            objetivo = candidatos[0]
-        elif len(candidatos) > 1 and base.get("ruc_emisor"):
-            objetivo = next((c for c in candidatos
-                             if _norm(c.get("ruc_emisor")) == _norm(base["ruc_emisor"])), None)
-        if not objetivo:
+        # Una misma factura puede cubrir VARIAS placas → varias filas con el mismo
+        # número. Si el PDF trae RUC, nos quedamos solo con las filas de ese emisor
+        # (desempata facturas distintas que coincidan en número); si no, todas.
+        objetivos = candidatos
+        if base.get("ruc_emisor"):
+            con_ruc = [c for c in candidatos
+                       if _norm(c.get("ruc_emisor")) == _norm(base["ruc_emisor"])]
+            if con_ruc:
+                objetivos = con_ruc
+        if not objetivos:
             resultados.append({"filename": f.filename, "ok": False, "numero_documento": num_doc,
                                "error": "Sin coincidencia en la carga masiva (ya tiene factura o no fue cargado)"})
             continue
 
+        # Guardamos el PDF una sola vez y lo enganchamos a TODAS las placas de la factura.
         key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
         storage.save_object(key, content, "application/pdf")
-        await db.consumos_subsidio.update_one(
-            {"id": objetivo["id"]},
+        ids = [o["id"] for o in objetivos]
+        await db.consumos_subsidio.update_many(
+            {"id": {"$in": ids}},
             {"$set": {"factura_filename": f.filename, "factura_storage_key": key,
                       "factura_content_type": "application/pdf", "factura_size": len(content),
                       "factura_adjunta_at": ahora}},
         )
-        # Evitar readjuntar a la misma fila si llegan dos PDF con el mismo número.
-        por_numero[_norm(num_doc)] = [c for c in candidatos if c["id"] != objetivo["id"]]
-        adjuntadas += 1
+        # Quitar del índice las filas ya enganchadas (evita readjuntar con otro PDF igual).
+        ids_set = set(ids)
+        por_numero[_norm(num_doc)] = [c for c in candidatos if c["id"] not in ids_set]
+        adjuntadas += len(ids)
         resultados.append({"filename": f.filename, "ok": True, "numero_documento": num_doc,
-                           "consumo_id": objetivo["id"]})
+                           "consumos": len(ids),
+                           "placas": [o.get("placa") for o in objetivos if o.get("placa")]})
 
     return {"adjuntadas": adjuntadas, "total": len(files), "resultados": resultados}
 

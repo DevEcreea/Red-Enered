@@ -614,8 +614,8 @@ export function CargaMasiva({ onDone }) {
               <FileText className="w-4 h-4 text-brand" /> Adjunta las facturas (PDF)
             </div>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Guardamos {facturas.guardadas} comprobante(s). Sube los PDF y los enganchamos
-              automáticamente a cada fila por su número (QR/XML). {facturas.pendientes > 0
+              Guardamos {facturas.guardadas} comprobante(s). Sube los PDF y los enganchamos por su
+              número (QR/XML). Si una factura cubre varias placas, se adjunta a todas. {facturas.pendientes > 0
                 ? `Faltan ${facturas.pendientes} por adjuntar.` : "¡Todos tienen su PDF! 🎉"}
             </p>
           </div>
