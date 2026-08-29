@@ -3141,8 +3141,8 @@ async def admin_zip_invoices(
     filtros), cada uno nombrado PLACA_NroDoc.ext, más un resumen.xlsx con totales.
     Agiliza armar el paquete operativo para la ATU."""
     import zipfile
-    import tempfile
-    from fastapi.responses import FileResponse
+    from zipstream import ZipStream
+    from fastapi.responses import StreamingResponse
 
     # Todas las cuentas de la MISMA empresa (las facturas pueden estar repartidas entre ellas).
     uids = await _get_company_uids(user_id)
@@ -3160,68 +3160,79 @@ async def admin_zip_invoices(
         rq = {"$regex": _re.escape(q.strip()), "$options": "i"}
         filtro["$or"] = [{"numero_documento": rq}, {"estacion": rq}, {"ruc_emisor": rq}]
 
-    rows = await db.consumos_subsidio.find(filtro, {"_id": 0}).sort("fecha", 1).to_list(2000)
+    rows = await db.consumos_subsidio.find(filtro, {"_id": 0}).sort("fecha", 1).to_list(5000)
     if not rows:
         raise HTTPException(status_code=404, detail="No hay facturas con esos filtros")
 
     from openpyxl import Workbook
-    wb = Workbook()
-    ws = wb.active
+    ws_wb = Workbook()
+    ws = ws_wb.active
     ws.title = "Facturas"
     ws.append(["Fecha", "Placa", "Producto", "Galones", "Importe (S/)", "RUC emisor",
                "Estación", "N° Doc", "Archivo en ZIP", "Estado"])
     tot_gal = tot_imp = 0.0
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     con_archivo = sin_archivo = 0
-    # Un solo listado del bucket para resolver archivos de TODAS las facturas.
+
+    # Un solo listado del bucket para resolver los archivos de TODAS las facturas
+    # (existencia por caché, sin descargar nada todavía).
     _keys = storage.list_keys("subsidio/")
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
-        usados = set()
-        for r in rows:
-            nombre_zip = ""
-            key = await _buscar_key_archivo(r, keys_cache=_keys)
-            if key:
-                fname = r.get("factura_filename") or "archivo"
-                ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "pdf"
-                base = f"{r.get('placa') or 'SIN-PLACA'}_{(r.get('numero_documento') or r.get('id'))}".replace("/", "-")
-                nombre_zip = f"{base}.{ext}"
-                k2 = 2
-                while nombre_zip in usados:
-                    nombre_zip = f"{base}_{k2}.{ext}"; k2 += 1
-                usados.add(nombre_zip)
-                try:
-                    zf.writestr(nombre_zip, storage.get_object_bytes(key))
-                    con_archivo += 1
-                except Exception as e:
-                    logger.warning(f"[zip_invoices] error leyendo {key}: {e}")
-                    nombre_zip = "(error al leer)"
+    usados: set = set()
+    archivos: list = []  # (nombre_en_zip, key) a transmitir bajo demanda
+    for r in rows:
+        nombre_zip = ""
+        key = await _buscar_key_archivo(r, keys_cache=_keys)
+        if key:
+            fname = r.get("factura_filename") or "archivo"
+            ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "pdf"
+            base = f"{r.get('placa') or 'SIN-PLACA'}_{(r.get('numero_documento') or r.get('id'))}".replace("/", "-")
+            nombre_zip = f"{base}.{ext}"
+            k2 = 2
+            while nombre_zip in usados:
+                nombre_zip = f"{base}_{k2}.{ext}"; k2 += 1
+            usados.add(nombre_zip)
+            archivos.append((nombre_zip, key))
+            con_archivo += 1
+        else:
+            sin_archivo += 1
+            # Distinguir el registro digitado a mano (nunca tuvo archivo) del archivo
+            # que debía existir y no se encontró en el almacenamiento.
+            if r.get("factura_storage_key") or (r.get("factura_filename") and not str(r.get("factura_filename")).startswith("manual_entry")):
+                nombre_zip = "(archivo no encontrado en almacenamiento)"
             else:
-                sin_archivo += 1
-                # Distinguir el registro digitado a mano (nunca tuvo archivo) del archivo
-                # que debía existir y no se encontró en el almacenamiento.
-                if r.get("factura_storage_key") or (r.get("factura_filename") and not str(r.get("factura_filename")).startswith("manual_entry")):
-                    nombre_zip = "(archivo no encontrado en almacenamiento)"
-                else:
-                    nombre_zip = "(sin archivo — registro manual)"
-            g = float(r.get("galones") or 0)
-            imp = float(r.get("importe_total") or 0)
-            tot_gal += g
-            tot_imp += imp
-            ws.append([r.get("fecha"), r.get("placa"), r.get("producto"), g, imp,
-                       r.get("ruc_emisor"), r.get("estacion"), r.get("numero_documento"),
-                       nombre_zip, r.get("status")])
-        ws.append([])
-        ws.append(["TOTAL", "", "", round(tot_gal, 3), round(tot_imp, 2), "", "",
-                   f"{len(rows)} facturas", f"{con_archivo} con archivo / {sin_archivo} sin archivo", ""])
-        xbuf = io.BytesIO()
-        wb.save(xbuf)
-        zf.writestr("resumen.xlsx", xbuf.getvalue())
-    tmp.close()
+                nombre_zip = "(sin archivo — registro manual)"
+        g = float(r.get("galones") or 0)
+        imp = float(r.get("importe_total") or 0)
+        tot_gal += g
+        tot_imp += imp
+        ws.append([r.get("fecha"), r.get("placa"), r.get("producto"), g, imp,
+                   r.get("ruc_emisor"), r.get("estacion"), r.get("numero_documento"),
+                   nombre_zip, r.get("status")])
+    ws.append([])
+    ws.append(["TOTAL", "", "", round(tot_gal, 3), round(tot_imp, 2), "", "",
+               f"{len(rows)} facturas", f"{con_archivo} con archivo / {sin_archivo} sin archivo", ""])
+    xbuf = io.BytesIO()
+    ws_wb.save(xbuf)
+    resumen_bytes = xbuf.getvalue()
+
+    # ZIP en STREAMING: el navegador empieza a bajar de inmediato y cada archivo se
+    # lee de R2 bajo demanda (un archivo a la vez → memoria baja, sin temp gigante ni
+    # bloqueo del event loop). Clave para expedientes con cientos de comprobantes.
+    zs = ZipStream(compress_type=zipfile.ZIP_DEFLATED)
+    zs.add(data=resumen_bytes, arcname="resumen.xlsx")
+
+    def _leer(k):
+        try:
+            yield storage.get_object_bytes(k)
+        except Exception as e:
+            logger.warning(f"[zip_invoices] error leyendo {k}: {e}")
+
+    for arcname, key in archivos:
+        zs.add(data=_leer(key), arcname=arcname)
 
     etiqueta = f"facturas_{(placa or 'todas')}_{desde or 'inicio'}_{hasta or 'fin'}.zip".replace(" ", "")
-    return FileResponse(tmp.name, media_type="application/zip", filename=etiqueta,
-                        background=None)
+    return StreamingResponse(
+        zs, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{etiqueta}"'})
 
 
 @subsidio_router.put("/admin/subsidio/invoices/{invoice_id}/usar-archivo")
