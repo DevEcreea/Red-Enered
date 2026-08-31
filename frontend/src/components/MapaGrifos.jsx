@@ -108,9 +108,9 @@ export default function MapaGrifos({ filtros }) {
         )}
         <MapContainer center={centro} zoom={grifos.length ? 12 : 5}
           style={{ height: "100%", width: "100%" }} ref={setMap} scrollWheelZoom>
-          <TileLayer attribution="&copy; OpenStreetMap &copy; CARTO"
-            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-            subdomains="abcd" maxZoom={20} />
+          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            subdomains="abc" maxZoom={19} />
           {/* Una etiqueta de precio por estación, en su ubicación real. */}
           {conUbicacion.map((g, i) => {
             const color = g.es_enered ? COL.enered : COL[nivel(g.precio_venta)];

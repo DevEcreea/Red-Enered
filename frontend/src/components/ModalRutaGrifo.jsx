@@ -226,9 +226,9 @@ export default function ModalRutaGrifo({ grifo, onClose }) {
           {estado === "ok" && origen && ruta?.destino && (
             <MapContainer center={[ruta.destino.lat, ruta.destino.lon]} zoom={13}
               style={{ height: "100%", width: "100%" }} ref={setMap} scrollWheelZoom>
-              <TileLayer attribution='&copy; OpenStreetMap &copy; CARTO'
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                subdomains="abcd" maxZoom={20} />
+              <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                subdomains="abc" maxZoom={19} />
               <Marker position={[origen.lat, origen.lon]} icon={ICONO_ORIGEN}>
                 <Popup>Tu ubicación</Popup>
               </Marker>

@@ -6,6 +6,14 @@ import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
 import ModalRutaGrifo from "./ModalRutaGrifo";
 import MapaGrifos from "./MapaGrifos";
 
+// Primera vista: elegir el producto (como Facilito). Cada uno mapea al valor real
+// de combustible que devuelve el backend (se resuelve por coincidencia; hay fallback).
+const PRODUCTOS = [
+  { key: "diesel",  label: "Diesel B5 S50",     sub: "El combustible de las flotas", match: ["diesel"],  fallback: "Diesel B5 UV" },
+  { key: "regular", label: "Gasolina Regular",  sub: "Gasohol / gasolina regular",   match: ["regular"], fallback: "Gasohol Regular" },
+  { key: "premium", label: "Gasolina Premium",  sub: "Gasohol / gasolina premium",   match: ["premium"], fallback: "Gasohol Premium" },
+];
+
 export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, syncing, isMobile = false }) {
   // Updated 2026-08-04 - Standardized TabPrecios table format
   // Modal Admin
@@ -112,9 +120,18 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   // Por defecto DIESEL (lo que cargan las flotas). OJO: antes iniciaba en "" y el select
   // MOSTRABA "Diesel B5 UV" sin filtrar → la tabla mezclaba los 3 combustibles y parecía
   // que había precios viejos o grifos duplicados.
-  const [selCombustible, setSelCombustible] = useState("Diesel B5 UV");
+  const [selCombustible, setSelCombustible] = useState("");
   const [selEstacion, setSelEstacion] = useState("");
   const [soloEnered, setSoloEnered] = useState(false);
+  // Producto elegido en la primera vista (null = todavía muestra el selector).
+  const [producto, setProducto] = useState(null);
+
+  const elegirProducto = (prod) => {
+    const real = combustiblesDisponibles.find(
+      (c) => prod.match.some((m) => (c || "").toLowerCase().includes(m))) || prod.fallback;
+    setSelCombustible(real);
+    setProducto(prod.key);
+  };
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -147,6 +164,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
 
 
   const fetchPrecios = useCallback(async () => {
+    if (!producto) return; // aún en la vista de selección de producto
     try {
       setLoading(true);
       setErrorMsg("");
@@ -168,7 +186,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     } finally {
       setLoading(false);
     }
-  }, [selDepartamento, selProvincia, selDistrito, selCombustible, soloEnered]);
+  }, [producto, selDepartamento, selProvincia, selDistrito, selCombustible, soloEnered]);
 
   useEffect(() => {
     fetchPrecios();
@@ -332,8 +350,51 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     } catch { return iso; }
   };
 
+  // ── PRIMERA VISTA: selección de producto (como Facilito) ──
+  if (!producto) {
+    return (
+      <div className="flex flex-col items-center py-10" data-testid="tab-precios-picker">
+        <div className="text-center mb-8">
+          <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-2">
+            Red de grifos · Precios en tiempo real
+          </div>
+          <h2 className="font-black text-2xl text-neutral-900">¿Qué combustible quieres consultar?</h2>
+          <p className="text-neutral-500 text-sm mt-1">
+            Elige un producto para ver las estaciones y sus precios en el mapa.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full max-w-3xl">
+          {PRODUCTOS.map((prod) => (
+            <button
+              key={prod.key}
+              onClick={() => elegirProducto(prod)}
+              data-testid={`producto-${prod.key}`}
+              className="group bg-white border border-neutral-200 rounded-2xl p-6 flex flex-col items-center gap-3 hover:border-brand hover:shadow-lg transition-all"
+            >
+              <div className="w-16 h-16 rounded-full bg-brand/10 group-hover:bg-brand/20 flex items-center justify-center transition-colors">
+                <Fuel className="w-8 h-8 text-brand" />
+              </div>
+              <div className="text-center">
+                <div className="font-black text-neutral-900">{prod.label}</div>
+                <div className="text-xs text-neutral-500 mt-0.5">{prod.sub}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6" data-testid="tab-precios">
+      {/* Volver a elegir producto */}
+      <button
+        onClick={() => { setProducto(null); setSelCombustible(""); }}
+        className="self-start -mb-2 text-xs font-bold text-brand hover:text-brand-hover flex items-center gap-1"
+      >
+        <ChevronLeft className="w-4 h-4" /> Elegir otro producto
+      </button>
+
       {/* KPIs superiores */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Ahorro Capturado */}
