@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { MapContainer, GeoJSON } from "react-leaflet";
-import { MapPin } from "lucide-react";
+import { MapContainer, GeoJSON, useMap } from "react-leaflet";
+
+// Reajusta el tamaño y encuadre tras montar (evita el mapa en blanco cuando el
+// contenedor aún no tenía dimensiones al renderizar).
+function AjustarPeru({ bounds }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => { map.invalidateSize(); map.fitBounds(bounds); }, 200);
+    return () => clearTimeout(t);
+  }, [map, bounds]);
+  return null;
+}
 
 const norm = (s) => (s || "").normalize("NFD").replace(new RegExp("[\\u0300-\\u036f]", "g"), "").toUpperCase().trim();
 
@@ -46,13 +56,8 @@ export default function MapaDepartamentos({ departamentos = [], onSelect }) {
     });
   };
 
-  // Lista de apoyo (mismos nombres del mapa, útil en móvil).
-  const nombresLista = departamentos.length
-    ? departamentos
-    : (geo && geo.features ? geo.features.map((f) => f.properties.NOMBDEP) : []);
-
   return (
-    <div className="space-y-3">
+    <div>
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden shadow-sm relative" style={{ height: 560 }}>
         {geo === null && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-400 z-[500]">Cargando mapa…</div>
@@ -67,22 +72,12 @@ export default function MapaDepartamentos({ departamentos = [], onSelect }) {
           dragging={false} scrollWheelZoom={false} doubleClickZoom={false}
           boxZoom={false} keyboard={false} touchZoom={false}
         >
+          <AjustarPeru bounds={PERU_BOUNDS} />
           {geo && geo.features && (
             <GeoJSON key="peru-dep" data={geo} style={style} onEachFeature={onEach} />
           )}
         </MapContainer>
       </div>
-
-      {nombresLista.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {nombresLista.map((dep) => (
-            <button key={dep} onClick={() => onSelect?.(nombreReal(dep))}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full border border-neutral-200 text-neutral-700 hover:border-brand hover:text-brand hover:bg-brand/5 transition-colors flex items-center gap-1">
-              <MapPin className="w-3 h-3" /> {dep}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
