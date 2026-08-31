@@ -3,10 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
-import {
-  ShieldAlert, ShieldCheck, Loader2, AlertTriangle, Truck, Copy, Search,
-  FileWarning, Building2, PlugZap, XCircle, Clock,
-} from "lucide-react";
+import { ShieldAlert, ShieldCheck, Loader2, AlertTriangle, Truck, Copy, Search, Building2, PlugZap, XCircle, Clock } from "lucide-react";
 
 function useAuthSafe() { try { return useAuth(); } catch { return {}; } }
 

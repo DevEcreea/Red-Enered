@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
-import { Loader2, CheckCircle2, AlertCircle, ShieldCheck, XCircle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 

@@ -1,11 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import {
-  FileText, CheckCircle2, Clock, AlertTriangle, Plus, Download,
-  ChevronDown, Calendar, Users, Truck, Tag, User, Activity,
-  LayoutTemplate, MoreHorizontal, X, Route, Building2,
-  Car, UploadCloud, Archive, RotateCcw, Trash2, Eye,
-  Sparkles, Folder, Files, Loader2, Camera
-} from "lucide-react";
+import { FileText, CheckCircle2, Clock, AlertTriangle, Plus, Download, ChevronDown, Users, Truck, User, LayoutTemplate, MoreHorizontal, X, Route, Building2, Car, UploadCloud, Archive, RotateCcw, Trash2, Eye, Sparkles, Files, Loader2, Camera } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import PdfViewerModal from "../components/PdfViewerModal";

@@ -3,11 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
   AreaChart, Area, PieChart, Pie, Cell,
 } from "recharts";
-import {
-  Siren, Truck, Fuel, CreditCard, Droplet, Banknote, MapPin,
-  Activity, TrendingUp, Gauge, Calendar, Wrench, FileText, Users,
-  Filter, X, Clock, Info, ChevronRight, Lock, Sparkles,
-} from "lucide-react";
+import { Siren, Truck, Fuel, CreditCard, Droplet, Banknote, MapPin, Activity, TrendingUp, Gauge, Calendar, Wrench, FileText, Users, Clock, Info, ChevronRight, Lock, Sparkles } from "lucide-react";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";

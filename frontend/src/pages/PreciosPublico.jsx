@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { api } from "../lib/api";
-import { Fuel, MapPin, Loader2, Search, MessageCircle, Star, CheckCircle2 } from "lucide-react";
+import { Fuel, MapPin, Loader2, Search, MessageCircle, Star } from "lucide-react";
 
 const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/artifacts/hrbrugb8_image.png";
 const WSP = "51997389536";

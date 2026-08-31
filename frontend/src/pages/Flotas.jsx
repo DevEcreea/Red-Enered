@@ -3,13 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import { formatSoles, formatNumber } from "../lib/utils";
 import ValidacionPendiente from "../components/ValidacionPendiente";
-import {
-  Receipt, Fuel, Gauge, Coins, Droplet, MapPin, Camera,
-  FileText, CreditCard, MoreHorizontal, ShieldCheck, Plus,
-  ChevronDown, Download, Share2, Printer, Columns3, Upload,
-  Filter, Calendar, User, Car, ArrowUpDown, Search, X,
-  CheckCircle2, Trash2, Edit2, Eye
-} from "lucide-react";
+import { Receipt, Fuel, Gauge, Coins, Droplet, MapPin, CreditCard, MoreHorizontal, ShieldCheck, Plus, ChevronDown, Download, Filter, Calendar, Search, X, CheckCircle2, Trash2, Edit2, Eye } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "../components/ui/hover-card";
 import PdfViewerModal from "../components/PdfViewerModal";
 import * as XLSX from "xlsx";

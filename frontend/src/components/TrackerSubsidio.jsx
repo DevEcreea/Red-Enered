@@ -2,7 +2,6 @@ import React, { useEffect, useState, useMemo } from "react";
 import { api } from "../lib/api";
 import { formatNumber } from "../lib/utils";
 import { useNavigate } from "react-router-dom";
-import { Clock } from "lucide-react";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "./ui/hover-card";
 
 const TARGET_DATE = new Date("2026-09-28T23:59:59");

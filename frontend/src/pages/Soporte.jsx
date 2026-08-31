@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Search, ChevronDown, Mail, Phone } from "lucide-react";
+import { Search, ChevronDown, Mail } from "lucide-react";
 
 const WA_PHONE = "51972228870";
 const WA_LINK_BASE = `https://wa.me/${WA_PHONE}`;

@@ -1,9 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Loader2, ArrowLeft, CheckCircle2, AlertTriangle, Trash2, Save, FileText, AlertCircle,
-  Upload, ScanLine,
-} from "lucide-react";
+import { Loader2, ArrowLeft, CheckCircle2, AlertTriangle, Trash2, Save, FileText, Upload, ScanLine } from "lucide-react";
 import { api } from "../lib/api";
 
 const PRODUCTOS = [

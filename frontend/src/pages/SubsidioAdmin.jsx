@@ -1,10 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import {
-  Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText,
-  Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock,
-  Pencil, Plus, Trash2, PlusCircle, X, ExternalLink, Upload,
-} from "lucide-react";
+import { Loader2, Search, Building2, Truck, Fuel, ShieldCheck, FileText, Download, ArrowLeft, CheckCircle2, Clock, AlertCircle, Banknote, Lock, Pencil, Plus, Trash2, X } from "lucide-react";
 import { api, API } from "../lib/api";
 
 /** Token EFÍMERO de descarga (5 min) para las URLs de iframe/descarga/ZIP, en vez del

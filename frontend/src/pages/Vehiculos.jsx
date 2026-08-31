@@ -1,13 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import {
-  Car, Plus, ChevronDown, Eye, Pencil, Copy,
-  Wrench, CalendarDays, Search, Upload, Download, X,
-  MapPin, Cog, Warehouse, FileText, UserCheck, Fuel,
-  Cpu, Wifi, WifiOff, Unlink, Tag, Shield, Layers,
-  Clock, Truck, Bus, Bike, RotateCw, Trash2
-} from "lucide-react";
+import { Car, Plus, ChevronDown, Eye, Pencil, CalendarDays, Search, Upload, Download, X, MapPin, Cog, Warehouse, FileText, UserCheck, Fuel, Cpu, Wifi, WifiOff, Unlink, Tag, Shield, Layers, Clock, Truck, Bus, Bike, RotateCw, Trash2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 

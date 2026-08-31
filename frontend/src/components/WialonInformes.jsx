@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Loader2, FileBarChart, Truck, Calendar, Play, Fuel, AlertTriangle,
-  Table as TableIcon, Download, TrendingUp, LineChart as LineChartIcon, ArrowDown, ArrowUp
+  Table as TableIcon, Download, TrendingUp, ArrowDown, ArrowUp
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,

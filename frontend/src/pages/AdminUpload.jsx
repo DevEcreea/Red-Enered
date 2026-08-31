@@ -1,11 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { api } from "../lib/api";
 import { formatApiError, formatDate, formatSoles } from "../lib/utils";
-import {
-  Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText,
-  Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode, ScanLine, Loader2, AlertTriangle,
-  Search, Edit3, Save, X, Eye, FileUp, ChevronDown, ChevronUp
-} from "lucide-react";
+import { Upload, FileSpreadsheet, Trash2, CheckCircle2, AlertCircle, FileText, Cloud, RefreshCw, Clock, ExternalLink, Receipt, QrCode, ScanLine, Loader2, AlertTriangle, Search, Edit3, Save, X, FileUp, ChevronDown, ChevronUp } from "lucide-react";
 
 
 const REQUIRED_COLS = ["FECHA", "EMPRESA", "PLACA", "CIUDAD", "ESTACION", "PRODUCTO", "CANTIDAD_GL", "IMPORTE_TOTAL"];

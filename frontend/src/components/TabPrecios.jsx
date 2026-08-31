@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { api } from "../lib/api";
 import { formatSoles } from "../lib/utils";
-import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRight, Edit3, X, Save, RefreshCw, Star, ShieldCheck, Plus, Upload } from "lucide-react";
+import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, X, RefreshCw, Star, ShieldCheck, Plus, Upload } from "lucide-react";
 import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
 import ModalRutaGrifo from "./ModalRutaGrifo";
 import MapaGrifos from "./MapaGrifos";

@@ -1,10 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import {
-  Download, FileText, Mail, Search, BookOpen, MessageCircle,
-  Clock, AlertCircle, FileSpreadsheet, Eye, Trash2, X, Loader2, Edit3, Upload,
-} from "lucide-react";
+import { Download, FileText, Mail, Search, BookOpen, MessageCircle, Clock, FileSpreadsheet, Eye, Trash2, X, Loader2, Upload } from "lucide-react";
 import { api, API } from "../lib/api";
 import { formatSoles, formatDate } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";

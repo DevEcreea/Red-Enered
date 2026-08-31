@@ -1,10 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Loader2, Fuel, Banknote, Truck, Building2, FileCheck2,
-  CheckCircle2, Circle, AlertTriangle, ShieldCheck, BarChart3, Gauge, Users,
-  MapPin, FileText, Clock, RefreshCw, TrendingDown, Wrench, Gift, MessageCircle,
-} from "lucide-react";
+import { Loader2, Fuel, Banknote, Truck, FileCheck2, CheckCircle2, ShieldCheck, FileText, Clock, RefreshCw, Gift, MessageCircle } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
   PieChart, Pie,

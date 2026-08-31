@@ -4,11 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuloBloqueado from "./ModuloBloqueado";
 import WialonInformes from "../components/WialonInformes";
 import { toast } from "sonner";
-import {
-  Loader2, AlertTriangle, RefreshCw, ExternalLink, Users, Building2,
-  MapPin, Gauge, Clock, Truck, Plus, Power, Navigation, Route, Calendar, X, MessageCircle,
-  Video, Shield, ShieldOff, Play, Wrench, ChevronDown, Check, Map as MapIcon, FileBarChart
-} from "lucide-react";
+import { Loader2, AlertTriangle, RefreshCw, ExternalLink, Users, Building2, Gauge, Truck, Plus, Navigation, Route, Calendar, X, MessageCircle, Video, Play, Wrench, ChevronDown, Map as MapIcon, FileBarChart } from "lucide-react";
 
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";

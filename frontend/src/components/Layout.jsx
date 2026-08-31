@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck, ShieldAlert, GraduationCap,
-  LifeBuoy, Users, Database, QrCode, LogOut, Menu, Search, Bell, Mail,
+  LayoutDashboard, Fuel, Satellite, BarChart3, Receipt, ShieldCheck,
+  Users, Database, LogOut, Menu, Search, Bell, Mail,
   FileText, Wrench, Disc, AlertTriangle,
-  Wallet, Calendar, Ticket, ClipboardCheck, Car, Route, ChevronDown, ChevronLeft, ChevronRight,
+  ClipboardCheck, Car, Route, ChevronDown, ChevronLeft, ChevronRight,
   FolderCheck,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
