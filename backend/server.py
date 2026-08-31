@@ -7049,9 +7049,6 @@ app.include_router(subsidio_router)
 from abonos import abonos_router
 app.include_router(abonos_router)
 
-from gre_api import gre_router
-app.include_router(gre_router)
-
 
 # CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
 _origins_env = os.environ.get("CORS_ORIGINS", "")
