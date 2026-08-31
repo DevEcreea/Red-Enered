@@ -736,6 +736,12 @@ async def precios_mapa(
     # Vía rápida: si los precios ya traen coordenadas GPS reales (sincronizadas desde el mapa
     # de Facilito), se usan directo — nada de geocodificar ni aproximar.
     con_gps = [p for p in precios if p.get("lat") is not None and p.get("lon") is not None]
+    sin_gps = [p for p in precios if p.get("lat") is None or p.get("lon") is None]
+
+    # Los que YA traen GPS real (sincronizado de Facilito) entran directo, descartando
+    # outliers por provincia. Los que NO traen GPS se geocodifican abajo (incremental),
+    # así el mapa termina mostrando TODAS las estaciones, no solo las que traen GPS.
+    salida = []
     if con_gps:
         # Algunos operadores reportan a Facilito un GPS equivocado (p. ej. un grifo de la sierra
         # con coordenadas en la costa). Se descartan esos outliers: dentro de una misma provincia
@@ -760,7 +766,6 @@ async def precios_mapa(
                 else:
                     logger.info(f"[precios_mapa] outlier GPS descartado: {g.get('establecimiento')} "
                                 f"({g['lat']},{g['lon']}) lejos de {prov}")
-        con_gps = limpios
         salida = [{
             "preciso": True,
             "establecimiento": p.get("establecimiento"), "direccion": p.get("direccion"),
@@ -770,9 +775,7 @@ async def precios_mapa(
             "combustible": p.get("combustible"), "es_enered": bool(p.get("es_enered")),
             "acepta_factura": p.get("acepta_factura", True),
             "lat": p["lat"], "lon": p["lon"],
-        } for p in con_gps]
-        return {"ok": True, "grifos": salida, "total": len(precios),
-                "con_coordenadas": len(salida), "pendientes": 0}
+        } for p in limpios]
 
     presupuesto = {"n": max_geo}   # llamadas nuevas a Nominatim permitidas en esta request
 
@@ -791,8 +794,8 @@ async def precios_mapa(
         await asyncio.sleep(1.1)                 # respeta el límite de Nominatim (1/seg)
         return coords
 
-    salida, pendientes = [], 0
-    for p in precios:
+    pendientes = 0
+    for p in sin_gps:
         direccion = p.get("direccion") or ""
         dist = p.get("distrito") or p.get("ciudad") or ""
         prov = p.get("provincia") or ""
@@ -7045,6 +7048,9 @@ app.include_router(subsidio_router)
 
 from abonos import abonos_router
 app.include_router(abonos_router)
+
+from gre_api import gre_router
+app.include_router(gre_router)
 
 
 # CORS — supports comma-separated CORS_ORIGINS, plus FRONTEND_URL for backwards-compat
