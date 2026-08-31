@@ -194,32 +194,28 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   }, [fetchPrecios]);
 
   const provinciasDisponibles = useMemo(() => {
-    let provStatic = [];
-    if (selDepartamento && UBIGEO_PERU[selDepartamento.toUpperCase()]) {
-      provStatic = Object.keys(UBIGEO_PERU[selDepartamento.toUpperCase()]);
-    }
+    const dep = (selDepartamento || "").toUpperCase();
+    // Catálogo oficial (UBIGEO): provincias reales del departamento.
+    if (dep && UBIGEO_PERU[dep]) return Object.keys(UBIGEO_PERU[dep]).sort();
+    // Sin catálogo: derivar de los datos, descartando el nombre del departamento (dato sucio).
     let pool = precios;
-    if (selDepartamento) {
-      pool = pool.filter((p) => (p.departamento || "").toUpperCase() === selDepartamento.toUpperCase());
-    }
-    const provFromData = pool.map((p) => p.provincia);
-    return sortedUnique([...provStatic, ...provFromData]);
+    if (dep) pool = pool.filter((p) => (p.departamento || "").toUpperCase() === dep);
+    const provFromData = pool.map((p) => p.provincia).filter((v) => (v || "").toUpperCase() !== dep);
+    return sortedUnique(provFromData);
   }, [precios, selDepartamento]);
 
   const distritosDisponibles = useMemo(() => {
-    let distStatic = [];
-    if (selDepartamento && selProvincia && UBIGEO_PERU[selDepartamento.toUpperCase()]?.[selProvincia.toUpperCase()]) {
-      distStatic = UBIGEO_PERU[selDepartamento.toUpperCase()][selProvincia.toUpperCase()];
-    }
+    const dep = (selDepartamento || "").toUpperCase();
+    const prov = (selProvincia || "").toUpperCase();
+    // Catálogo oficial: distritos reales de la provincia elegida.
+    if (dep && prov && UBIGEO_PERU[dep]?.[prov]) return [...UBIGEO_PERU[dep][prov]].sort();
+    // Sin provincia (o sin catálogo): derivar de datos, descartando dept/prov (datos sucios).
     let pool = precios;
-    if (selDepartamento) {
-      pool = pool.filter((p) => (p.departamento || "").toUpperCase() === selDepartamento.toUpperCase());
-    }
-    if (selProvincia) {
-      pool = pool.filter((p) => (p.provincia || "").toUpperCase() === selProvincia.toUpperCase());
-    }
-    const distFromData = pool.map((p) => p.distrito || p.ciudad);
-    return sortedUnique([...distStatic, ...distFromData]);
+    if (dep) pool = pool.filter((p) => (p.departamento || "").toUpperCase() === dep);
+    if (prov) pool = pool.filter((p) => (p.provincia || "").toUpperCase() === prov);
+    const distFromData = pool.map((p) => p.distrito || p.ciudad)
+      .filter((v) => { const u = (v || "").toUpperCase(); return u && u !== dep && u !== prov; });
+    return sortedUnique(distFromData);
   }, [precios, selDepartamento, selProvincia]);
 
   const filteredPrecios = useMemo(() => {
