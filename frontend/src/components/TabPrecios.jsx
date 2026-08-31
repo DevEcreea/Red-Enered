@@ -404,7 +404,20 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
               Toca un departamento para ver sus estaciones y precios.
             </p>
           </div>
-          <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-brand/10 text-brand">{prodLabel}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-brand/10 text-brand">{prodLabel}</span>
+            {user?.role === "admin_enered" && (
+              <button
+                onClick={actualizarConGps}
+                disabled={syncGps}
+                title="Trae de Facilito todas las estaciones del Perú con su GPS real (tarda unos minutos)"
+                className="btn-brand text-xs px-4 py-1.5 flex items-center gap-1.5 rounded-lg font-bold disabled:opacity-60"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${syncGps ? "animate-spin" : ""}`} />
+                {syncGps ? "Sincronizando…" : "Sincronizar todo el Perú"}
+              </button>
+            )}
+          </div>
         </div>
         <MapaDepartamentos
           departamentos={listaDepartamentos}
