@@ -647,9 +647,6 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
         )}
       </div>
 
-      {/* MAPA DE LA RED DE GRIFOS */}
-      <MapaGrifos filtros={mapaFiltros} />
-
       {/* Barra de asignación masiva (aparece al marcar estaciones) */}
       {user?.role === "admin_enered" && numSel > 0 && (
         <div className="flex items-center justify-between gap-3 bg-brand/10 border border-brand/30 rounded-xl px-4 py-2.5 flex-wrap">
@@ -966,6 +963,9 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
           </div>
         </div>
       </div>
+
+      {/* MAPA DE LA RED DE GRIFOS (debajo de la lista de estaciones) */}
+      <MapaGrifos filtros={mapaFiltros} />
 
 
       {/* Modal Admin */}

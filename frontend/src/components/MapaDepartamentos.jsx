@@ -66,7 +66,7 @@ export default function MapaDepartamentos({ departamentos = [], onSelect }) {
           <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-400 z-[500]">No se pudo cargar el mapa. Usa la lista de abajo.</div>
         )}
         <MapContainer
-          bounds={PERU_BOUNDS}
+          center={[-9.2, -75.2]} zoom={5}
           style={{ height: "100%", width: "100%", background: "#ffffff" }}
           zoomControl={false} attributionControl={false}
           dragging={false} scrollWheelZoom={false} doubleClickZoom={false}
