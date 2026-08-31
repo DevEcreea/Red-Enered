@@ -5,6 +5,7 @@ import { Zap, Fuel, MapPin, TrendingDown, Filter, Search, ChevronLeft, ChevronRi
 import { UBIGEO_PERU, DEPARTAMENTOS_PERU } from "../lib/ubigeoPeru";
 import ModalRutaGrifo from "./ModalRutaGrifo";
 import MapaGrifos from "./MapaGrifos";
+import MapaDepartamentos from "./MapaDepartamentos";
 
 // Primera vista: elegir el producto (como Facilito). Cada uno mapea al valor real
 // de combustible que devuelve el backend (se resuelve por coincidencia; hay fallback).
@@ -164,7 +165,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
 
 
   const fetchPrecios = useCallback(async () => {
-    if (!producto) return; // aún en la vista de selección de producto
+    if (!producto || !selDepartamento) return; // aún eligiendo producto/departamento
     try {
       setLoading(true);
       setErrorMsg("");
@@ -385,14 +386,42 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
     );
   }
 
+  // ── SEGUNDA VISTA: mapa de departamentos ──
+  if (!selDepartamento) {
+    const prodLabel = PRODUCTOS.find((p) => p.key === producto)?.label || selCombustible;
+    return (
+      <div className="flex flex-col gap-4" data-testid="tab-precios-departamentos">
+        <div className="flex items-start justify-between flex-wrap gap-2">
+          <div>
+            <button
+              onClick={() => { setProducto(null); setSelCombustible(""); }}
+              className="text-xs font-bold text-brand hover:text-brand-hover flex items-center gap-1 mb-1"
+            >
+              <ChevronLeft className="w-4 h-4" /> Elegir otro producto
+            </button>
+            <h2 className="font-black text-xl text-neutral-900">Elige el departamento</h2>
+            <p className="text-neutral-500 text-sm">
+              Toca un departamento para ver sus estaciones y precios.
+            </p>
+          </div>
+          <span className="text-[11px] font-bold px-3 py-1 rounded-full bg-brand/10 text-brand">{prodLabel}</span>
+        </div>
+        <MapaDepartamentos
+          departamentos={listaDepartamentos}
+          onSelect={(dep) => { setSelDepartamento(dep); setSelProvincia(""); setSelDistrito(""); }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6" data-testid="tab-precios">
-      {/* Volver a elegir producto */}
+      {/* Migas: volver al mapa de departamentos */}
       <button
-        onClick={() => { setProducto(null); setSelCombustible(""); }}
+        onClick={() => { setSelDepartamento(""); setSelProvincia(""); setSelDistrito(""); }}
         className="self-start -mb-2 text-xs font-bold text-brand hover:text-brand-hover flex items-center gap-1"
       >
-        <ChevronLeft className="w-4 h-4" /> Elegir otro producto
+        <ChevronLeft className="w-4 h-4" /> Departamentos · {selDepartamento}
       </button>
 
       {/* KPIs superiores */}
