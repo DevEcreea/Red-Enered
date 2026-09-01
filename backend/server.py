@@ -1036,20 +1036,41 @@ async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_r
 
     # Marca es_enered por nombre y normaliza combustible.
     enered_names = {(n or "").upper() for n in await db.estaciones_enered.distinct("nombre_facilito")}
-    # Provincia/distrito reales cruzando el código OSINERGMIN con el padrón (para que los filtros afinen).
-    codigos = {r.get("codigo_osinergmin") for r in registros if r.get("codigo_osinergmin")}
+
+    # Provincia/distrito reales cruzando el código OSINERGMIN con el padrón. Si el padrón
+    # está vacío, se sincroniza primero (así el distrito sale correcto, no el departamento).
+    if await db.grifos_osinergmin.estimated_document_count() == 0:
+        try:
+            from services.padron_grifos import sincronizar as _sync_padron
+            await _sync_padron(db)
+        except Exception as e:
+            logger.warning(f"[sync_precios_mapa] no se pudo cargar el padrón OSINERGMIN: {e}")
+
+    # Índice por código (para el cruce) — la carga del padrón solo indexa 'ruc'.
+    try:
+        await db.grifos_osinergmin.create_index("codigo_osinergmin")
+    except Exception:
+        pass
+
+    # El código de Facilito y el del padrón pueden diferir en ceros a la izquierda/espacios;
+    # se normaliza para que el cruce no falle. Se mapea por departamento (más tolerante que $in).
+    def _ncod(c):
+        return str(c or "").strip().lstrip("0")
+    deps_sync = {(r.get("departamento") or "").upper() for r in registros}
     padron = {}
-    if codigos:
-        async for g in db.grifos_osinergmin.find(
-            {"codigo_osinergmin": {"$in": list(codigos)}},
-            {"_id": 0, "codigo_osinergmin": 1, "provincia": 1, "distrito": 1}):
-            padron[g["codigo_osinergmin"]] = g
+    async for g in db.grifos_osinergmin.find(
+        {"departamento": {"$in": list(deps_sync)}},
+        {"_id": 0, "codigo_osinergmin": 1, "provincia": 1, "distrito": 1}):
+        k = _ncod(g.get("codigo_osinergmin"))
+        if k:
+            padron[k] = g
+
     dptos = set()
     for r in registros:
         r["combustible"] = normalizar_combustible(r["combustible"])
         r["es_enered"] = (r["establecimiento"] or "").upper() in enered_names
         r["preciso"] = True   # coordenada GPS real
-        ref = padron.get(r.get("codigo_osinergmin"), {})
+        ref = padron.get(_ncod(r.get("codigo_osinergmin")), {})
         r["provincia"] = (ref.get("provincia") or r["departamento"]).upper()
         r["distrito"] = (ref.get("distrito") or "").upper()
         r["ciudad"] = r["distrito"] or r["departamento"]
