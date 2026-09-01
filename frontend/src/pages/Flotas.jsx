@@ -873,10 +873,12 @@ function TabControl({ onToast }) {
 }
 
 // ── TAB: QR ───────────────────────────────────────────────────────────────────
-function TabQR({ onToast }) {
+function TabQR({ onToast, user }) {
   const [qrq, setQrq] = useState("");
+  const [qrEmpresa, setQrEmpresa] = useState("");
   const [qrList, setQrList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const esAdmin = user?.role === "admin_enered";
 
   useEffect(() => {
     api.get("/qr/list").then(r => {
@@ -888,7 +890,22 @@ function TabQR({ onToast }) {
     });
   }, []);
 
-  const vis = qrList.filter(q => (q.placa || "").toLowerCase().includes(qrq.toLowerCase()));
+  const empresas = [...new Set(qrList.map(q => q.empresa).filter(Boolean))].sort();
+  const vis = qrList.filter(q =>
+    (q.placa || "").toLowerCase().includes(qrq.toLowerCase()) &&
+    (!qrEmpresa || q.empresa === qrEmpresa)
+  );
+
+  const handleDelete = async (q) => {
+    if (!window.confirm(`¿Eliminar el QR de la placa ${q.placa}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/admin/qr/${encodeURIComponent(q.placa)}`, { params: { empresa: q.empresa } });
+      setQrList(prev => prev.filter(x => !(x.placa === q.placa && x.empresa === q.empresa)));
+      onToast(`QR ${q.placa} eliminado`);
+    } catch (err) {
+      onToast("No se pudo eliminar el QR");
+    }
+  };
 
   const handleDownload = async (placa) => {
     try {
@@ -913,9 +930,11 @@ function TabQR({ onToast }) {
       <div style={{ color:"#6b7280",fontSize:13.5,marginTop:2,marginBottom:16 }}>Códigos QR por unidad para uso en estaciones afiliadas a la red ENERED.</div>
 
       <div style={{ display:"flex",gap:12,marginBottom:18 }}>
-        <div style={{ position:"relative",height:42,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",display:"flex",alignItems:"center",padding:"0 34px 0 14px",fontSize:14,color:"#4b5563",minWidth:220,cursor:"pointer",userSelect:"none" }}>
-          Todas las empresas<ChevronDown style={{ position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",width:16,height:16,color:"#9ca3af" }}/>
-        </div>
+        <select value={qrEmpresa} onChange={e=>setQrEmpresa(e.target.value)}
+          style={{ height:42,border:"1px solid #E5E7EB",borderRadius:10,background:"#fff",padding:"0 14px",fontSize:14,color:"#4b5563",minWidth:220,cursor:"pointer" }}>
+          <option value="">Todas las empresas</option>
+          {empresas.map(e => <option key={e} value={e}>{e}</option>)}
+        </select>
         <div style={{ position:"relative",flex:1,maxWidth:320 }}>
           <Search style={{ position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",width:16,height:16,color:"#9ca3af" }}/>
           <input style={{ ...inputSt,paddingLeft:36,height:42 }} placeholder="Buscar placa..." value={qrq} onChange={e=>setQrq(e.target.value)}/>
@@ -937,6 +956,12 @@ function TabQR({ onToast }) {
                 style={{ width:"100%",marginTop:12,background:"#8B3DFF",color:"#fff",border:"none",borderRadius:10,height:40,fontSize:13.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
                 <Download style={{ width:15,height:15 }}/>Descargar
               </button>
+              {esAdmin && (
+                <button onClick={() => handleDelete(q)}
+                  style={{ width:"100%",marginTop:8,background:"#fff",color:"#DC2626",border:"1px solid #FCA5A5",borderRadius:10,height:36,fontSize:12.5,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6 }}>
+                  <Trash2 style={{ width:14,height:14 }}/>Eliminar
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -1368,7 +1393,7 @@ export default function Flotas() {
       )}
       {activeTab==="Precios" && <TabPrecios user={user} ahorroCapturado={totals.ahorro} />}
       {activeTab==="Eventos" && <TabEventos user={user}/>}
-      {activeTab==="QR"      && <TabQR onToast={showToast}/>}
+      {activeTab==="QR"      && <TabQR onToast={showToast} user={user}/>}
       {activeTab==="Control" && <TabControl onToast={showToast}/>}
 
       <ModalNuevaCarga open={nuevaCargaOpen} initialData={editCargaData} onClose={()=>setNuevaCargaOpen(false)} onSaved={(newConsumo, isEdit)=>{
