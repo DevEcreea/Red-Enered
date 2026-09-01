@@ -1089,8 +1089,23 @@ async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_r
 
     count = await db.precios_facilito.count_documents({})
     grifos = len({(r["establecimiento"], r["lat"], r["lon"]) for r in registros})
+    # Diagnóstico del cruce de distrito con el padrón OSINERGMIN.
+    con_distrito = sum(1 for r in registros
+                       if r["distrito"] and r["distrito"] != (r["departamento"] or "").upper())
+    padron_total = await db.grifos_osinergmin.estimated_document_count()
+    sin_match = list({str(r.get("codigo_osinergmin") or "") for r in registros
+                      if not (r["distrito"] and r["distrito"] != (r["departamento"] or "").upper())})[:5]
+    padron_muestra = [g.get("codigo_osinergmin") async for g in
+                      db.grifos_osinergmin.find({}, {"_id": 0, "codigo_osinergmin": 1}).limit(5)]
     return {"ok": True, "grifos_con_gps": grifos, "registros": len(registros),
-            "borrados_viejos": borrados, "departamentos": sorted(dptos), "total_en_db": count}
+            "borrados_viejos": borrados, "departamentos": sorted(dptos), "total_en_db": count,
+            "diagnostico": {
+                "padron_total": padron_total,
+                "con_distrito_real": con_distrito,
+                "sin_distrito": len(registros) - con_distrito,
+                "codigos_facilito_sin_match": sin_match,
+                "codigos_padron_muestra": padron_muestra,
+            }}
 
 
 @api.post("/admin/precios/importar-json")

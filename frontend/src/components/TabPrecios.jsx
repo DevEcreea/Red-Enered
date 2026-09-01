@@ -68,7 +68,16 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
       const body = dep ? { departamentos: [dep.toUpperCase()] } : {};
       const { data } = await api.post("/admin/precios/sync-mapa", body, { timeout: 600000 });
       setLastSync(new Date().toISOString());
-      alert(`✅ ${data.grifos_con_gps} grifos con GPS real actualizados (${data.departamentos.join(", ")}).`);
+      const d = data.diagnostico || {};
+      alert(
+        `✅ ${data.grifos_con_gps} grifos con GPS actualizados (${data.departamentos.join(", ")}).\n\n` +
+        `Diagnóstico distrito:\n` +
+        `• Padrón OSINERGMIN cargado: ${d.padron_total ?? "?"} grifos\n` +
+        `• Con distrito real: ${d.con_distrito_real ?? "?"}\n` +
+        `• Sin distrito (quedó el depto): ${d.sin_distrito ?? "?"}\n` +
+        `• Códigos Facilito sin match: ${(d.codigos_facilito_sin_match || []).join(", ") || "—"}\n` +
+        `• Muestra códigos padrón: ${(d.codigos_padron_muestra || []).join(", ") || "—"}`
+      );
       await fetchPrecios();
     } catch (err) {
       alert("Error: " + (err.response?.data?.detail || err.message));
