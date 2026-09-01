@@ -1065,15 +1065,26 @@ async def sync_precios_mapa(payload: dict = None, user: dict = Depends(require_r
         if k:
             padron[k] = g
 
+    # Fuente PRINCIPAL del distrito: point-in-polygon con el GPS del grifo (límites
+    # distritales INEI, 1834 distritos). Cubre el 100% y no depende del padrón (que está
+    # desactualizado). El padrón queda solo como respaldo si el GPS cae fuera de todo.
+    from services.geo_distritos import ubicar as _ubicar_distrito
+
     dptos = set()
     for r in registros:
         r["combustible"] = normalizar_combustible(r["combustible"])
         r["es_enered"] = (r["establecimiento"] or "").upper() in enered_names
         r["preciso"] = True   # coordenada GPS real
+        dep_scraper = (r["departamento"] or "").upper()
+        loc = _ubicar_distrito(r.get("lat"), r.get("lon"))
         ref = padron.get(_ncod(r.get("codigo_osinergmin")), {})
-        r["provincia"] = (ref.get("provincia") or r["departamento"]).upper()
-        r["distrito"] = (ref.get("distrito") or "").upper()
-        r["ciudad"] = r["distrito"] or r["departamento"]
+        if loc and loc["departamento"] == dep_scraper:
+            r["provincia"] = loc["provincia"]
+            r["distrito"] = loc["distrito"]
+        else:
+            r["provincia"] = (ref.get("provincia") or dep_scraper).upper()
+            r["distrito"] = (ref.get("distrito") or "").upper()
+        r["ciudad"] = r["distrito"] or dep_scraper
         dptos.add(r["departamento"])
 
     # Borra TODO lo viejo del departamento (regex case-insensitive para cubrir variantes de
