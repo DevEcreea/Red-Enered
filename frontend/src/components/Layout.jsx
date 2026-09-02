@@ -474,7 +474,7 @@ export default function Layout({ children }) {
                 {empresasList.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
               <button disabled={!chooserEmpresa}
-                onClick={async () => { await enterEmpresa(chooserEmpresa); setShowChooser(false); navigate("/dashboard"); }}
+                onClick={async () => { await enterEmpresa(chooserEmpresa); setShowChooser(false); window.location.assign("/dashboard"); }}
                 className="flex-shrink-0 px-5 h-11 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm disabled:opacity-50 transition-colors"
                 data-testid="chooser-entrar">Entrar</button>
             </div>
@@ -556,7 +556,12 @@ export default function Layout({ children }) {
             {Array.isArray(user.empresas_asignadas) && user.empresas_asignadas.length >= 2 && (
               <select
                 value={user.empresa_activa || user.empresa || ""}
-                onChange={async (e) => { await enterEmpresa(e.target.value); navigate("/subsidio/documentos"); }}
+                onChange={async (e) => {
+                  await enterEmpresa(e.target.value);
+                  // Recarga completa: así TODOS los módulos vuelven a pedir datos con la
+                  // nueva empresa (navigate() no remonta si ya estás en la misma ruta).
+                  window.location.assign("/subsidio/documentos");
+                }}
                 title="Cambiar de empresa"
                 data-testid="header-empresa-switch"
                 className="hidden sm:block h-10 px-3 border border-brand/40 bg-brand/5 rounded-lg text-sm font-bold text-brand max-w-[240px] cursor-pointer hover:bg-brand/10"
