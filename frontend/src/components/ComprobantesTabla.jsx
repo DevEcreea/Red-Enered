@@ -308,7 +308,8 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
     setBuscando(true);
     const t = setTimeout(async () => {
       try {
-        const { data } = await api.get(`/subsidio/grifo/${ruc}`);
+        // La razón social ayuda al respaldo Facilito cuando el RUC no está en el CSV de OSINERGMIN
+        const { data } = await api.get(`/subsidio/grifo/${ruc}`, { params: { razon: f.razon_social_emisor || "" } });
         if (!vivo) return;
         setGrifo(data);
         if (data.inscrito) {
