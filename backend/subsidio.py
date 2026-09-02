@@ -3688,6 +3688,96 @@ async def admin_update_representante(
     return {"ok": True, "representante": payload.representante}
 
 
+@subsidio_router.post("/admin/subsidio/reordenar-multiempresa/{user_id}")
+async def admin_reordenar_multiempresa(user_id: str, dry: int = 0, _: dict = Depends(_require_admin_enered)):
+    """Reordena el expediente de un usuario multi-empresa: cada documento/vehículo/factura
+    con placa se asigna a la empresa dueña de esa placa según el MTC (cada empresa tiene
+    placas distintas). Los documentos de empresa sin placa se mueven si el nombre del
+    archivo menciona a otra de sus empresas. También corrige nombres de empresas_asignadas
+    que no calzan con la empresa real (p.ej. 'S.R.L.' vs 'SRL'). Con ?dry=1 solo reporta."""
+    import re as _re
+    import mtc as _mtc
+
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    asignadas = u.get("empresas_asignadas") or []
+    if len(asignadas) < 2:
+        raise HTTPException(status_code=400, detail="El usuario no es multi-empresa")
+
+    def _norm_emp(s):
+        return _re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+
+    # 0) Canonizar nombres de asignadas contra las empresas reales del sistema.
+    reales = set(await db.users.distinct("empresa")) | set(await db.empresas_config.distinct("empresa"))
+    reales = {r for r in reales if r}
+    canon = {_norm_emp(r): r for r in reales}
+    nombres_corregidos = []
+    for a in asignadas:
+        real = canon.get(_norm_emp(a.get("empresa")))
+        if real and real != a.get("empresa"):
+            nombres_corregidos.append({"antes": a["empresa"], "despues": real})
+            a["empresa"] = real
+    if nombres_corregidos and not dry:
+        await db.users.update_one({"id": user_id}, {"$set": {"empresas_asignadas": asignadas}})
+
+    # 1) placa → empresa vía MTC (por el RUC de cada empresa asignada).
+    def _norm_placa(p):
+        return _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
+    placa_a_empresa: dict = {}
+    errores_mtc = []
+    for a in asignadas:
+        ruc, emp = (a.get("ruc") or "").strip(), a.get("empresa")
+        if not ruc or not emp:
+            continue
+        try:
+            m = await _mtc.consultar("ruc", ruc)
+            for aut in m.get("autorizaciones", []):
+                for v in aut.get("vehiculos", []):
+                    pn = _norm_placa(v.get("placa"))
+                    if pn:
+                        placa_a_empresa.setdefault(pn, emp)
+        except Exception as e:
+            errores_mtc.append({"empresa": emp, "ruc": ruc, "error": str(e)[:120]})
+
+    movimientos = []
+    cols_con_placa = ["subsidio_documents", "subsidio_vehicles", "consumos_subsidio"]
+    for c in cols_con_placa:
+        async for d in db[c].find({"user_id": user_id, "placa": {"$nin": [None, ""]}},
+                                  {"_id": 0, "id": 1, "placa": 1, "empresa": 1, "filename": 1}):
+            destino = placa_a_empresa.get(_norm_placa(d.get("placa")))
+            if destino and destino != d.get("empresa"):
+                movimientos.append({"col": c, "id": d.get("id"), "placa": d.get("placa"),
+                                    "de": d.get("empresa"), "a": destino,
+                                    "archivo": d.get("filename", "")})
+                if not dry:
+                    await db[c].update_one({"id": d["id"]}, {"$set": {"empresa": destino}})
+
+    # 2) Docs de empresa sin placa: mover si el nombre del archivo menciona a OTRA empresa.
+    genericas = {"TRANSPORTES", "TRANSPORTE", "TRANSP", "IMPORTACIONES", "LOGISTICOS", "LOGISTICA",
+                 "OPERACIONES", "CONSTRUCCIONES", "EMPRESA", "SRL", "SAC", "EIRL", "CIA", "P"}
+    tokens_emp = {}
+    for a in asignadas:
+        toks = {t for t in _re.sub(r"[^A-Z0-9 ]", " ", (a.get("empresa") or "").upper()).split()
+                if len(t) >= 4 and t not in genericas}
+        if toks:
+            tokens_emp[a["empresa"]] = toks
+    async for d in db.subsidio_documents.find({"user_id": user_id, "$or": [{"placa": None}, {"placa": ""}]},
+                                              {"_id": 0, "id": 1, "empresa": 1, "filename": 1, "categoria": 1}):
+        fname = (d.get("filename") or "").upper()
+        for emp, toks in tokens_emp.items():
+            if emp != d.get("empresa") and any(t in fname for t in toks):
+                movimientos.append({"col": "subsidio_documents", "id": d.get("id"), "placa": None,
+                                    "de": d.get("empresa"), "a": emp, "archivo": d.get("filename", "")})
+                if not dry:
+                    await db.subsidio_documents.update_one({"id": d["id"]}, {"$set": {"empresa": emp}})
+                break
+
+    return {"ok": True, "dry": bool(dry), "nombres_corregidos": nombres_corregidos,
+            "placas_mapeadas": len(placa_a_empresa), "errores_mtc": errores_mtc,
+            "movimientos": movimientos, "total_movimientos": len(movimientos)}
+
+
 @subsidio_router.post("/admin/subsidio/backfill-empresa")
 async def admin_backfill_empresa(_: dict = Depends(_require_admin_enered)):
     """Asigna empresa a los registros ANTIGUOS del expediente que se grabaron sin ella
