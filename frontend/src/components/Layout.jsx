@@ -59,6 +59,7 @@ const ADMIN_ITEMS = [
       { to: "/atu", label: "Diagnóstico ATU", testid: "nav-atu", mkey: "atu" },
       { to: "/admin/atu", label: "Conexión ATU", testid: "nav-admin-atu", mkey: "atu_conexion" },
       { to: "/admin/sire", label: "Compras SUNAT", testid: "nav-admin-sire", mkey: "sire" },
+      { to: "/testing", label: "Testing", testid: "nav-testing", mkey: "atu" },
     ],
   },
 ];
