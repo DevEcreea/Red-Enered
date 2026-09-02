@@ -1037,7 +1037,7 @@ function InvoiceEditModal({ inv, onClose, onSaved }) {
           </div>
 
           {/* Fila 4: Monto + Saldo + Moneda */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-widest text-neutral-500 mb-1">Monto Total (S/)</label>
               <input

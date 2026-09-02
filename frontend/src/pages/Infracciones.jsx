@@ -483,7 +483,7 @@ export default function Infracciones() {
                     </select>
                   </Field>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Field label="Fecha" required><input required type="date" value={form.fecha || ""} onChange={(e) => setForm({ ...form, fecha: e.target.value })} className={inputCls} /></Field>
                   <Field label="Código" required><input required value={form.codigo || ""} onChange={(e) => setForm({ ...form, codigo: e.target.value })} className={inputCls} placeholder="M02, G28..." /></Field>
                   <Field label="Papeleta"><input value={form.papeleta || ""} onChange={(e) => setForm({ ...form, papeleta: e.target.value })} className={inputCls} /></Field>
@@ -491,7 +491,7 @@ export default function Infracciones() {
                 <Field label="Descripción" required>
                   <input required value={form.descripcion || ""} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} className={inputCls} />
                 </Field>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <Field label="Monto (S/)" required><input required type="number" step="0.01" value={form.monto || ""} onChange={(e) => setForm({ ...form, monto: e.target.value })} className={inputCls} /></Field>
                   <Field label="Estado" required>
                     <select required value={form.estado || "pendiente"} onChange={(e) => setForm({ ...form, estado: e.target.value })} className={inputCls}>

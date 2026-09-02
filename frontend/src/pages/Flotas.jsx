@@ -329,13 +329,13 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
   return (
     <div>
       {/* Big KPIs — SIN sparklines, solo números reales */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:20 }}>
         {BIG_CARDS_META.map((k,i)=>{
           const Icon = k.ic;
           return (
             <div key={i} style={{ position:"relative",background:"#fff",borderRadius:20,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:"22px 24px",overflow:"hidden",minHeight:130 }}>
-              <div style={{ fontSize:36,fontWeight:700,color:"#111827",lineHeight:1.1 }} data-testid={`combustible-kpi-${k.key}`}>{kpiValues[k.key]}</div>
-              <div style={{ fontSize:15,color:"#6b7280",marginTop:10,maxWidth:"75%" }}>{k.lab}</div>
+              <div style={{ fontSize:"clamp(24px,5.2vw,36px)",fontWeight:700,color:"#111827",lineHeight:1.1,whiteSpace:"nowrap" }} data-testid={`combustible-kpi-${k.key}`}>{kpiValues[k.key]}</div>
+              <div style={{ fontSize:14,color:"#6b7280",marginTop:10 }}>{k.lab}</div>
               <div style={{ position:"absolute",top:22,right:22,opacity:.85,color:k.col }}>
                 <Icon style={{ width:26,height:26 }}/>
               </div>
@@ -345,7 +345,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
       </div>
 
       {/* Small KPIs row 2 — Ahorro se oculta si no tiene services.combustible */}
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:20,marginTop:20 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginTop:20 }}>
         <div style={{ borderRadius:16,padding:"16px 20px",minHeight:78,background:"#fff",boxShadow:"0 2px 8px rgba(0,0,0,.05)",position:"relative",display:"flex",flexDirection:"column",justifyContent:"center" }}>
           <span style={{ fontSize:11,color:"#9ca3af",fontWeight:600,letterSpacing:".04em",textTransform:"uppercase" }}>Cargas</span>
           <span style={{ fontSize:26,fontWeight:700,color:"#111827",marginTop:2 }} data-testid="combustible-kpi-cargas">{filteredRows.length}</span>
@@ -944,7 +944,7 @@ function TabQR({ onToast, user }) {
       {loading ? (
         <div style={{ textAlign:"center",padding:40,color:"#9ca3af" }}>Cargando QR...</div>
       ) : vis.length > 0 ? (
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:18 }}>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:18 }}>
           {vis.map((q, i) => (
             <div key={i} style={{ background:"#fff",border:"1px solid #EFEFF3",borderRadius:16,boxShadow:"0 2px 8px rgba(0,0,0,.05)",padding:14,display:"flex",flexDirection:"column",alignItems:"center" }}>
               <div style={{ width:"100%",aspectRatio:"1",borderRadius:12,background:"linear-gradient(135deg,#F5F1FF,#EDE7FA)",display:"flex",alignItems:"center",justifyContent:"center",padding:22 }}>
@@ -1363,7 +1363,7 @@ export default function Flotas() {
     <div style={{ padding:"22px 26px", background:"transparent", minHeight:"100%" }} data-testid="flotas-page">
       <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} />
       {/* TABS */}
-      <div style={{ display:"flex",alignItems:"center",gap:38,marginBottom:20 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:38,marginBottom:20,overflowX:"auto" }}>
         {TABS.map(t=>(
           <button key={t} onClick={()=>setActiveTab(t)} style={{
             fontSize:19,fontWeight:activeTab===t?700:500,

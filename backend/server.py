@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.7.0-multiempresa",
+        "version": "1.7.1-backfill-grifos",
     }
 
 # ============================================================

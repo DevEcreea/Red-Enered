@@ -1065,7 +1065,7 @@ function DocItem({ item, onChange, hint, accept, acceptLabel }) {
             {subido ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
               <div className="min-w-0">
                 <div className="font-bold text-neutral-900 text-sm">{item.placa ? item.label.split(" — ")[0] : item.label}</div>
                 <div className="text-xs text-neutral-500 mt-0.5 line-clamp-1">{item.detalle}</div>

@@ -906,13 +906,15 @@ async def subsidio_ficha_ruc(user: dict = Depends(_require_subsidio), ruc: Optio
 
 
 @subsidio_router.get("/subsidio/grifo/{ruc}")
-async def subsidio_grifo(ruc: str, user: dict = Depends(_require_subsidio)):
+async def subsidio_grifo(ruc: str, razon: str = "", user: dict = Depends(_require_subsidio)):
     """
     Autocompleta los datos del grifo (razón social, ubicación, dirección) desde el padrón
     de OSINERGMIN, e indica si está inscrito. Alimenta la sección 'GRIFO' del formulario ATU.
+    Si el RUC no figura en el CSV de Datos Abiertos (incompleto), busca la razón social en
+    las estaciones de Facilito antes de marcarlo en rojo.
     """
     from services.padron_grifos import buscar_por_ruc
-    g = await buscar_por_ruc(db, ruc)
+    g = await buscar_por_ruc(db, ruc, razon_social=razon or None)
     if g is None:
         raise HTTPException(status_code=400, detail="RUC inválido (11 dígitos)")
     return g
@@ -932,9 +934,10 @@ async def subsidio_extraer_comprobante(file: UploadFile = File(...), user: dict 
     from services.padron_grifos import buscar_por_ruc
     datos = extraer(contenido, file.filename or "")
 
-    # Completar los datos del grifo desde OSINERGMIN con el RUC del emisor.
+    # Completar los datos del grifo desde OSINERGMIN con el RUC del emisor
+    # (con respaldo Facilito por razón social si el CSV no lo tiene).
     if datos.get("ruc_emisor"):
-        g = await buscar_por_ruc(db, datos["ruc_emisor"])
+        g = await buscar_por_ruc(db, datos["ruc_emisor"], razon_social=datos.get("razon_social_emisor"))
         if g:
             datos["grifo"] = g
             if g.get("inscrito"):
@@ -3683,6 +3686,31 @@ async def admin_update_representante(
         }}
     )
     return {"ok": True, "representante": payload.representante}
+
+
+@subsidio_router.post("/admin/subsidio/backfill-empresa")
+async def admin_backfill_empresa(_: dict = Depends(_require_admin_enered)):
+    """Asigna empresa a los registros ANTIGUOS del expediente que se grabaron sin ella
+    (antes del soporte multi-empresa). Sin empresa, esos registros caen al filtro por
+    user_id y un usuario con varias empresas los ve en todas. Se asignan a la empresa
+    base del usuario que los subió (el único contexto que existía entonces). Idempotente."""
+    cols = ["subsidio_documents", "consumos_subsidio", "subsidio_vehicles",
+            "subsidio_bank_accounts", "subsidio_declaraciones", "subsidio_vehicles_excluidos"]
+    asignados: dict = {}
+    usuarios = 0
+    async for u in db.users.find(
+        {"role": {"$ne": "admin_enered"}, "empresa": {"$nin": [None, ""]}},
+        {"_id": 0, "id": 1, "empresa": 1},
+    ):
+        usuarios += 1
+        for c in cols:
+            r = await db[c].update_many(
+                {"user_id": u["id"], "$or": [{"empresa": {"$in": [None, ""]}}, {"empresa": {"$exists": False}}]},
+                {"$set": {"empresa": u["empresa"]}},
+            )
+            if r.modified_count:
+                asignados[c] = asignados.get(c, 0) + r.modified_count
+    return {"ok": True, "usuarios_revisados": usuarios, "asignados": asignados}
 
 
 @subsidio_router.post("/admin/subsidio/expedientes/{user_id}/vehicles")

@@ -715,7 +715,7 @@ export default function Documentacion() {
       <Toast msg={toast}/>
       <PdfViewerModal open={viewerOpen} url={viewerUrl} title={viewerTitle} onClose={() => setViewerOpen(false)} />
       {/* TABS */}
-      <div style={{ display:"flex",alignItems:"center",gap:28,borderBottom:"1px solid #E5E7EB",marginBottom:22 }}>
+      <div style={{ display:"flex",alignItems:"center",gap:28,borderBottom:"1px solid #E5E7EB",marginBottom:22,overflowX:"auto" }}>
         {TABS.map(({ key, icon:Icon })=>(
           <button key={key} onClick={()=>{ setTab(key); setVerArch(false); setOpenMenu(null); }} style={{
             position:"relative",display:"flex",alignItems:"center",gap:8,paddingBottom:12,
@@ -729,7 +729,7 @@ export default function Documentacion() {
       </div>
 
       {/* KPIs */}
-      <div style={{ display:"grid",gridTemplateColumns:`repeat(${kpis.length},1fr)`,gap:20,marginBottom:22 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:20,marginBottom:22 }}>
         {kpis.map((k,i)=>(
           <KpiCard key={i} icon={k.icon} value={k.n} label={k.l} iconColor={k.iconColor} iconBg={k.iconBg}/>
         ))}
@@ -1878,7 +1878,7 @@ export default function Documentacion() {
               <h2 style={{ fontSize:19,fontWeight:700,color:"#1f2937" }}>Seleccionar tipo de documento</h2>
               <button onClick={()=>setTypeModal(false)} style={{ background:"none",border:"none",cursor:"pointer",color:"#9ca3af" }}><X style={{ width:20,height:20 }}/></button>
             </div>
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12 }}>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12 }}>
               {DOCTYPES.map(([name, premium],i)=>(
                 <button key={i} onClick={()=>{ setTypeModal(false); setAddForm(name); setNewDoc({}); }}
                   style={{ display:"flex",alignItems:"center",gap:12,border:"1px solid #E5E7EB",borderRadius:12,padding:14,background:"#fff",cursor:"pointer",textAlign:"left",transition:"border-color .15s" }}

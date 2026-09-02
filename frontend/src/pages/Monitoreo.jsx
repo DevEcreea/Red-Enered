@@ -321,7 +321,7 @@ Ubicación/Dirección: ${formData.direccion}`;
             </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* Toggle Mapa | Informes */}
           <div style={{ display: "inline-flex", background: "#F3F4F6", borderRadius: 8, padding: 3 }}>
             <button onClick={() => setView("mapa")} data-testid="view-mapa"

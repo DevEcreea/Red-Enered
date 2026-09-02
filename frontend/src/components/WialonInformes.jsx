@@ -365,7 +365,7 @@ function KpiRow({ tables }) {
 
   if (!kpis.length) return null;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(kpis.length, 5)}, 1fr)`, gap: 12 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
       {kpis.map((k, i) => (
         <div key={i} style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", padding: "14px 16px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, color: k.color, fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em" }}>{k.icon}{k.label}</div>

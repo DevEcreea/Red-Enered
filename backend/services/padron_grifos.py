@@ -84,16 +84,79 @@ async def sincronizar(db) -> dict:
     return {"establecimientos": len(docs), "rucs": len({d['ruc'] for d in docs}), "actualizado_en": ahora}
 
 
-async def buscar_por_ruc(db, ruc: str) -> dict | None:
+# Palabras genéricas que no identifican al grifo (para el match por razón social).
+_GENERICAS = {
+    "ESTACION", "ESTACIN", "DE", "SERVICIOS", "SERVICIO", "SERVICENTRO", "GRIFO", "GRIFOS",
+    "S", "A", "C", "SA", "SAC", "SRL", "EIRL", "SCRL", "E", "I", "R", "L", "Y", "DEL", "LA",
+    "EL", "LOS", "LAS", "EMPRESA", "CORPORACION", "INVERSIONES", "COMBUSTIBLES", "MULTISERVICIOS",
+}
+
+
+def _tokens_significativos(nombre: str) -> list[str]:
+    import re as _re
+    limpio = _re.sub(r"[^A-Z0-9 ]", " ", (nombre or "").upper())
+    return [t for t in limpio.split() if len(t) >= 3 and t not in _GENERICAS]
+
+
+async def _buscar_en_facilito(db, razon_social: str) -> list[dict]:
+    """Respaldo: el padrón CSV de Datos Abiertos está incompleto, pero toda estación
+    que declara precios en Facilito está inscrita en OSINERGMIN por definición.
+    Busca el establecimiento por los tokens distintivos de la razón social."""
+    import re as _re
+    tokens = _tokens_significativos(razon_social)
+    if not tokens:
+        return []
+    cond = [{"establecimiento": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]
+    rows = await db.precios_facilito.find(
+        {"$and": cond},
+        {"_id": 0, "establecimiento": 1, "codigo_osinergmin": 1, "direccion": 1,
+         "departamento": 1, "provincia": 1, "distrito": 1},
+    ).to_list(300)
+    # un local por código osinergmin
+    vistos, locales = set(), []
+    for r in rows:
+        cod = r.get("codigo_osinergmin") or r.get("direccion")
+        if cod in vistos:
+            continue
+        vistos.add(cod)
+        locales.append(r)
+    return locales
+
+
+async def buscar_por_ruc(db, ruc: str, razon_social: str | None = None) -> dict | None:
     """
     Devuelve los datos del grifo para autocompletar el formulario de la ATU.
     Si el RUC tiene varios locales, devuelve el primero y cuántos hay.
+    Si el RUC no está en el padrón CSV, intenta por razón social en Facilito
+    (padrón vivo de OSINERGMIN) antes de marcarlo como no inscrito.
     """
     ruc = (ruc or "").strip()
     if len(ruc) != 11 or not ruc.isdigit():
         return None
     docs = await db[COLECCION].find({"ruc": ruc}, {"_id": 0}).to_list(200)
     if not docs:
+        if razon_social:
+            fac = await _buscar_en_facilito(db, razon_social)
+            if fac:
+                f0 = fac[0]
+                return {
+                    "ruc": ruc, "inscrito": True, "fuente": "OSINERGMIN (vía Facilito)",
+                    "razon_social": razon_social,
+                    "codigo_osinergmin": f0.get("codigo_osinergmin", ""),
+                    "direccion": f0.get("direccion", ""),
+                    "departamento": (f0.get("departamento") or "").upper(),
+                    "provincia": (f0.get("provincia") or "").upper(),
+                    "distrito": (f0.get("distrito") or "").upper(),
+                    "vigencia": "VIGENTE (declara precios en Facilito)",
+                    "locales": [
+                        {"direccion": x.get("direccion", ""), "distrito": (x.get("distrito") or "").upper(),
+                         "provincia": (x.get("provincia") or "").upper(),
+                         "departamento": (x.get("departamento") or "").upper(),
+                         "codigo_osinergmin": x.get("codigo_osinergmin", "")}
+                        for x in fac
+                    ],
+                    "total_locales": len(fac),
+                }
         return {"ruc": ruc, "inscrito": False, "locales": []}
     d = dict(docs[0])
     d["inscrito"] = True

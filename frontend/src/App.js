@@ -41,6 +41,7 @@ import PreciosPublico from "./pages/PreciosPublico";
 import AdminSire from "./pages/AdminSire";
 import SubsidioDU007 from "./pages/SubsidioDU007";
 import SubsidioDiagnostico from "./pages/SubsidioDiagnostico";
+import TestingVerificacion from "./pages/TestingVerificacion";
 import AdminUsers from "./pages/AdminUsers";
 import AdminUpload from "./pages/AdminUpload";
 import AdminQRUpload from "./pages/AdminQRUpload";
@@ -125,6 +126,7 @@ function App() {
           <Route path="/precios" element={<PreciosPublico />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
           <Route path="/subsidio/diagnostico" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDiagnostico /></Shell>} />
+          <Route path="/testing" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><TestingVerificacion /></Shell>} />
           <Route path="/subsidio/documentos" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDocumentos /></Shell>} />
           <Route path="/subsidio/du007" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDU007 /></Shell>} />
           <Route path="/dashboard-subsidio" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><DashboardSubsidioView /></Shell>} />          <Route path="/subsidio/verificar" element={<Shell roles={["cliente_subsidio"]}><SubsidioVerificar /></Shell>} />

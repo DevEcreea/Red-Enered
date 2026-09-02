@@ -139,7 +139,7 @@ function Toggle({ label, checked, onChange }) {
 function EstadoSelector({ value, onChange, disabled }) {
   return (
     <div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:4 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(88px,1fr))",gap:8,marginTop:4 }}>
         {ESTADOS.map(e => {
           const active = (value||"OPERATIVO").toUpperCase() === e.value;
           return (
@@ -439,7 +439,7 @@ export default function Vehiculos() {
       {tab==="vehiculos"&&(<>
 
         {/* KPIs — computados desde /api/vehiculos/kpis y datos locales */}
-        <div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:16,marginBottom:16 }}>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:16 }}>
           <KpiCard 
             label="GPS" 
             value={String(vehiculos.length)} 
@@ -475,7 +475,7 @@ export default function Vehiculos() {
               <button onClick={exportExcel} style={{ width:34,height:34,border:"none",borderRadius:8,background:"#F3F4F6",color:"#6b7280",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}><Upload style={{ width:16,height:16 }}/></button>
               <button onClick={exportPDF}   style={{ width:34,height:34,border:"none",borderRadius:8,background:"#F3F4F6",color:"#6b7280",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center" }}><Download style={{ width:16,height:16 }}/></button>
             </div>
-            <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"22px 32px" }}>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:"22px 32px" }}>
               <FilterField label="Marca"    dropdown value={fMarca}  onChange={setFMarca}   options={["Chevrolet","Ford","Mercedes-Benz","Kenworth","Volvo"]} />
               <FilterField label="Estados"  dropdown value={fEstado} onChange={setFEstado}  options={ESTADOS.map(e=>({ value:e.value, label:e.label }))} />
               <FilterField label="Unidad"           value={fUnidad}  onChange={setFUnidad} />
@@ -672,7 +672,7 @@ export default function Vehiculos() {
                             </div>
                             {/* RIGHT: stats + controles */}
                             <div style={{ borderLeft:"1px solid #E5E7EB",paddingLeft:24 }}>
-                              <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16 }}>
+                              <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:12,marginBottom:16 }}>
                                 {[["$0","Costo/km"],["0","Promedio Km/Día"],["0","Recorrido Km"]].map(([val,sub],j)=>(
                                   <div key={j}>
                                     <div style={{ fontWeight:700,color:"#1f2937",fontSize:20 }}>{val}</div>
@@ -813,7 +813,7 @@ export default function Vehiculos() {
       {/* ══════════ DISPOSITIVOS GPS ══════════ */}
       {tab==="dispositivos"&&(
         <div>
-          <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:16 }}>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,marginBottom:16 }}>
             {[
               { label:"Dispositivos",v:"0",icon:Cpu,    color:"#8B3DFF",bg:"#F1EAFF" },
               { label:"Reportando",  v:"0",icon:Wifi,   color:"#059669",bg:"#ECFDF5" },

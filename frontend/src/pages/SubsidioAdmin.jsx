@@ -103,7 +103,7 @@ export default function SubsidioAdmin() {
             <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Subsidio · Expedientes</h2>
             <p className="text-neutral-500 text-sm mt-1">Vista de todos los clientes del subsidio y su avance.</p>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Kpi label="Empresas" value={stats.total} />
             <Kpi label="Enviadas ATU" value={stats.submitted} color="emerald" />
             <Kpi label="Ahorro est." value={`S/ ${num(stats.ahorroEst)}`} color="violet" />

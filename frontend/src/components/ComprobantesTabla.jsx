@@ -473,7 +473,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
                 ¿Tiene nota de crédito?
               </label>
               {f.tiene_nc && (
-                <div className="grid grid-cols-3 gap-3 flex-1 min-w-[300px]">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 min-w-[300px]">
                   <div><label className={lbl}>Serie N/C</label><input className={inp} value={f.serie_nc} onChange={set("serie_nc")} /></div>
                   <div><label className={lbl}>Número N/C</label><input className={inp} value={f.numero_nc} onChange={set("numero_nc")} /></div>
                   <div><label className={lbl}>Alcance</label>
