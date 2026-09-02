@@ -156,6 +156,29 @@ async def _get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
+        # Cambio de empresa (X-Impersonate-Empresa), mismo contrato que server.py.
+        # Sin esto, un cliente con varias empresas operaba SIEMPRE sobre su empresa base
+        # y el expediente de una empresa mostraba los vehículos/consumos de las otras.
+        imp = (request.headers.get("X-Impersonate-Empresa") or "").strip()
+        if imp:
+            if user.get("role") == "admin_enered":
+                rep = (await db.users.find_one({"empresa": imp, "role": "cliente_subsidio"}, {"_id": 0, "password_hash": 0})
+                       or await db.users.find_one({"empresa": imp, "role": {"$ne": "admin_enered"}}, {"_id": 0, "password_hash": 0}))
+                if rep:
+                    eff = dict(rep)
+                    eff["_admin_id"] = user.get("id")
+                    eff["_admin_role"] = user.get("role")
+                    eff["_impersonando"] = True
+                    return eff
+            else:
+                asignadas = user.get("empresas_asignadas") or []
+                match = next((e for e in asignadas if (e or {}).get("empresa") == imp), None)
+                if match:
+                    eff = dict(user)
+                    eff["empresa"] = match.get("empresa")
+                    eff["ruc"] = match.get("ruc", "")
+                    eff["_empresa_activa"] = match.get("empresa")
+                    return eff
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesión expirada")
@@ -163,12 +186,36 @@ async def _get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token inválido")
 
 
-async def _get_company_uids(user_id: str) -> list[str]:
-    u = await db.users.find_one({"id": user_id})
-    if u and u.get("empresa"):
-        users = await db.users.find({"empresa": u["empresa"]}).to_list(100)
-        return [usr["id"] for usr in users]
-    return [user_id]
+async def _get_company_uids(user) -> list[str]:
+    """uids de la empresa EFECTIVA del usuario (respeta el cambio de empresa del
+    header). Acepta el dict del usuario efectivo; por compatibilidad también un id
+    (en ese caso resuelve al usuario base desde la BD). Incluye a los usuarios
+    multi-empresa que tienen esa empresa en empresas_asignadas."""
+    if isinstance(user, str):
+        user = await db.users.find_one({"id": user}) or {"id": user}
+    uids = [user["id"]] if user.get("id") else []
+    emp = user.get("empresa")
+    if emp:
+        async for x in db.users.find(
+            {"$or": [{"empresa": emp}, {"empresas_asignadas.empresa": emp}]},
+            {"_id": 0, "id": 1},
+        ):
+            if x.get("id") and x["id"] not in uids:
+                uids.append(x["id"])
+    return uids or [user.get("id")]
+
+
+def _own_q(user, uids) -> dict:
+    """Filtro de propiedad del expediente con soporte multi-empresa: el mismo
+    usuario puede pertenecer a varias empresas, así que manda el campo `empresa`
+    del documento (la empresa activa). Los documentos antiguos sin empresa caen
+    al filtro por user_id. `user` puede ser el dict efectivo o un nombre de empresa."""
+    emp = user.get("empresa") if isinstance(user, dict) else user
+    base = {"user_id": {"$in": uids}}
+    if not emp:
+        return base
+    base["$and"] = [{"$or": [{"empresa": emp}, {"empresa": {"$in": [None, ""]}}]}]
+    return base
 
 
 async def _require_subsidio(request: Request) -> dict:
@@ -908,9 +955,9 @@ async def subsidio_extraer_comprobante(file: UploadFile = File(...), user: dict 
 async def subsidio_plantilla_masiva(user: dict = Depends(_require_subsidio)):
     """Descarga la plantilla ENERED de carga masiva, ya con la flota del transportista."""
     from services.carga_masiva import generar_plantilla
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     vehiculos = await db.subsidio_vehicles.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
+        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(500)
     xlsx = generar_plantilla(empresa=user.get("empresa") or "", ruc=user.get("ruc") or "",
                              vehiculos=vehiculos)
@@ -942,16 +989,16 @@ async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict
     if not filas:
         raise HTTPException(status_code=400, detail="La plantilla no tiene filas con datos")
 
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     vehiculos = await db.subsidio_vehicles.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
+        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(500)
     _np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
     placas = {_np(v["placa"]) for v in vehiculos}
     cats = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
 
     previas = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
+        _own_q(user, uids), {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
     ).to_list(3000)
     vistos = {(str(p.get("ruc_emisor") or "").strip(), str(p.get("numero_documento") or "").strip().upper(),
                _np(p.get("placa"))) for p in previas if p.get("numero_documento")}
@@ -1147,15 +1194,15 @@ async def subsidio_validation_state(user: dict = Depends(_require_subsidio)):
     - confirmed: facturas ya validadas (status=confirmed → alimentan los KPIs)
     - pending_validation: subió facturas pero aún ninguna fue validada
     """
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     # Total de facturas que el cliente subió (cualquier estado, incluido draft)
-    uploaded = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}})
+    uploaded = await db.consumos_subsidio.count_documents(_own_q(user, uids))
     # "visible" = facturas con datos REALES reconocidos que ya alimentan los KPIs.
     # Clave: una factura puede estar 'confirmed' pero con galones/importe en 0/null porque
     # el OCR no extrajo o ENERED aún no la validó — en ese caso los KPIs salen en 0 y el
     # aviso DEBE mostrarse. Por eso exigimos galones > 0 (dato real), no solo status.
     visible = await db.consumos_subsidio.count_documents({
-        "user_id": {"$in": uids},
+        **_own_q(user, uids),
         "status": "confirmed",
         "origin": {"$ne": "admin_ocr"},
         "estacion": {"$ne": "ENERED"},
@@ -1166,8 +1213,8 @@ async def subsidio_validation_state(user: dict = Depends(_require_subsidio)):
     if empresa:
         fleet = await db.consumptions.count_documents({"EMPRESA": empresa})
     # ¿el cliente ya empezó a cargar su expediente? (facturas, documentos o vehículos)
-    docs = await db.subsidio_documents.count_documents({"user_id": {"$in": uids}})
-    vehicles = await db.subsidio_vehicles.count_documents({"user_id": {"$in": uids}})
+    docs = await db.subsidio_documents.count_documents(_own_q(user, uids))
+    vehicles = await db.subsidio_vehicles.count_documents(_own_q(user, uids))
     started = uploaded > 0 or docs > 0 or vehicles > 0
     validated = visible > 0 or fleet > 0
     return {
@@ -1194,14 +1241,14 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     # Cálculo
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
 
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     
     # Vehículos
     vehicles_dict = {}
     
     # Placas que el cliente quitó del expediente (la flota principal no se toca).
     _excl = await db.subsidio_vehicles_excluidos.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+        _own_q(user, uids), {"_id": 0, "placa": 1}).to_list(500)
     excluidas = {e.get("placa") for e in _excl}
 
     # Traer primero los de la flota principal si hay empresa
@@ -1219,7 +1266,7 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
             }
             
     # Traer los del modulo subsidio (sobreescriben si hay duplicados por placa)
-    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(500)
+    sub_veh = await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0}).to_list(500)
     for sv in sub_veh:
         placa = (sv.get("placa") or "").strip().upper()
         if not placa: continue
@@ -1229,13 +1276,13 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
 
     # Documentos
     docs = await db.subsidio_documents.find(
-        {"user_id": {"$in": uids}}, {"_id": 0}
+        _own_q(user, uids), {"_id": 0}
     ).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
 
     # Cuenta bancaria + evidencia del CCI (voucher/captura que respalda la cuenta)
     bank = await db.subsidio_bank_accounts.find_one(
-        {"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)]
+        _own_q(user, uids), {"_id": 0}, sort=[("updated_at", -1)]
     )
     evidencia_cci = [d for d in docs if d["categoria"] == "evidencia_cci"]
 
@@ -1347,14 +1394,14 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
     )
 
     # Conteos de facturas (drafts y confirmadas)
-    invoices_draft = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "draft"})
-    invoices_confirmed = await db.consumos_subsidio.count_documents({"user_id": {"$in": uids}, "status": "confirmed"})
+    invoices_draft = await db.consumos_subsidio.count_documents({**_own_q(user, uids), "status": "draft"})
+    invoices_confirmed = await db.consumos_subsidio.count_documents({**_own_q(user, uids), "status": "confirmed"})
     
     # Calcular ahorro_reconocido real (galones confirmados * 4)
     ahorro_reconocido_real = 0
     if invoices_confirmed > 0:
         agg = await db.consumos_subsidio.aggregate([
-            {"$match": {"user_id": {"$in": uids}, "status": "confirmed"}},
+            {"$match": {**_own_q(user, uids), "status": "confirmed"}},
             {"$group": {"_id": None, "total_gal": {"$sum": "$galones"}}}
         ]).to_list(1)
         if agg and agg[0].get("total_gal"):
@@ -1396,19 +1443,19 @@ async def aceptar_declaracion(
     if not payload.accepted:
         raise HTTPException(status_code=400, detail="Debes marcar la casilla de aceptación")
 
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     
     # Idempotente: si ya aceptó alguien de la empresa, devolver el registro existente
-    existing = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0})
+    existing = await db.subsidio_declaraciones.find_one(_own_q(user, uids), {"_id": 0})
     if existing:
         return {"ok": True, "declaracion": existing, "already": True}
 
     # Validar que hayan terminado etapas 1, 2 y 3
     drafts_pendientes = await db.consumos_subsidio.count_documents(
-        {"user_id": {"$in": uids}, "status": "draft"}
+        {**_own_q(user, uids), "status": "draft"}
     )
     confirmadas = await db.consumos_subsidio.count_documents(
-        {"user_id": {"$in": uids}, "status": "confirmed"}
+        {**_own_q(user, uids), "status": "confirmed"}
     )
     if drafts_pendientes > 0:
         raise HTTPException(status_code=400, detail="Aún tienes facturas en borrador. Confírmalas antes de firmar la declaración.")
@@ -1416,9 +1463,9 @@ async def aceptar_declaracion(
         raise HTTPException(status_code=400, detail="Debes subir y confirmar al menos una factura de combustible.")
 
     # Verificar docs empresa + flota subidos
-    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
+    docs = await db.subsidio_documents.find(_own_q(user, uids), {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0}).to_list(200)
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
     # Todos los documentos deben estar adjuntos: la verificación en línea (SUNAT/MTC) es
     # un apoyo para el cliente, pero no reemplaza el archivo en el expediente.
@@ -1470,8 +1517,8 @@ async def aceptar_declaracion(
 
 @subsidio_router.get("/subsidio/declaracion")
 async def get_declaracion(user: dict = Depends(_require_subsidio)):
-    uids = await _get_company_uids(user["id"])
-    rec = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
+    uids = await _get_company_uids(user)
+    rec = await db.subsidio_declaraciones.find_one(_own_q(user, uids), {"_id": 0}, sort=[("accepted_at", -1)])
     return {"declaracion": rec}
 
 
@@ -1531,8 +1578,8 @@ async def upload_document(
 
 @subsidio_router.delete("/subsidio/documents/{doc_id}")
 async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    uids = await _get_company_uids(user["id"])
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}})
+    uids = await _get_company_uids(user)
+    d = await db.subsidio_documents.find_one({"id": doc_id, **_own_q(user, uids)})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     try:
@@ -1545,8 +1592,8 @@ async def delete_document(doc_id: str, user: dict = Depends(_require_subsidio)):
 
 @subsidio_router.get("/subsidio/documents/{doc_id}/download")
 async def download_document(doc_id: str, user: dict = Depends(_require_subsidio)):
-    uids = await _get_company_uids(user["id"])
-    d = await db.subsidio_documents.find_one({"id": doc_id, "user_id": {"$in": uids}}, {"_id": 0})
+    uids = await _get_company_uids(user)
+    d = await db.subsidio_documents.find_one({"id": doc_id, **_own_q(user, uids)}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     return storage.download_response(d["storage_key"], d["filename"], d.get("content_type", "application/octet-stream"))
@@ -1561,9 +1608,9 @@ async def my_docs_summary(user: dict = Depends(_require_subsidio)):
       - por_placa: { "ABC-123": [{...docs de esa placa...}], ... }
       - combustible: [{...docs comprobantes...}]
     """
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     docs = await db.subsidio_documents.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}
+        _own_q(user, uids), {"_id": 0, "storage_key": 0}
     ).sort("uploaded_at", -1).to_list(2000)
 
     empresa = []
@@ -1605,12 +1652,12 @@ async def update_bank_account(payload: BankAccountIn, user: dict = Depends(_requ
     if not payload.es_banco_nacion and not payload.cci:
         raise HTTPException(status_code=400, detail="CCI obligatorio si no es Banco de la Nación")
     doc = payload.model_dump()
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     doc["user_id"] = user["id"]
     doc["empresa"] = user.get("empresa")
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
     # Find existing bank account for company or insert new
-    existing = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}})
+    existing = await db.subsidio_bank_accounts.find_one(_own_q(user, uids))
     if existing:
         await db.subsidio_bank_accounts.update_one({"user_id": existing["user_id"]}, {"$set": doc})
     else:
@@ -1621,11 +1668,11 @@ async def update_bank_account(payload: BankAccountIn, user: dict = Depends(_requ
 @subsidio_router.post("/subsidio/vehicles")
 async def add_vehicle(payload: VehicleIn, user: dict = Depends(_require_subsidio)):
     placa = payload.placa.upper().strip()
-    uids = await _get_company_uids(user["id"])
-    if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa}):
+    uids = await _get_company_uids(user)
+    if await db.subsidio_vehicles.find_one({**_own_q(user, uids), "placa": placa}):
         raise HTTPException(status_code=409, detail="La placa ya está registrada en la empresa")
     # Si estaba excluida del expediente (se borró antes), re-agregarla la reactiva.
-    await db.subsidio_vehicles_excluidos.delete_many({"user_id": {"$in": uids}, "placa": placa})
+    await db.subsidio_vehicles_excluidos.delete_many({**_own_q(user, uids), "placa": placa})
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
@@ -1747,10 +1794,10 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
             vistas.add(pn)
             encontradas.append({"placa": placa, "categoria": (v.get("categoria") or "").upper()})
 
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     existentes = {
         (v.get("placa") or "").upper().replace("-", "").replace(" ", "")
-        for v in await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+        for v in await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0, "placa": 1}).to_list(500)
     }
 
     nuevos = []
@@ -1781,27 +1828,27 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
 @subsidio_router.delete("/subsidio/vehicles/{placa}")
 async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
     placa_norm = placa.upper().strip()
-    uids = await _get_company_uids(user["id"])
-    await db.subsidio_vehicles.delete_one({"user_id": {"$in": uids}, "placa": placa_norm})
+    uids = await _get_company_uids(user)
+    await db.subsidio_vehicles.delete_one({**_own_q(user, uids), "placa": placa_norm})
     # La placa puede venir "prestada" de la flota principal (db.vehiculos), que NO se
     # toca desde aquí (la usa el monitoreo). Se marca como excluida del expediente para
     # que el dashboard no la vuelva a mostrar; re-agregarla quita la exclusión.
     await db.subsidio_vehicles_excluidos.update_one(
-        {"placa": placa_norm, "user_id": {"$in": uids}},
+        {"placa": placa_norm, **_own_q(user, uids)},
         {"$set": {"placa": placa_norm, "user_id": user["id"], "empresa": user.get("empresa"),
                   "excluded_at": datetime.now(timezone.utc).isoformat()}},
         upsert=True,
     )
     # Borra docs de esa placa
     docs = await db.subsidio_documents.find(
-        {"user_id": {"$in": uids}, "placa": placa_norm}, {"_id": 0}
+        {**_own_q(user, uids), "placa": placa_norm}, {"_id": 0}
     ).to_list(100)
     for d in docs:
         try:
             storage.delete_object(d["storage_key"])
         except Exception:
             pass
-    await db.subsidio_documents.delete_many({"user_id": {"$in": uids}, "placa": placa_norm})
+    await db.subsidio_documents.delete_many({**_own_q(user, uids), "placa": placa_norm})
     return {"ok": True}
 
 
@@ -1809,11 +1856,11 @@ async def remove_vehicle(placa: str, user: dict = Depends(_require_subsidio)):
 async def finalize(user: dict = Depends(_require_subsidio)):
     """Marca el expediente como completado. Valida que todo esté presente."""
     # Re-construir el dashboard para verificar can_finalize
-    uids = await _get_company_uids(user["id"])
-    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
-    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(1000)
+    uids = await _get_company_uids(user)
+    vehicles = await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0}).to_list(200)
+    docs = await db.subsidio_documents.find(_own_q(user, uids), {"_id": 0}).to_list(1000)
     docs = [_normalize_doc(d) for d in docs]
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0})
+    bank = await db.subsidio_bank_accounts.find_one(_own_q(user, uids), {"_id": 0})
 
     missing = []
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
@@ -2097,16 +2144,16 @@ async def invoices_upload(
 @subsidio_router.get("/subsidio/invoices/preview")
 async def invoices_preview(programa: str = "du004", user: dict = Depends(_require_subsidio)):
     """Devuelve facturas en draft (pendientes de confirmar) del usuario, por programa."""
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     # Las filas antiguas no tienen campo "programa": cuentan como du004.
     filtro_prog = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "status": "draft", **filtro_prog},
+        {**_own_q(user, uids), "status": "draft", **filtro_prog},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("created_at", -1).to_list(500)
     # Placas registradas para mostrar dropdown de corrección
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}
+        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
     return {"items": rows, "vehicles": vehicles}
 
@@ -2115,9 +2162,9 @@ async def invoices_preview(programa: str = "du004", user: dict = Depends(_requir
 async def invoice_file(invoice_id: str, user: dict = Depends(_require_subsidio)):
     """Sirve el PDF/imagen original de una factura del propio cliente, inline,
     para previsualizarla al costado del formulario de edición."""
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     d = await db.consumos_subsidio.find_one(
-        {"id": invoice_id, "user_id": {"$in": uids}},
+        {"id": invoice_id, **_own_q(user, uids)},
         {"_id": 0, "factura_storage_key": 1, "factura_filename": 1, "factura_content_type": 1},
     )
     if not d:
@@ -2137,9 +2184,9 @@ async def invoices_update(
     payload: InvoiceUpdateIn,
     user: dict = Depends(_require_subsidio),
 ):
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     inv = await db.consumos_subsidio.find_one(
-        {"id": invoice_id, "user_id": {"$in": uids}}, {"_id": 0}
+        {"id": invoice_id, **_own_q(user, uids)}, {"_id": 0}
     )
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
@@ -2155,12 +2202,12 @@ async def invoices_update(
         from services.validador_facturas import validar_factura as _validar_upd
         futuro = {**inv, **patch}
         vehiculos = await db.subsidio_vehicles.find(
-            {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1, "categoria": 1}).to_list(500)
+            _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}).to_list(500)
         _npu = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
         placas = {_npu(v["placa"]) for v in vehiculos}
         cats = {_npu(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
         otras = await db.consumos_subsidio.find(
-            {"user_id": {"$in": uids}, "id": {"$ne": invoice_id}},
+            {**_own_q(user, uids), "id": {"$ne": invoice_id}},
             {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(3000)
         vistos = {(str(o.get("ruc_emisor") or "").strip(),
                    str(o.get("numero_documento") or "").strip().upper(), _npu(o.get("placa")))
@@ -2185,8 +2232,8 @@ async def invoices_update(
 
 @subsidio_router.delete("/subsidio/invoices/{invoice_id}")
 async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidio)):
-    uids = await _get_company_uids(user["id"])
-    inv = await db.consumos_subsidio.find_one({"id": invoice_id, "user_id": {"$in": uids}})
+    uids = await _get_company_uids(user)
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, **_own_q(user, uids)})
     if not inv:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     try:
@@ -2209,8 +2256,8 @@ async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     """Confirma TODAS las facturas en draft del usuario → status=confirmed.
     Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed."""
     now = datetime.now(timezone.utc).isoformat()
-    uids = await _get_company_uids(user["id"])
-    drafts = await db.consumos_subsidio.find({"user_id": {"$in": uids}, "status": "draft"}).to_list(1000)
+    uids = await _get_company_uids(user)
+    drafts = await db.consumos_subsidio.find({**_own_q(user, uids), "status": "draft"}).to_list(1000)
 
     for d in drafts:
         fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
@@ -2299,9 +2346,9 @@ def _combustible_to_subsidio(r: dict) -> dict:
 async def du007_estado(user: dict = Depends(_require_subsidio)):
     """Estado del DU 007 del cliente: facturas por periodo (conteo, galones, monto) y
     declaraciones ya firmadas. Alimenta las 3 etapas del módulo DU-007."""
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "programa": "du007"},
+        {**_own_q(user, uids), "programa": "du007"},
         {"_id": 0, "periodo_du007": 1, "galones": 1, "importe_total": 1, "validacion_estado": 1},
     ).to_list(2000)
     periodos = {1: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0},
@@ -2324,7 +2371,7 @@ async def du007_estado(user: dict = Depends(_require_subsidio)):
         if r.get("validacion_estado") == "CONFORME":
             periodos[p]["conformes"] += 1
     decls = await db.declaraciones_du007.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "periodo": 1, "accepted_at": 1, "representante": 1},
+        _own_q(user, uids), {"_id": 0, "periodo": 1, "accepted_at": 1, "representante": 1},
     ).to_list(10)
     return {"periodos": [{"periodo": k, **{kk: round(vv, 2) if isinstance(vv, float) else vv
                                             for kk, vv in v.items()}} for k, v in periodos.items()],
@@ -2342,14 +2389,14 @@ async def du007_declaracion(payload: dict, request: Request, user: dict = Depend
         periodo = 0
     if periodo not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="Periodo inválido (1, 2 o 3)")
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     n = await db.consumos_subsidio.count_documents(
-        {"user_id": {"$in": uids}, "programa": "du007", "periodo_du007": periodo,
+        {**_own_q(user, uids), "programa": "du007", "periodo_du007": periodo,
          "validacion_estado": {"$ne": "RECHAZADA"}})
     if n == 0:
         raise HTTPException(status_code=400,
                             detail=f"Aún no tienes facturas válidas del periodo {periodo}. Carga tu combustible primero.")
-    ya = await db.declaraciones_du007.find_one({"user_id": {"$in": uids}, "periodo": periodo})
+    ya = await db.declaraciones_du007.find_one({**_own_q(user, uids), "periodo": periodo})
     if ya:
         raise HTTPException(status_code=409, detail=f"La declaración del periodo {periodo} ya fue firmada.")
     rec = {
@@ -2374,10 +2421,10 @@ async def du007_declaracion(payload: dict, request: Request, user: dict = Depend
 @subsidio_router.get("/subsidio/invoices/confirmed")
 async def invoices_confirmed(programa: str = "du004", user: dict = Depends(_require_subsidio)):
     """Lista facturas confirmadas (para módulos del cliente_subsidio), por programa."""
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     filtro_prog = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "status": "confirmed", **filtro_prog},
+        {**_own_q(user, uids), "status": "confirmed", **filtro_prog},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(2000)
 
@@ -2404,10 +2451,10 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     """
     from datetime import date, timedelta
     
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
 
     rows = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "status": "confirmed"},
+        {**_own_q(user, uids), "status": "confirmed"},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).to_list(5000)
 
@@ -2450,7 +2497,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
 
     # === Unidades (vehículos) ===
-    vehicles = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(200)
+    vehicles = await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0}).to_list(200)
     unidades_incluidas = len(vehicles)
     placas_activas = {(r.get("placa") or "").upper().strip() for r in rows if (r.get("placa") or "").strip()}
     unidades_activas = len({v["placa"] for v in vehicles if v["placa"].upper() in placas_activas})
@@ -2957,19 +3004,19 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     
-    uids = await _get_company_uids(user_id)
+    uids = await _get_company_uids(u)
     
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
     
     # Obtener el último banco y declaración (cualquiera de la empresa sirve)
-    bank = await db.subsidio_bank_accounts.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("updated_at", -1)])
-    decl = await db.subsidio_declaraciones.find_one({"user_id": {"$in": uids}}, {"_id": 0}, sort=[("accepted_at", -1)])
+    bank = await db.subsidio_bank_accounts.find_one(_own_q(u, uids), {"_id": 0}, sort=[("updated_at", -1)])
+    decl = await db.subsidio_declaraciones.find_one(_own_q(u, uids), {"_id": 0}, sort=[("accepted_at", -1)])
     
-    docs = await db.subsidio_documents.find({"user_id": {"$in": uids}}, {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
+    docs = await db.subsidio_documents.find(_own_q(u, uids), {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
     
     # Merge vehicles from both main fleet and subsidio
     _excl = await db.subsidio_vehicles_excluidos.find(
-        {"user_id": {"$in": uids}}, {"_id": 0, "placa": 1}).to_list(500)
+        _own_q(u, uids), {"_id": 0, "placa": 1}).to_list(500)
     excluidas = {e.get("placa") for e in _excl}
     vehicles_dict = {}
     if u.get("empresa"):
@@ -2985,7 +3032,7 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
                 "from_main_fleet": True
             }
     
-    sub_veh = await db.subsidio_vehicles.find({"user_id": {"$in": uids}}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    sub_veh = await db.subsidio_vehicles.find(_own_q(u, uids), {"_id": 0}).sort("created_at", 1).to_list(200)
     for sv in sub_veh:
         placa = (sv.get("placa") or "").strip().upper()
         if not placa: continue
@@ -2993,7 +3040,7 @@ async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_en
         
     vehicles = list(vehicles_dict.values())
     sub_invs = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}},
+        _own_q(u, uids),
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("fecha", -1).to_list(2000)
     
@@ -3145,8 +3192,9 @@ async def admin_zip_invoices(
     from fastapi.responses import StreamingResponse
 
     # Todas las cuentas de la MISMA empresa (las facturas pueden estar repartidas entre ellas).
-    uids = await _get_company_uids(user_id)
-    filtro = {"user_id": {"$in": uids}}
+    t_user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "empresa": 1}) or {"id": user_id}
+    uids = await _get_company_uids(t_user)
+    filtro = _own_q(t_user, uids)
     if placa:
         filtro["placa"] = placa.upper().strip()
     if desde or hasta:
@@ -3675,21 +3723,22 @@ async def admin_update_vehicle(
     v = await db.subsidio_vehicles.find_one({"id": vehicle_id})
     if not v:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
-        
-    uids = await _get_company_uids(user_id)
-    
+
+    t_user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "empresa": 1}) or {"id": user_id}
+    uids = await _get_company_uids(t_user)
+
     placa_new = payload.placa.upper().strip()
     if placa_new != v["placa"]:
-        if await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa_new}):
+        if await db.subsidio_vehicles.find_one({**_own_q(t_user, uids), "placa": placa_new}):
             raise HTTPException(status_code=409, detail="La nueva placa ya está registrada")
-    
+
     if placa_new != v["placa"]:
         await db.subsidio_documents.update_many(
-            {"user_id": {"$in": uids}, "placa": v["placa"]},
+            {**_own_q(t_user, uids), "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
         await db.consumos_subsidio.update_many(
-            {"user_id": {"$in": uids}, "placa": v["placa"]},
+            {**_own_q(t_user, uids), "placa": v["placa"]},
             {"$set": {"placa": placa_new}}
         )
 
@@ -3795,7 +3844,8 @@ async def admin_update_invoice(
     expediente). Aplica el mapeo de nombres de campo correcto para cada
     colección. Devuelve 404 solo si el ID no existe en ninguna de las dos.
     """
-    uids = await _get_company_uids(user_id)
+    t_user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "empresa": 1}) or {"id": user_id}
+    uids = await _get_company_uids(t_user)
 
     # --- 1. Buscar en consumos_subsidio ---
     inv = await db.consumos_subsidio.find_one({"id": invoice_id})
@@ -3806,7 +3856,7 @@ async def admin_update_invoice(
         if "placa" in patch and patch["placa"]:
             placa = patch["placa"].upper().strip()
             patch["placa"] = placa
-            own = await db.subsidio_vehicles.find_one({"user_id": {"$in": uids}, "placa": placa})
+            own = await db.subsidio_vehicles.find_one({**_own_q(t_user, uids), "placa": placa})
             patch["placa_match"] = placa if own else None
         patch["updated_at"] = datetime.now(timezone.utc).isoformat()
         await target_collection.update_one({"id": invoice_id}, {"$set": patch})

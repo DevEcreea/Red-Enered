@@ -1416,6 +1416,56 @@ async def precios_publico(combustible: Optional[str] = None):
     return {"estaciones": dedup, "total": len(dedup), "enered": sum(1 for o in dedup if o["es_enered"]), "combustibles": combustibles}
 
 
+@api.get("/precios/mapa-publico")
+async def precios_mapa_publico(combustible: Optional[str] = None, departamento: Optional[str] = None,
+                               provincia: Optional[str] = None, distrito: Optional[str] = None):
+    """PÚBLICO (sin login): grifos con GPS real para el mapa de la landing /precios.
+    Marca es_enered (Red ENERED). Mismo pintado que el mapa del módulo con login, pero abierto."""
+    query = {"lat": {"$ne": None}, "lon": {"$ne": None}}
+    if combustible:
+        c = combustible.strip().upper()
+        if "PREMIUM" in c:
+            query["combustible"] = {"$regex": "PREMIUM|95|97|98", "$options": "i"}
+        elif "REGULAR" in c or "84" in c:
+            query["combustible"] = {"$regex": "REGULAR|84|90", "$options": "i"}
+        elif "DIESEL" in c or "DB5" in c or "B5" in c:
+            query["combustible"] = {"$regex": "DB5|DIESEL|B5|S-50|UV", "$options": "i"}
+        else:
+            query["combustible"] = {"$regex": combustible, "$options": "i"}
+    if departamento:
+        dep = departamento.strip().upper().replace("Á", "A").replace("É", "E").replace("Í", "I").replace("Ó", "O").replace("Ú", "U")
+        query["departamento"] = {"$regex": dep, "$options": "i"}
+    if provincia:
+        query["provincia"] = {"$regex": provincia.strip().upper(), "$options": "i"}
+    if distrito:
+        d = distrito.strip().upper()
+        query["$or"] = [{"distrito": {"$regex": d, "$options": "i"}},
+                        {"ciudad": {"$regex": d, "$options": "i"}}]
+
+    rows = await db.precios_facilito.find(query, {"_id": 0}).limit(20000).to_list(20000)
+    enered_up = {(n or "").strip().upper() for n in await db.estaciones_enered.distinct("nombre_facilito")}
+
+    grifos = []
+    for p in rows:
+        lat, lon = p.get("lat"), p.get("lon")
+        if lat is None or lon is None:
+            continue
+        # descarta coordenadas fuera de Perú (GPS basura)
+        if not (-18.6 <= lat <= 0.1 and -81.5 <= lon <= -68.5):
+            continue
+        nombre = (p.get("establecimiento") or p.get("estacion") or "")
+        grifos.append({
+            "preciso": True, "establecimiento": nombre, "direccion": p.get("direccion"),
+            "distrito": p.get("distrito") or p.get("ciudad"), "provincia": p.get("provincia"),
+            "departamento": p.get("departamento"),
+            "precio_venta": p.get("precio_venta"), "combustible": p.get("combustible"),
+            "es_enered": nombre.strip().upper() in enered_up,
+            "lat": lat, "lon": lon,
+        })
+    return {"ok": True, "grifos": grifos, "total": len(grifos),
+            "con_coordenadas": len(grifos), "pendientes": 0}
+
+
 app.include_router(api)
 
 
@@ -1803,9 +1853,13 @@ async def list_consumptions(
         }
         if user.get("role") == "cliente_subsidio":
             uid_filter["user_id"] = user["id"]
+            # Multi-empresa: el mismo usuario puede tener varias empresas; manda la
+            # empresa activa del doc (los antiguos sin empresa caen al user_id).
+            if user.get("empresa"):
+                uid_filter["$or"] = [{"empresa": user["empresa"]}, {"empresa": {"$in": [None, ""]}}]
         elif target_emp:
             uid_filter["empresa"] = target_emp
-            
+
         raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
         mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
         
@@ -2033,6 +2087,9 @@ async def update_consumption(
     if user.get("role") == "cliente_subsidio":
         coll = db.consumos_subsidio
         q = {"user_id": user["id"]}
+        if user.get("empresa"):
+            # Multi-empresa: solo consumos de la empresa activa (o antiguos sin empresa)
+            q["$and"] = [{"$or": [{"empresa": user["empresa"]}, {"empresa": {"$in": [None, ""]}}]}]
         if oid: q["$or"] = [{"id": cid}, {"_id": oid}]
         else: q["id"] = cid
     else:
@@ -2105,6 +2162,9 @@ async def delete_consumption(cid: str, user: dict = Depends(get_current_user)):
 
     if user.get("role") == "cliente_subsidio":
         q_sub = {"user_id": user["id"]}
+        if user.get("empresa"):
+            # Multi-empresa: solo consumos de la empresa activa (o antiguos sin empresa)
+            q_sub["$and"] = [{"$or": [{"empresa": user["empresa"]}, {"empresa": {"$in": [None, ""]}}]}]
         if oid: q_sub["$or"] = [{"id": cid}, {"_id": oid}]
         else: q_sub["id"] = cid
         c_doc = await db.consumos_subsidio.find_one(q_sub)
@@ -4988,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.6.0-precios-corp",
+        "version": "1.7.0-multiempresa",
     }
 
 # ============================================================
@@ -6452,7 +6512,11 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
                         continue
                     vistas.add(pn)
                     mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
-                                         "vigencia": a.get("vigente_hasta"), "numero_autorizacion": a.get("codigo") or v.get("constancia")})
+                                         "vigencia": a.get("vigente_hasta"),
+                                         "numero_autorizacion": a.get("codigo") or v.get("constancia"),
+                                         # Constancia de habilitación del MTC por unidad: es el "TUC"
+                                         # que muestra el padrón ATU (formato 13M25000323E).
+                                         "constancia": v.get("constancia")})
         except Exception:
             pass
         return razon, mtc_unidades, permiso_mtc
@@ -6535,7 +6599,10 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
             estado, motivo = "no_aceptada", "No figura habilitada en la ATU (regularizable)"
         unidades.append({
             "placa": u["placa"], "categoria": cat, "cumple": cumple, "estado": estado,
-            "tuc": (au.get("tuc") if au else None), "motivo": motivo,
+            # TUC: el que reporta la ATU si respondió; si no, la constancia MTC de la
+            # unidad (es el mismo número que el padrón ATU muestra como "TUC").
+            "tuc": (au.get("tuc") if au else None) or u.get("constancia"),
+            "motivo": motivo,
             "vigencia": vig, "numero_autorizacion": u.get("numero_autorizacion"),
         })
     # Orden: aceptadas primero, luego por verificar, luego el resto.
@@ -6609,10 +6676,22 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
 
     # Vehículos con TUC habilitado: comparado contra las unidades SUBSIDIABLES (M/N con tope).
     # Verde solo si TODAS las subsidiables están aceptadas; amarillo si unas sí y otras no.
-    subsid_total = sum(1 for u in mtc_unidades if u["categoria"] in _TOPES_GALONES)
+    subsid_total = sum(1 for u in mtc_unidades if clase_base_categoria(u["categoria"]) in _TOPES_GALONES)
+    # TUC por unidad según el MTC (constancia): es el mismo número que el padrón ATU
+    # muestra como "TUC". Si TODAS las subsidiables lo tienen, el punto CUMPLE aunque
+    # la ATU no responda (igual que el padrón oficial); la aceptación ATU manda si responde.
+    con_tuc_mtc = sum(1 for u in mtc_unidades
+                      if clase_base_categoria(u["categoria"]) in _TOPES_GALONES and u.get("constancia"))
     if not atu_disponible:
-        tuc_estado = "POR_VERIFICAR"
-        tuc_desc = "La plataforma de la ATU es quien valida este punto y hoy no responde."
+        if subsid_total > 0 and con_tuc_mtc >= subsid_total:
+            tuc_estado = "CUMPLE"
+            tuc_desc = f"Las {subsid_total} unidad(es) subsidiables cuentan con TUC / autorización (constancia MTC)."
+        elif con_tuc_mtc > 0:
+            tuc_estado = "PARCIAL"
+            tuc_desc = f"{con_tuc_mtc} de {subsid_total} unidad(es) cuentan con TUC (constancia MTC); el resto por verificar."
+        else:
+            tuc_estado = "POR_VERIFICAR"
+            tuc_desc = "La plataforma de la ATU es quien valida este punto y hoy no responde."
     elif aceptadas == 0:
         tuc_estado = "NO_CUMPLE"
         tuc_desc = "La plataforma de la ATU no reconoce el TUC de tus unidades."
