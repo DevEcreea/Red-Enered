@@ -16,6 +16,20 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 CSV_URL = "https://www.datosabiertos.gob.pe/sites/default/files/18Grifos%20y%20Estaciones%20de%20Servicios_1.csv"
+
+# El registro de hidrocarburos de OSINERGMIN se publica en 28 archivos por categoría.
+# La ATU acepta como proveedor no solo grifos: también distribuidores minoristas
+# (p.ej. venta en contenedores intermedios/cisterna) y mayoristas. Cargamos las
+# categorías que VENDEN combustible a transportistas.
+FUENTES = [
+    ("18Grifos%20y%20Estaciones%20de%20Servicios_1.csv", "GRIFO / ESTACIÓN DE SERVICIOS"),
+    ("17Grifos%20Rurales%20con%20almacenamiento%20en%20Cilindros_1.csv", "GRIFO RURAL"),
+    ("16Grifos%20Flotantes_1.csv", "GRIFO FLOTANTE"),
+    ("21Distribuidores%20Mayoristas%20Combustibles%20L%C3%ADquidos_1.csv", "DISTRIBUIDOR MAYORISTA"),
+    ("3Transporte%20de%20combustibles%20l%C3%ADquidos%20en%20contenedores%20intermedios_1.csv",
+     "DISTRIBUIDOR MINORISTA (CONTENEDORES INTERMEDIOS)"),
+]
+_BASE_FILES = "https://www.datosabiertos.gob.pe/sites/default/files/"
 # El portal rechaza clientes sin cabeceras de navegador (devuelve 418).
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -30,47 +44,111 @@ def _limpiar(v) -> str:
     return (v or "").strip()
 
 
-def _fila_a_doc(r: dict) -> dict | None:
-    ruc = _limpiar(r.get("RUC"))
+def _clave_norm(k: str) -> str:
+    """Normaliza un encabezado: sin acentos/mojibake/símbolos, solo A-Z."""
+    import re as _re
+    import unicodedata
+    k = unicodedata.normalize("NFKD", k or "")
+    return _re.sub(r"[^A-Z]", "", k.upper())
+
+
+def _mapear_columnas(encabezados: list[str]) -> dict:
+    """Cada categoría del registro usa nombres de columna algo distintos
+    (DIRECCION OPERATIVA / DOMICILIO LEGAL / DIRECCIÓN LEGAL, RAZON/RAZÓN...).
+    Devuelve {campo_destino: nombre_columna_original}."""
+    m: dict = {}
+    for h in encabezados:
+        n = _clave_norm(h)
+        if n == "RUC":
+            m.setdefault("ruc", h)
+        elif "RAZ" in n and "SOCIAL" in n:
+            m.setdefault("razon_social", h)
+        elif "CODIGOOSINERGMIN" in n:
+            m.setdefault("codigo_osinergmin", h)
+        elif n == "REGISTRO":
+            m.setdefault("registro", h)
+        elif "DIRECC" in n or "DOMICILIO" in n:
+            m.setdefault("direccion", h)
+        elif n == "DEPARTAMENTO":
+            m.setdefault("departamento", h)
+        elif n == "PROVINCIA":
+            m.setdefault("provincia", h)
+        elif n == "DISTRITO":
+            m.setdefault("distrito", h)
+        elif "VIGENCIA" in n:
+            m.setdefault("vigencia", h)
+        elif "TIPODEESTABLECIMIENTO" in n:
+            m.setdefault("tipo", h)
+    return m
+
+
+def _fila_a_doc(r: dict, cols: dict, tipo_defecto: str) -> dict | None:
+    ruc = _limpiar(r.get(cols.get("ruc", "RUC")))
     if not ruc or len(ruc) != 11 or not ruc.isdigit():
         return None
+    def v(campo):
+        col = cols.get(campo)
+        return _limpiar(r.get(col)) if col else ""
     return {
         "ruc": ruc,
-        "codigo_osinergmin": _limpiar(r.get("CODIGO OSINERGMIN")),
-        "razon_social": _limpiar(r.get("RAZON SOCIAL")),
-        "direccion": _limpiar(r.get("DIRECCION OPERATIVA")),
-        "departamento": _limpiar(r.get("DEPARTAMENTO")).upper(),
-        "provincia": _limpiar(r.get("PROVINCIA")).upper(),
-        "distrito": _limpiar(r.get("DISTRITO")).upper(),
-        "tipo_establecimiento": _limpiar(r.get("TIPO DE ESTABLECIMIENTO")),
-        "vigencia": _limpiar(r.get("TÉRMINO DE VIGENCIA")) or "INDEFINIDO",
-        "registro": _limpiar(r.get("REGISTRO")),
+        "codigo_osinergmin": v("codigo_osinergmin"),
+        "razon_social": v("razon_social"),
+        "direccion": v("direccion"),
+        "departamento": v("departamento").upper(),
+        "provincia": v("provincia").upper(),
+        "distrito": v("distrito").upper(),
+        "tipo_establecimiento": v("tipo") or tipo_defecto,
+        "vigencia": v("vigencia") or "INDEFINIDO",
+        "registro": v("registro"),
     }
 
 
 async def sincronizar(db) -> dict:
-    """Descarga el padrón y lo carga en Mongo. Devuelve un resumen."""
+    """Descarga las categorías vendedoras del registro de hidrocarburos y las carga
+    en Mongo (reemplazo completo). Devuelve un resumen por categoría."""
     import os
     import httpx
     # Los .gob.pe bloquean servidores extranjeros: en producción se sale por el proxy peruano
     # (el mismo del MTC); en local queda None (conexión directa).
     proxy = os.getenv("FACILITO_PROXY") or os.getenv("MTC_PROXY") or None
+    docs, por_categoria, vistos = [], {}, set()
+    ahora = datetime.now(timezone.utc).isoformat()
     async with httpx.AsyncClient(timeout=120.0, verify=False, headers=_HEADERS,
                                  follow_redirects=True, proxy=proxy) as c:
-        r = await c.get(CSV_URL)
-        if r.status_code != 200:
-            raise RuntimeError(f"OSINERGMIN respondió {r.status_code}")
-        contenido = r.content
+        for archivo, tipo in FUENTES:
+            try:
+                r = await c.get(_BASE_FILES + archivo)
+                if r.status_code != 200:
+                    raise RuntimeError(f"HTTP {r.status_code}")
+                try:
+                    texto = r.content.decode("utf-8")
+                except UnicodeDecodeError:
+                    texto = r.content.decode("latin-1", errors="replace")
+                filas = list(csv.DictReader(io.StringIO(texto), delimiter=";"))
+                if not filas:
+                    raise RuntimeError("vacío")
+                cols = _mapear_columnas(list(filas[0].keys()))
+                n = 0
+                for f in filas:
+                    d = _fila_a_doc(f, cols, tipo)
+                    if not d:
+                        continue
+                    # una fila por local (el archivo de contenedores repite el RUC por placa)
+                    clave = (d["ruc"], d["codigo_osinergmin"], d["direccion"])
+                    if clave in vistos:
+                        continue
+                    vistos.add(clave)
+                    d["actualizado_en"] = ahora
+                    docs.append(d)
+                    n += 1
+                por_categoria[tipo] = n
+            except Exception as e:
+                # una categoría caída no debe tumbar el padrón completo
+                por_categoria[tipo] = f"ERROR: {str(e)[:80]}"
+                logger.warning(f"Padrón OSINERGMIN: fallo en {archivo}: {e}")
 
-    texto = contenido.decode("latin-1", errors="replace")
-    filas = list(csv.DictReader(io.StringIO(texto), delimiter=";"))
-    docs = [d for d in (_fila_a_doc(f) for f in filas) if d]
     if not docs:
         raise RuntimeError("El padrón vino vacío o con formato inesperado")
-
-    ahora = datetime.now(timezone.utc).isoformat()
-    for d in docs:
-        d["actualizado_en"] = ahora
 
     # Reemplazo completo (el padrón es la fuente de verdad).
     await db[COLECCION].delete_many({})
@@ -80,8 +158,9 @@ async def sincronizar(db) -> dict:
     except Exception:
         pass
 
-    logger.info(f"Padrón OSINERGMIN sincronizado: {len(docs)} establecimientos")
-    return {"establecimientos": len(docs), "rucs": len({d['ruc'] for d in docs}), "actualizado_en": ahora}
+    logger.info(f"Padrón OSINERGMIN sincronizado: {len(docs)} establecimientos ({por_categoria})")
+    return {"establecimientos": len(docs), "rucs": len({d['ruc'] for d in docs}),
+            "por_categoria": por_categoria, "actualizado_en": ahora}
 
 
 # Palabras genéricas que no identifican al grifo (para el match por razón social).
