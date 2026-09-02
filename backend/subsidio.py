@@ -3709,9 +3709,13 @@ async def admin_reordenar_multiempresa(user_id: str, dry: int = 0, _: dict = Dep
         return _re.sub(r"[^A-Z0-9]", "", (s or "").upper())
 
     # 0) Canonizar nombres de asignadas contra las empresas reales del sistema.
-    reales = set(await db.users.distinct("empresa")) | set(await db.empresas_config.distinct("empresa"))
-    reales = {r for r in reales if r}
-    canon = {_norm_emp(r): r for r in reales}
+    # La forma que un usuario real usa como empresa base MANDA sobre la de empresas_config
+    # (p.ej. 'SERVI TRANSP NASCA SRL' del usuario vs 'S.R.L.' en otra parte): así los
+    # documentos movidos quedan visibles para ese usuario.
+    reales_cfg = {r for r in await db.empresas_config.distinct("empresa") if r}
+    reales_users = {r for r in await db.users.distinct("empresa") if r}
+    canon = {_norm_emp(r): r for r in reales_cfg}
+    canon.update({_norm_emp(r): r for r in reales_users})
     nombres_corregidos = []
     for a in asignadas:
         real = canon.get(_norm_emp(a.get("empresa")))
