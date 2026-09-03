@@ -214,6 +214,9 @@ export default function Vehiculos() {
   const [saving, setSaving]       = useState(false);
   const [errMsg, setErrMsg]       = useState("");
   const [loadingSunarp, setLoadingSunarp] = useState(false);
+  const [enriqueciendo, setEnriqueciendo] = useState(false);
+  const [valorFlota, setValorFlota] = useState(null); // suma del valor referencial MEF de la flota
+  const [valModal, setValModal] = useState(false);
 
   // data
   const [vehiculos, setVehiculos]     = useState([]);
@@ -248,21 +251,28 @@ export default function Vehiculos() {
   const [fMedMin, setFMedMin]   = useState("");
   const [fMedMax, setFMedMax]   = useState("");
   const [fInact, setFInact]     = useState(false);
+  // Valorización: misma regla que la tabla — las unidades INACTIVAS no cuentan salvo "Ver Inactivos"
+  const valorizadosVisibles = useMemo(
+    () => vehiculos.filter(v => v.valor_referencial > 0 && (fInact || String(v.estado||"").toUpperCase() !== "INACTIVO")),
+    [vehiculos, fInact]
+  );
   const [fPers, setFPers]       = useState(false);
 
   // ── API ──
   async function loadAll() {
     setLoading(true);
     try {
-      const [v, c, k] = await Promise.all([
+      const [v, c, k, vf] = await Promise.all([
         api.get("/vehiculos"),
         api.get("/conductores").catch(()=>({ data:[] })),
-        api.get("/vehiculos/kpis").catch(()=>({ data:{} }))
+        api.get("/vehiculos/kpis").catch(()=>({ data:{} })),
+        api.get("/vehiculos/valor-flota").catch(()=>({ data:null }))
       ]);
       const real = (v.data||[]);
       setVehiculos(real.length > 0 ? real : []);
       setConductores(c.data||[]);
       setKpis(k.data || {});
+      setValorFlota(vf.data || null);
     } catch {
       setVehiculos([]);
     } finally { setLoading(false); }
@@ -318,7 +328,8 @@ export default function Vehiculos() {
     if (!vForm.placa) return;
     setLoadingSunarp(true); setErrMsg("");
     try {
-      const { data } = await api.get(`/vehiculos/consulta-sunarp/${vForm.placa}`);
+      // Ficha combinada: MTC (chasis, categoría, año, ejes, pesos) + marca por VIN + SUNARP si está activo
+      const { data } = await api.get(`/vehiculos/ficha/${vForm.placa}`);
       setVForm(prev => ({
         ...prev,
         marca: data.marca || prev.marca,
@@ -326,7 +337,12 @@ export default function Vehiculos() {
         chasis: data.chasis || prev.chasis,
         año: data.año || prev.año,
         titular: data.titular || prev.titular,
-        tipo: data.tipo || prev.tipo
+        tipo: data.tipo || prev.tipo,
+        categoria: data.categoria || prev.categoria,
+        constancia_mtc: data.constancia_mtc || prev.constancia_mtc,
+        ejes: data.ejes || prev.ejes,
+        carga_util: data.carga_util || prev.carga_util,
+        peso_seco: data.peso_seco || prev.peso_seco,
       }));
     } catch(e) {
       setErrMsg(e?.response?.data?.detail || "No se pudo consultar la placa");
@@ -466,7 +482,91 @@ export default function Vehiculos() {
           <button onClick={()=>setPanelOpen(p=>!p)} style={{ width:44,height:44,borderRadius:"50%",background:"#1F2937",border:"none",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 12px rgba(0,0,0,.18)" }}>
             <ChevronDown style={{ width:20,height:20,transform:panelOpen?"rotate(180deg)":"none",transition:"transform .2s" }} />
           </button>
+          {/* Enriquecimiento por placa: la placa es la llave — nada queda vacío */}
+          <button
+            onClick={async () => {
+              if (enriqueciendo) return;
+              setEnriqueciendo(true);
+              try {
+                const { data } = await api.post("/vehiculos/enriquecer");
+                const n = data.campos_completados ?? 0;
+                let msg = n > 0
+                  ? `✨ ${n} dato(s) completados automáticamente en ${data.detalle?.length ?? 0} vehículo(s).`
+                  : "Todos los vehículos ya tienen sus datos completos.";
+                if (data.aviso) msg += `\n⚠️ ${data.aviso}`;
+                alert(msg);
+                loadAll();
+              } catch (err) {
+                alert("Error al completar datos: " + (err.response?.data?.detail || err.message));
+              } finally { setEnriqueciendo(false); }
+            }}
+            title="Completar automáticamente marca, modelo, VIN, año, titular y categoría desde la placa (SUNARP + MTC)"
+            data-testid="btn-enriquecer"
+            style={{ display:"flex",alignItems:"center",gap:8,height:44,padding:"0 18px",borderRadius:22,background:"#7C3AED",border:"none",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 12px rgba(0,0,0,.18)",opacity:enriqueciendo?0.7:1 }}>
+            {enriqueciendo ? <RotateCw style={{ width:15,height:15,animation:"spin 1s linear infinite" }}/> : <Cpu style={{ width:15,height:15 }}/>}
+            {enriqueciendo ? "Completando..." : "Completar datos (auto)"}
+          </button>
+          {/* Valorización de flota (valor referencial oficial MEF): botón como los demás, abre el detalle */}
+          {(() => {
+            const total = valorizadosVisibles.reduce((s, v) => s + Number(v.valor_referencial || 0), 0);
+            return (
+              <button onClick={() => setValModal(true)} data-testid="btn-ver-valorizacion"
+                title="Valoriza tu flota ahora y obtén liquidez — valor referencial oficial (MEF 2026) por unidad"
+                style={{ display:"flex",alignItems:"center",gap:8,height:44,padding:"0 18px",borderRadius:22,background:"#fff",border:"1.5px solid #7C3AED",color:"#5B21B6",cursor:"pointer",fontSize:13,fontWeight:700,boxShadow:"0 4px 12px rgba(0,0,0,.10)" }}>
+                <Tag style={{ width:15,height:15 }}/>
+                {total > 0 ? <>Valorizar flota · <span style={{ fontWeight:900 }}>S/ {Number(total).toLocaleString("es-PE")}</span></> : "Valorizar flota"}
+              </button>
+            );
+          })()}
         </div>
+
+        {valModal && (
+          <div style={{ position:"fixed",inset:0,background:"rgba(17,24,39,.55)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }} onClick={()=>setValModal(false)}>
+            <div onClick={e=>e.stopPropagation()} style={{ background:"#fff",borderRadius:16,width:"min(720px,100%)",maxHeight:"84vh",display:"flex",flexDirection:"column",overflow:"hidden" }}>
+              {(() => {
+                const total = valorizadosVisibles.reduce((s, v) => s + Number(v.valor_referencial || 0), 0);
+                const waMsg = encodeURIComponent(`Hola ENERED, quiero evaluar opciones de liquidez con mi flota (${valorizadosVisibles.length} unidades, valor referencial S/ ${Number(total).toLocaleString("es-PE")}).`);
+                return (
+                  <div style={{ padding:"18px 20px",color:"#fff",background:"linear-gradient(120deg,#2E1065 0%,#6D28D9 60%,#8B3DFF 100%)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap" }}>
+                    <div>
+                      <div style={{ fontSize:10.5,fontWeight:800,letterSpacing:1,textTransform:"uppercase",opacity:.75 }}>Valorización de flota</div>
+                      <div style={{ fontWeight:900,fontSize:18,lineHeight:1.15 }}>Valoriza tu flota ahora y obtén liquidez</div>
+                      <div style={{ fontSize:12.5,opacity:.92,marginTop:4 }}>
+                        {total > 0
+                          ? <>Tus <b>{valorizadosVisibles.length}</b> unidades valen <b>S/ {Number(total).toLocaleString("es-PE")}</b> (tabla oficial MEF 2026) — respaldo para crédito, leasing y renovación.</>
+                          : <>Presiona "Completar datos (auto)" y ENERED valoriza cada unidad con la tabla oficial del MEF.</>}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                      <a href={`https://wa.me/51997389536?text=${waMsg}`} target="_blank" rel="noreferrer" data-testid="btn-liquidez"
+                        style={{ height:38,padding:"0 16px",borderRadius:10,background:"#fff",color:"#5B21B6",fontWeight:900,fontSize:13,display:"flex",alignItems:"center",textDecoration:"none" }}>
+                        Quiero liquidez →
+                      </a>
+                      <button onClick={()=>setValModal(false)} style={{ background:"rgba(255,255,255,.15)",border:"none",borderRadius:8,cursor:"pointer",color:"#fff",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center" }}><X style={{ width:18,height:18 }}/></button>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div style={{ padding:"10px 20px 0",fontSize:11.5,color:"#6b7280" }}>Fuente: MEF · Tabla de Valores Referenciales 2026 (RM 008-2026-EF/15). Valor tributario oficial, no precio de mercado.</div>
+              <div style={{ overflowY:"auto",padding:"8px 20px 20px" }}>
+                {[...valorizadosVisibles].sort((a,b)=>b.valor_referencial-a.valor_referencial).map(v=>(
+                  <div key={v.id||v.placa} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 0",borderBottom:"1px solid #F3F4F6" }}>
+                    <div>
+                      <div style={{ fontWeight:800,fontFamily:"ui-monospace,monospace",fontSize:13 }}>{v.placa||v.veh}</div>
+                      <div style={{ fontSize:12,color:"#6b7280" }}>{[(v.marca||"").toUpperCase(),v.modelo,v.año].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontWeight:800,fontSize:14,color:"#111827" }}>S/ {Number(v.valor_referencial).toLocaleString("es-PE")}</div>
+                      <div style={{ fontSize:10.5,color:v.valor_ref_detalle?.match==="exacto"?"#0EA46B":"#9ca3af" }} title={v.valor_ref_detalle?.regla||""}>
+                        {v.valor_ref_detalle?.match==="exacto" ? "modelo exacto" : `≈ ${v.valor_ref_detalle?.modelo_tabla||"ref."}`}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Filter Panel */}
         {panelOpen&&(
@@ -510,16 +610,16 @@ export default function Vehiculos() {
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
               <thead>
                 <tr style={{ background:"#2A2A3C" }}>
-                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACCIONES"].map((h,i)=>(
+                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","AÑO","CAT.","EJES","CARGA ÚTIL","PESO SECO","CONSTANCIA MTC","SOAT","REV. TÉC.","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACCIONES"].map((h,i)=>(
                     <th key={i} style={{ textAlign:"left",color:"#fff",fontWeight:600,textTransform:"uppercase",fontSize:10.5,letterSpacing:".03em",padding:"12px 14px",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading?(
-                  <tr><td colSpan={15} style={{ textAlign:"center",padding:40,color:"#9ca3af",fontSize:14 }}>Cargando...</td></tr>
+                  <tr><td colSpan={23} style={{ textAlign:"center",padding:40,color:"#9ca3af",fontSize:14 }}>Cargando...</td></tr>
                 ):lista.length===0?(
-                  <tr><td colSpan={15} style={{ textAlign:"center",padding:48,color:"#9ca3af",fontSize:14 }}>
+                  <tr><td colSpan={23} style={{ textAlign:"center",padding:48,color:"#9ca3af",fontSize:14 }}>
                     <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:10 }}>
                       <Car style={{ width:40,height:40,color:"#D1D5DB" }}/>
                       <span>No hay vehículos registrados aún</span>
@@ -559,6 +659,46 @@ export default function Vehiculos() {
                           {v.veh||v.placa||"—"}<span style={{ color:"#DC2626" }}> ●</span>
                         </td>
                         <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>{v.modelo||"—"}</td>
+                        <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap",textAlign:"center" }}>{v.año||"—"}</td>
+                        {/* Datos del permiso MTC (autocompletados por placa) */}
+                        <td style={{ padding:"10px 14px",whiteSpace:"nowrap" }}>
+                          {v.categoria
+                            ? <span style={{ borderRadius:999,fontWeight:700,fontSize:10,padding:"3px 9px",color:"#5B21B6",background:"#F1EAFF" }}>{v.categoria}</span>
+                            : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                        </td>
+                        <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap",textAlign:"center" }}>{v.ejes||"—"}</td>
+                        <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>
+                          {v.carga_util ? `${Number(v.carga_util).toLocaleString("es-PE")} kg` : "—"}
+                        </td>
+                        <td style={{ padding:"10px 14px",fontSize:12.5,color:"#4b5563",whiteSpace:"nowrap" }}>
+                          {v.peso_seco ? `${Number(v.peso_seco).toLocaleString("es-PE")} kg` : "—"}
+                        </td>
+                        <td style={{ padding:"10px 14px",fontSize:12,color:"#6b7280",whiteSpace:"nowrap",fontFamily:"ui-monospace,monospace" }}>{v.constancia_mtc||"—"}</td>
+                        <td style={{ padding:"10px 14px",whiteSpace:"nowrap" }} title={v.soat_compania ? `${v.soat_compania} · Póliza ${v.soat_poliza||"—"}` : ""}>
+                          {v.soat_vencimiento ? (
+                            <span style={{ display:"inline-flex",flexDirection:"column",gap:2 }}>
+                              <span style={{ fontSize:12,fontWeight:700,color:v.soat_estado==="VIGENTE"?"#0EA46B":"#DC2626" }}>{v.soat_vencimiento}</span>
+                              <span style={{ fontSize:9.5,color:"#9ca3af" }}>{v.soat_compania||""}</span>
+                            </span>
+                          ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                        </td>
+                        <td style={{ padding:"10px 14px",whiteSpace:"nowrap" }}
+                          title={v.revtec_vencimiento ? [
+                            v.revtec_resultado ? `Resultado: ${v.revtec_resultado}` : "",
+                            v.revtec_certificado ? `Certificado: ${v.revtec_certificado}` : "",
+                            v.revtec_centro ? `Centro: ${v.revtec_centro}` : "",
+                            v.revtec_ultimo_resultado ? `Última inspección: ${v.revtec_ultimo_resultado}` : "",
+                            v.revtec_observaciones ? `Obs.: ${v.revtec_observaciones}` : "",
+                          ].filter(Boolean).join("\n") : ""}>
+                          {v.revtec_vencimiento ? (
+                            <span style={{ display:"inline-flex",flexDirection:"column",gap:2 }}>
+                              <span style={{ fontSize:12,fontWeight:700,color:(v.revtec_estado||"").toUpperCase().includes("VIG")?"#0EA46B":"#DC2626" }}>{v.revtec_vencimiento}</span>
+                              <span style={{ fontSize:9.5,color:v.revtec_ultimo_resultado==="DESAPROBADO"?"#DC2626":"#9ca3af" }}>
+                                {v.revtec_ultimo_resultado==="DESAPROBADO" ? "última: DESAPROBADO" : (v.revtec_resultado||"")}
+                              </span>
+                            </span>
+                          ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
+                        </td>
                         <td style={{ padding:"10px 14px" }}>
                           {(() => {
                             const kmActual = v.kilometraje || 0;
@@ -648,7 +788,7 @@ export default function Vehiculos() {
 
                       {/* EXPANDED ROW */}
                       {open&&(
-                        <tr><td colSpan={15} style={{ background:"#FAF7FF",borderTop:"1px solid #F1EAFF",padding:0 }}>
+                        <tr><td colSpan={23} style={{ background:"#FAF7FF",borderTop:"1px solid #F1EAFF",padding:0 }}>
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,padding:24 }}>
                             {/* LEFT: costo total (todo 0) */}
                             <div>

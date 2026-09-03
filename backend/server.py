@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.7.4-padron-minoristas",
+        "version": "1.8.0-motor-placas",
     }
 
 # ============================================================
@@ -5073,6 +5073,11 @@ class VehiculoCreate(BaseModel):
     kilometraje: Optional[int] = None
     proximo_mtto_fecha: Optional[str] = None
     proximo_mtto_km: Optional[int] = None
+    categoria: Optional[str] = None
+    constancia_mtc: Optional[str] = None
+    ejes: Optional[str] = None
+    carga_util: Optional[str] = None
+    peso_seco: Optional[str] = None
 
 class VehiculoUpdate(BaseModel):
     placa: Optional[str] = None
@@ -5090,6 +5095,11 @@ class VehiculoUpdate(BaseModel):
     kilometraje: Optional[int] = None
     proximo_mtto_fecha: Optional[str] = None
     proximo_mtto_km: Optional[int] = None
+    categoria: Optional[str] = None
+    constancia_mtc: Optional[str] = None
+    ejes: Optional[str] = None
+    carga_util: Optional[str] = None
+    peso_seco: Optional[str] = None
 
 class ConductorCreate(BaseModel):
     dni: str = Field(min_length=8, max_length=8)
@@ -5201,6 +5211,572 @@ async def consulta_sunarp_placa(req: Request, placa: str):
         raise HTTPException(e.code, f"{err_msg} (HTTP {e.code})")
     except Exception as e:
         raise HTTPException(500, f"Error de servidor: {str(e)}")
+
+
+# WMI (3 primeras letras del VIN) → fabricante. Cubre las marcas comunes de las
+# flotas peruanas; si el código no está, la marca queda para consultadatos/manual.
+_WMI_MARCAS = {
+    "9BS": "SCANIA", "YS2": "SCANIA",
+    "93K": "VOLVO", "YV2": "VOLVO", "YB3": "VOLVO",
+    "9BM": "MERCEDES-BENZ", "W1T": "MERCEDES-BENZ", "WDB": "MERCEDES-BENZ", "8AC": "MERCEDES-BENZ",
+    "8AJ": "TOYOTA", "MR0": "TOYOTA", "JTF": "TOYOTA", "JTE": "TOYOTA",
+    "MMB": "MITSUBISHI", "JMB": "MITSUBISHI", "JA4": "MITSUBISHI",
+    "JHH": "HINO", "JHD": "HINO", "JHF": "HINO", "5PV": "HINO",
+    "9BW": "VOLKSWAGEN",
+    "3HA": "INTERNATIONAL", "1HT": "INTERNATIONAL", "3HS": "INTERNATIONAL",
+    "JAL": "ISUZU", "JAA": "ISUZU",
+    "KMH": "HYUNDAI", "KMF": "HYUNDAI",
+    "LZZ": "SINOTRUK", "LGA": "DONGFENG", "LGB": "DONGFENG",
+    "LVB": "FOTON", "LFN": "FAW", "LBZ": "JAC",
+    "MHF": "TOYOTA", "8AD": "PEUGEOT", "3N6": "NISSAN", "JN1": "NISSAN",
+    "KL5": "CHEVROLET", "9GA": "CHEVROLET",
+}
+
+
+def _marca_por_vin(vin: str) -> str:
+    """Deduce la marca del vehículo por el WMI del VIN/chasis."""
+    wmi = (vin or "").strip().upper()[:3]
+    return _WMI_MARCAS.get(wmi, "")
+
+
+async def _jsonpe(recurso: str, body: dict) -> dict:
+    """POST a api.json.pe (placa, soat, revision-tecnica, licencia). Devuelve el
+    dict `data` o {} si no hay token, falla la red o el proveedor no tiene datos."""
+    token = os.getenv("JSONPE_TOKEN", "").strip()
+    if not token:
+        return {}
+    import json
+    import urllib.request as _ur
+
+    req = _ur.Request(f"https://api.json.pe/api/{recurso}",
+                      data=json.dumps(body).encode(), method="POST",
+                      headers={"Authorization": f"Bearer {token}",
+                               "Content-Type": "application/json"})
+    def _fetch():
+        with _ur.urlopen(req, timeout=25) as r:
+            return json.loads(r.read())
+    import urllib.error as _ue
+    try:
+        res = await asyncio.to_thread(_fetch)
+    except _ue.HTTPError as e:
+        # json.pe responde 404 tanto para "no hay registro" (unidad nueva sin CITV) como
+        # para fallas del MTC ("Error de red MTC: 429"). Solo el primero se marca como
+        # SIN REGISTRO; la falla es transitoria y se reintenta en la siguiente pasada.
+        if e.code == 404:
+            try:
+                msg = str(json.loads(e.read()).get("message", ""))
+            except Exception:
+                msg = ""
+            if re.search(r"no se encontr", msg, re.I) and not re.search(r"error de red|429|timeout", msg, re.I):
+                return {"_sin_registro": True}
+        return {}
+    except Exception:
+        return {}
+    if not res.get("success"):
+        return {}
+    data = res.get("data")
+    # placa/soat devuelven un objeto; revision-tecnica devuelve una LISTA de inspecciones
+    if isinstance(data, list):
+        return {"_lista": data}
+    return data if isinstance(data, dict) else {}
+
+
+async def _placa_leyenda(placa: str) -> dict:
+    """Ficha de la placa: json.pe primero (marca, modelo, VIN/serie, color, motor);
+    consultadatos como respaldo si está configurado. Devuelve {} sin datos."""
+    jp = await _jsonpe("placa", {"placa": placa})
+    if jp:
+        out = {k: x for k, x in {
+            "marca": jp.get("marca", ""), "modelo": jp.get("modelo", ""),
+            "chasis": (jp.get("vin") or jp.get("serie") or "").upper(),
+            "color": jp.get("color", ""), "motor": jp.get("motor", ""),
+        }.items() if x}
+        try:
+            a = int(jp.get("anio") or 0)
+            if a > 1900:
+                out["año"] = a
+        except Exception:
+            pass
+        if out:
+            return out
+    token = os.getenv("CONSULTADATOS_TOKEN", "").strip()
+    if not token:
+        return {}
+    import json
+    import urllib.request as _ur
+    import ssl as _ssl
+    ctx = _ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = _ssl.CERT_NONE
+    req = _ur.Request(f"https://api2.consultadatos.com/api/placa/leyenda/{placa}",
+                      headers={"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0",
+                               "Accept": "application/json"})
+    def _fetch():
+        with _ur.urlopen(req, context=ctx, timeout=8) as r:
+            return json.loads(r.read())
+    try:
+        res = await asyncio.to_thread(_fetch)
+    except Exception:
+        return {}
+    if not (res.get("success") and res.get("data")):
+        return {}
+    v = res["data"].get("vehiculo", {}) or {}
+    props = res["data"].get("propietarios", []) or []
+    año = None
+    try:
+        año = int(v.get("ano_fab") or v.get("an_mode") or 0) or None
+    except Exception:
+        pass
+    return {k: x for k, x in {
+        "marca": v.get("marca", ""), "modelo": v.get("modelo", ""),
+        "chasis": v.get("no_vin") or v.get("num_serie", ""), "año": año,
+        "titular": (props[0].get("propietario", "") if props else ""),
+        "tipo": v.get("desc_tipo_carr", ""),
+    }.items() if x}
+
+
+async def _placa_soat(placa: str) -> dict:
+    """SOAT vigente por placa: json.pe primero (compañía, vigencia, póliza, estado);
+    consultadatos como respaldo. Devuelve {} sin datos."""
+    jp = await _jsonpe("soat", {"placa": placa})
+    if jp and (jp.get("fecha_fin") or jp.get("estado")):
+        return {k: x for k, x in {
+            "soat_vencimiento": jp.get("fecha_fin", ""),
+            "soat_compania": jp.get("nombre_compania", ""),
+            "soat_poliza": jp.get("numero_poliza", ""),
+            "soat_estado": jp.get("estado", ""),
+        }.items() if x}
+    token = os.getenv("CONSULTADATOS_TOKEN", "").strip()
+    if not token:
+        return {}
+    import json
+    import urllib.request as _ur
+    import ssl as _ssl
+    ctx = _ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = _ssl.CERT_NONE
+    req = _ur.Request(f"https://api2.consultadatos.com/api/placa/soat/{placa}",
+                      headers={"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0",
+                               "Accept": "application/json"})
+    def _fetch():
+        with _ur.urlopen(req, context=ctx, timeout=8) as r:
+            return json.loads(r.read())
+    try:
+        res = await asyncio.to_thread(_fetch)
+    except Exception:
+        return {}
+    data = res.get("data") or res
+    if not isinstance(data, dict):
+        return {}
+    soat = data.get("soat") or data
+    venc = (soat.get("fecha_fin") or soat.get("fecha_vencimiento") or soat.get("vencimiento")
+            or soat.get("fin_vigencia") or soat.get("end_date") or "")
+    out = {}
+    if venc:
+        out["soat_vencimiento"] = str(venc)[:10]
+    for k_dst, keys in (("soat_compania", ("compania", "aseguradora", "company")),
+                        ("soat_poliza", ("poliza", "numero_poliza", "certificado"))):
+        for k in keys:
+            if soat.get(k):
+                out[k_dst] = soat[k]
+                break
+    return out
+
+
+async def _placa_revtec(placa: str) -> dict:
+    """Revisión técnica (CITV) por placa vía json.pe (consulta al MTC). Devuelve {}
+    si no hay datos o el MTC limita las consultas (reintentar luego)."""
+    jp = await _jsonpe("revision-tecnica", {"placa": placa})
+    if not jp:
+        return {}
+    if jp.get("_sin_registro"):
+        return {"revtec_estado": "SIN REGISTRO",
+                "revtec_consultado_en": datetime.now(timezone.utc).isoformat()}
+    # json.pe devuelve la lista de inspecciones (orden ULTIMO/PENULTIMO...): tomamos la
+    # última CON vigencia (un informe DESAPROBADO no tiene vigente_hasta).
+    items = jp.get("_lista") if isinstance(jp.get("_lista"), list) else [jp]
+    items = [i for i in items if isinstance(i, dict)]
+    if not items:
+        return {}
+    ult = next((i for i in items if str(i.get("orden", "")).upper() == "ULTIMO"), items[0])
+    con_vig = next((i for i in items if i.get("vigente_hasta")), None)
+    src = ult if ult.get("vigente_hasta") else (con_vig or ult)
+    venc = (src.get("vigente_hasta") or src.get("fecha_vencimiento") or src.get("fecha_fin") or "")
+    out = {}
+    if venc:
+        out["revtec_vencimiento"] = str(venc)[:10]
+    for k_dst, keys in (("revtec_estado", ("estado", "vigencia")),
+                        ("revtec_resultado", ("resultado_inspeccion", "resultado", "calificacion")),
+                        ("revtec_centro", ("empresa_certificadora", "centro", "planta", "entidad")),
+                        ("revtec_certificado", ("numero_certificado",)),
+                        ("revtec_desde", ("vigente_desde",)),
+                        ("revtec_observaciones", ("observaciones",))):
+        for k in keys:
+            if src.get(k):
+                out[k_dst] = src[k]
+                break
+    # la última inspección (aunque sea desaprobada) manda en el resultado mostrado
+    if ult is not src and ult.get("resultado_inspeccion"):
+        out["revtec_ultimo_resultado"] = ult["resultado_inspeccion"]
+        if ult.get("observaciones"):
+            out["revtec_observaciones"] = ult["observaciones"]
+    return out
+
+
+@api.get("/vehiculos/ficha/{placa}")
+async def ficha_vehiculo(req: Request, placa: str):
+    """Ficha completa de una placa para autollenar el formulario: MTC (chasis/VIN,
+    categoría, año, ejes, carga útil, peso seco, constancia) + marca por el VIN +
+    consultadatos si está activo (marca, modelo, titular, tipo)."""
+    import mtc as _mtc3
+    await require_auth(req)
+    p = (placa or "").replace("-", "").replace(" ", "").upper()
+    if len(p) < 6:
+        raise HTTPException(400, "Placa no válida")
+    ficha: dict = {"placa": p, "fuentes": []}
+    try:
+        m = await _mtc3.consultar("placa", p)
+        for a in m.get("autorizaciones", []):
+            for veh in a.get("vehiculos", []):
+                if (veh.get("placa") or "").replace("-", "").replace(" ", "").upper() != p:
+                    continue
+                ficha.update({k: x for k, x in {
+                    "chasis": (veh.get("chasis") or "").upper(),
+                    "categoria": (veh.get("categoria") or "").upper(),
+                    "constancia_mtc": veh.get("constancia"),
+                    "ejes": veh.get("ejes"), "carga_util": veh.get("carga_util"),
+                    "peso_seco": veh.get("peso_seco"),
+                }.items() if x})
+                try:
+                    a_int = int(veh.get("anio") or 0)
+                    if a_int > 1900:
+                        ficha["año"] = a_int
+                except Exception:
+                    pass
+                if not ficha.get("titular") and a.get("razon_social"):
+                    ficha["titular"] = a["razon_social"]
+                ficha["fuentes"].append("MTC")
+                break
+    except Exception:
+        pass
+    ley = await _placa_leyenda(p)
+    for campo in ("marca", "modelo", "chasis", "año", "titular", "tipo"):
+        if ley.get(campo) and not ficha.get(campo):
+            ficha[campo] = ley[campo]
+            if "SUNARP" not in ficha["fuentes"]:
+                ficha["fuentes"].append("SUNARP")
+    if not ficha.get("marca"):
+        m_vin = _marca_por_vin(ficha.get("chasis", ""))
+        if m_vin:
+            ficha["marca"] = m_vin
+            ficha["fuentes"].append("VIN")
+    soat = await _placa_soat(p)
+    if soat:
+        ficha.update(soat)
+        ficha["fuentes"].append("SOAT")
+    revtec = await _placa_revtec(p)
+    if revtec:
+        ficha.update(revtec)
+        ficha["fuentes"].append("CITV")
+    if ficha.get("marca") and ficha.get("modelo"):
+        try:
+            from services.valorizacion import valorizar as _valorizar
+            val = await _valorizar(db, ficha["marca"], ficha["modelo"], ficha.get("año"), ficha.get("categoria"))
+            if val:
+                ficha.update(val)
+                ficha["fuentes"].append("MEF")
+        except Exception:
+            pass
+    if len(ficha) <= 2:
+        raise HTTPException(404, "No se encontró información para esta placa")
+    return ficha
+
+
+@api.post("/vehiculos/valores-referenciales/sync")
+async def sync_valores_referenciales(req: Request):
+    """Descarga la Tabla de Valores Referenciales del MEF (anexo Excel oficial) y la
+    carga en la base. Correr una vez por ejercicio (se publica cada enero)."""
+    u = await require_auth(req)
+    if u["role"] != "admin_enered":
+        raise HTTPException(403, "Solo administradores ENERED")
+    from services.valorizacion import sincronizar as _sync_val
+    try:
+        return await _sync_val(db)
+    except Exception as e:
+        raise HTTPException(503, f"No se pudo sincronizar la tabla del MEF: {e}")
+
+
+@api.get("/vehiculos/valor-flota")
+async def valor_flota(req: Request):
+    """Suma del valor referencial de la flota de la empresa activa."""
+    u = await require_auth(req)
+    # unidades INACTIVAS (vendidas/de baja) no suman patrimonio
+    filt = {"valor_referencial": {"$gt": 0}, "estado": {"$not": {"$regex": "^INACTIVO$", "$options": "i"}}}
+    if u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    elif u["role"] != "admin_enered":
+        return {"total": 0, "unidades": 0}
+    total, n = 0.0, 0
+    async for v in db.vehiculos.find(filt, {"_id": 0, "valor_referencial": 1}):
+        total += float(v.get("valor_referencial") or 0)
+        n += 1
+    return {"total": round(total), "unidades": n, "fuente": "MEF · Tabla de Valores Referenciales 2026"}
+
+
+class VerificacionManualIn(BaseModel):
+    placa: str
+    campo: Literal["revtec", "soat"] = "revtec"
+    vencimiento: str  # dd/mm/yyyy
+    estado: Optional[str] = None
+
+
+@api.post("/vehiculos/verificacion-manual")
+async def vehiculo_verificacion_manual(payload: VerificacionManualIn, req: Request):
+    """Registra una vigencia consultada MANUALMENTE en el portal oficial (CITV del MTC,
+    SOAT, etc.): la persona hace la consulta con captcha en el portal y pega aquí el
+    resultado; ENERED lo guarda, lo muestra en Vehículos/Documentación y alerta el
+    vencimiento. Complemento humano de las fuentes que no permiten automatización."""
+    u = await require_auth(req)
+    placa = (payload.placa or "").replace("-", "").replace(" ", "").upper()
+    if not placa:
+        raise HTTPException(400, "Placa requerida")
+    ven = (payload.vencimiento or "").strip()
+    if not re.fullmatch(r"\d{2}/\d{2}/\d{4}", ven):
+        raise HTTPException(400, "La fecha debe ser dd/mm/aaaa")
+    filt = {"placa": placa}
+    if u["role"] != "admin_enered" or u.get("empresa"):
+        filt["empresa"] = u.get("empresa")
+    v = await db.vehiculos.find_one(filt)
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado en la empresa activa")
+    pref = "revtec" if payload.campo == "revtec" else "soat"
+    cambios = {
+        f"{pref}_vencimiento": ven,
+        f"{pref}_estado": (payload.estado or "VIGENTE").upper(),
+        f"{pref}_fuente": "manual",
+        f"{pref}_verificado_por": u.get("email") or u.get("name") or "",
+        f"{pref}_verificado_en": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.vehiculos.update_one({"_id": v["_id"]} if "_id" in v else {"id": v.get("id")},
+                                  {"$set": cambios})
+    return {"ok": True, "placa": placa, "guardado": {k: cambios[k] for k in (f"{pref}_vencimiento", f"{pref}_estado")}}
+
+
+@api.post("/vehiculos/enriquecer")
+async def enriquecer_vehiculos(req: Request):
+    """Completa automáticamente los campos vacíos de la flota a partir de la placa:
+    consultadatos (marca, modelo, VIN/chasis, año, titular, tipo) + MTC (categoría y
+    constancia de habilitación). NUNCA pisa un dato ya escrito. La placa es la llave:
+    nada debe quedar vacío."""
+    u = await require_auth(req)
+    filt = {}
+    if u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    elif u["role"] != "admin_enered":
+        raise HTTPException(403, "Sin empresa activa")
+    return await _enriquecer_flota(filt)
+
+
+async def _enriquecer_flota(filt: dict) -> dict:
+    """Núcleo del motor de placas (lo usan el botón y la tarea nocturna)."""
+    import mtc as _mtc2
+    CAMPOS = ["marca", "modelo", "chasis", "año", "titular", "tipo",
+              "categoria", "constancia_mtc", "ejes", "carga_util", "peso_seco",
+              "soat_vencimiento", "revtec_vencimiento", "valor_referencial"]
+    vehiculos = await db.vehiculos.find(filt).to_list(2000)
+    revisados, completados_total, detalle = 0, 0, []
+    leyenda_caida = False
+    fallos_mtc, mtc_bloqueado = 0, False  # freno automático ante 429 del MTC (vía json.pe)
+
+    # El listado del MTC trae la FLOTA COMPLETA de la autorización en una sola consulta
+    # (placa, constancia, categoría, chasis/VIN, año, ejes, carga útil, peso seco):
+    # se cachea para no repetir el scrape por cada unidad.
+    def _np(p):
+        return (p or "").replace("-", "").replace(" ", "").upper()
+    mtc_cache: dict = {}
+    mtc_consultadas: set = set()
+
+    async def _mtc_datos(placa: str) -> dict:
+        if placa in mtc_cache:
+            return mtc_cache[placa]
+        if placa in mtc_consultadas:
+            return {}
+        mtc_consultadas.add(placa)
+        try:
+            m = await _mtc2.consultar("placa", placa)
+            for a in m.get("autorizaciones", []):
+                for veh in a.get("vehiculos", []):
+                    pn = _np(veh.get("placa"))
+                    if pn:
+                        mtc_cache.setdefault(pn, veh)
+        except Exception:
+            pass
+        return mtc_cache.get(placa) or {}
+
+    # Consumo inteligente de créditos: SOAT y revisión técnica solo se (re)consultan si
+    # no hay dato, si vencen en ≤30 días (posible renovación) o si el proveedor dijo
+    # "sin registro" hace más de 30 días. Nunca se repite lo vigente.
+    def _dias_para(fecha_ddmmyyyy: str):
+        try:
+            d, m, a = map(int, str(fecha_ddmmyyyy).split("/")[:3])
+            return (datetime(a, m, d, tzinfo=timezone.utc) - datetime.now(timezone.utc)).days
+        except Exception:
+            return None
+
+    def _hace_dias(iso: str):
+        try:
+            return (datetime.now(timezone.utc) - datetime.fromisoformat(iso.replace("Z", "+00:00"))).days
+        except Exception:
+            return 10**6
+
+    def _necesita_vigencia(v, pref):
+        venc = v.get(f"{pref}_vencimiento")
+        ultima = _hace_dias(v.get(f"{pref}_consultado_en") or "")
+        if not venc:
+            if v.get(f"{pref}_estado") == "SIN REGISTRO":
+                return ultima > 30
+            return ultima > 7  # sin dato: reintentar como máximo semanalmente
+        dias = _dias_para(venc)
+        return dias is not None and dias <= 30 and ultima > 7
+
+    for v in vehiculos:
+        placa = _np(v.get("placa") or v.get("veh"))
+        if not placa:
+            continue
+        vacios = [c for c in CAMPOS if not v.get(c) and c not in ("soat_vencimiento", "revtec_vencimiento")]
+        if _necesita_vigencia(v, "soat"):
+            vacios.append("soat_vencimiento")
+        if _necesita_vigencia(v, "revtec"):
+            vacios.append("revtec_vencimiento")
+        if not vacios:
+            continue
+        revisados += 1
+        nuevos: dict = {}
+        # 1) MTC primero: gratis y trae el VIN/chasis oficial del permiso
+        mv = await _mtc_datos(placa)
+        if mv:
+            if "categoria" in vacios and mv.get("categoria"):
+                nuevos["categoria"] = mv["categoria"].upper()
+            if "constancia_mtc" in vacios and mv.get("constancia"):
+                nuevos["constancia_mtc"] = mv["constancia"]
+            if "chasis" in vacios and mv.get("chasis"):
+                nuevos["chasis"] = mv["chasis"].upper()
+            if "año" in vacios and mv.get("anio"):
+                try:
+                    a_int = int(mv["anio"])
+                    if a_int > 1900:
+                        nuevos["año"] = a_int
+                except Exception:
+                    pass
+            for campo in ("ejes", "carga_util", "peso_seco"):
+                if campo in vacios and mv.get(campo) not in (None, "", "0"):
+                    nuevos[campo] = mv[campo]
+        # 2) ficha vehicular (marca, modelo, titular, tipo y lo que el MTC no cubrió)
+        vacios_rest = [c for c in ("marca", "modelo", "chasis", "año", "titular", "tipo")
+                       if c in vacios and c not in nuevos]
+        if vacios_rest:
+            ley = await _placa_leyenda(placa)
+            if not ley and not os.getenv("JSONPE_TOKEN", "").strip():
+                leyenda_caida = True
+            for campo in vacios_rest:
+                if ley.get(campo):
+                    nuevos[campo] = ley[campo]
+            await asyncio.sleep(0.3)  # no saturar al proveedor
+        # 2b) marca por el VIN (WMI): no depende de ningún proveedor
+        if "marca" in vacios and not nuevos.get("marca"):
+            m_vin = _marca_por_vin(nuevos.get("chasis") or v.get("chasis"))
+            if m_vin:
+                nuevos["marca"] = m_vin
+        # 2c) SOAT vigente (json.pe / consultadatos)
+        if "soat_vencimiento" in vacios:
+            s = await _placa_soat(placa)
+            nuevos["soat_consultado_en"] = datetime.now(timezone.utc).isoformat()
+            if s:
+                nuevos.update(s)
+        # 2d) Revisión técnica CITV (json.pe → MTC)
+        if "revtec_vencimiento" in vacios and not mtc_bloqueado:
+            rt = await _placa_revtec(placa)
+            nuevos["revtec_consultado_en"] = datetime.now(timezone.utc).isoformat()
+            if rt:
+                nuevos.update(rt)
+                fallos_mtc = 0
+            else:
+                # sin dato ni "sin registro" = el MTC rechazó (429). Tras 3 seguidos, se frena:
+                # insistir solo quema créditos y alarga el bloqueo; el próximo ciclo reintenta.
+                fallos_mtc += 1
+                if fallos_mtc >= 3:
+                    mtc_bloqueado = True
+            await asyncio.sleep(6)  # el MTC (detrás de json.pe) limita ráfagas: gotear, no disparar
+        # 2e) Valor referencial (tabla oficial MEF, gratis): necesita marca + modelo
+        if "valor_referencial" in vacios:
+            marca_v = nuevos.get("marca") or v.get("marca")
+            modelo_v = nuevos.get("modelo") or v.get("modelo")
+            if marca_v and modelo_v:
+                try:
+                    from services.valorizacion import valorizar as _valorizar
+                    val = await _valorizar(db, marca_v, modelo_v, nuevos.get("año") or v.get("año"),
+                                           nuevos.get("categoria") or v.get("categoria"))
+                    if val:
+                        nuevos.update(val)
+                except Exception:
+                    pass
+        if nuevos:
+            nuevos["enriquecido_en"] = datetime.now(timezone.utc).isoformat()
+            await db.vehiculos.update_one({"id": v["id"]} if v.get("id") else {"_id": v["_id"]},
+                                          {"$set": nuevos})
+            completados_total += len([k for k in nuevos if k != "enriquecido_en"])
+            detalle.append({"placa": placa, "completados": {k: x for k, x in nuevos.items() if k != "enriquecido_en"}})
+
+    # 3) Unidades que solo existen en el expediente del subsidio (la tabla las muestra
+    #    "prestadas" y salen vacías): se les crea su ficha completa en el módulo.
+    empresa_f = filt.get("empresa")
+    if empresa_f:
+        placas_registradas = {_np(v.get("placa") or v.get("veh")) for v in vehiculos}
+        async for sv in db.subsidio_vehicles.find({"empresa": empresa_f}):
+            placa = _np(sv.get("placa"))
+            if not placa or placa in placas_registradas:
+                continue
+            placas_registradas.add(placa)
+            revisados += 1
+            mv = await _mtc_datos(placa)
+            ley = await _placa_leyenda(placa)
+            if not ley and not os.getenv("JSONPE_TOKEN", "").strip():
+                leyenda_caida = True
+            nuevo_v = {
+                "id": str(uuid.uuid4()), "placa": placa, "empresa": empresa_f,
+                "estado": "OPERATIVO", "origen": "subsidio",
+                "categoria": (mv.get("categoria") or sv.get("categoria") or "").upper() or None,
+                "constancia_mtc": mv.get("constancia") or None,
+                "chasis": (mv.get("chasis") or ley.get("chasis") or "").upper() or None,
+                "ejes": mv.get("ejes") or None,
+                "carga_util": mv.get("carga_util") or None,
+                "peso_seco": mv.get("peso_seco") or None,
+                "marca": ley.get("marca") or _marca_por_vin(mv.get("chasis") or ley.get("chasis")) or None,
+                "modelo": ley.get("modelo") or None,
+                "titular": ley.get("titular") or None,
+                "tipo": ley.get("tipo") or None,
+                "enriquecido_en": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            try:
+                a_raw = mv.get("anio") or ley.get("año")
+                a_int = int(a_raw)
+                if a_int > 1900:
+                    nuevo_v["año"] = a_int
+            except Exception:
+                pass
+            llenados = {k: x for k, x in nuevo_v.items()
+                        if x and k not in ("id", "placa", "empresa", "estado", "origen", "enriquecido_en", "created_at")}
+            await db.vehiculos.insert_one(nuevo_v)
+            completados_total += len(llenados)
+            detalle.append({"placa": placa, "completados": {"(ficha creada)": True, **llenados}})
+
+    aviso = None
+    if leyenda_caida:
+        aviso = ("No hay token de json.pe configurado (JSONPE_TOKEN): solo se completó lo del "
+                 "MTC y la marca por VIN. Configúralo para modelo, SOAT y revisión técnica.")
+    elif mtc_bloqueado:
+        aviso = ("El portal del MTC está limitando las consultas de revisión técnica en este momento; "
+                 "se pausaron para no gastar créditos. Las pendientes se reintentan en el próximo ciclo.")
+    return {"ok": True, "vehiculos_revisados": revisados, "campos_completados": completados_total,
+            "detalle": detalle, "mtc_bloqueado": mtc_bloqueado, "aviso": aviso}
+
 
 @api.get("/vehiculos")
 async def list_vehiculos(req: Request):
@@ -6820,7 +7396,7 @@ SUB_CAT_MAP = {
     "resolucion_autorizacion": ("Empresa", "Resolución de autorización"),
     "dni_representante": ("Empresa", "DNI del representante"),
     "tarjeta_propiedad": ("Vehículos", "Tarjeta de propiedad"),
-    "tarjeta_habilitacion": ("Vehículos", "Tarjeta de habilitación"),
+    "tarjeta_habilitacion": ("Vehículos", "TUC / Tarjeta de habilitación"),
     "tarjeta_circulacion": ("Vehículos", "Tarjeta de circulación"),
     "soat": ("Vehículos", "SOAT"),
     "revision_tecnica": ("Vehículos", "Revisión Técnica"),
@@ -6988,8 +7564,176 @@ async def list_documents(
             "_origen": "subsidio",
         })
 
+    # Documentos VERIFICADOS POR API (motor de placas): el SOAT y la revisión técnica
+    # se consultan automáticamente por placa; aunque nadie haya subido el archivo, el
+    # casillero muestra la vigencia real y alimenta las alertas de vencimiento.
+    if target_empresa:
+        ya = set()
+        for r in results:
+            d_norm = re.sub(r"[^a-z0-9]", "", (r.get("doc") or "").lower())
+            ya.add((r.get("placa") or "", d_norm))
+
+        def _est_de(fecha_ddmmyyyy: str) -> str:
+            try:
+                d, m, a = map(int, fecha_ddmmyyyy.split("/")[:3])
+                venc = datetime(a, m, d, tzinfo=timezone.utc)
+                dias = (venc - datetime.now(timezone.utc)).days
+                if dias < 0:
+                    return "Vencido"
+                if dias <= 30:
+                    return "Próximo"
+                return "Vigente"
+            except Exception:
+                return "Vigente"
+
+        async for v in db.vehiculos.find(
+            {"empresa": target_empresa,
+             "$or": [{"soat_vencimiento": {"$nin": [None, ""]}},
+                     {"revtec_vencimiento": {"$nin": [None, ""]}}]},
+            {"_id": 0, "placa": 1, "soat_vencimiento": 1, "soat_compania": 1, "soat_poliza": 1,
+             "soat_estado": 1, "revtec_vencimiento": 1, "revtec_estado": 1, "revtec_desde": 1,
+             "revtec_certificado": 1, "revtec_centro": 1, "revtec_resultado": 1,
+             "enriquecido_en": 1},
+        ):
+            placa = (v.get("placa") or "").upper().strip()
+            if not placa:
+                continue
+            el_api = (v.get("enriquecido_en") or "")[:10]
+            # Rótulo: quién lo emite y el número del documento (no "automático")
+            soat_por = " · ".join(x for x in [v.get("soat_compania") or "",
+                                              f"Póliza {v['soat_poliza']}" if v.get("soat_poliza") else ""] if x) or "SOAT verificado"
+            rev_por = " · ".join(x for x in [(v.get("revtec_centro") or "")[:40],
+                                             f"Cert. {v['revtec_certificado']}" if v.get("revtec_certificado") else "",
+                                             v.get("revtec_resultado") or ""] if x) or "Revisión verificada"
+            for campo, doc_name, extra in (
+                ("soat_vencimiento", "SOAT", soat_por),
+                ("revtec_vencimiento", "Revisión técnica", rev_por),
+            ):
+                ven = v.get(campo)
+                if not ven:
+                    continue
+                d_norm = re.sub(r"[^a-z0-9]", "", doc_name.lower())
+                # si ya existe un documento subido para ese casillero, manda el archivo real
+                if any(p == placa and (d_norm in dn or dn in d_norm) for p, dn in ya if dn):
+                    continue
+                results.append({
+                    "id": f"api-{d_norm}-{placa}",
+                    "tipo": "Vehículos",
+                    "doc": doc_name,
+                    "por": extra,
+                    "el": el_api,
+                    "emi": (v.get("revtec_desde") or "—") if campo == "revtec_vencimiento" else "—",
+                    "ven": ven,
+                    "atr": "—",
+                    "veh": 1, "grp": 0, "all": 0,
+                    "placa": placa,
+                    "archived": 0,
+                    "est": _est_de(ven),
+                    "filename": "",
+                    "_origen": "api",
+                })
+
     results.sort(key=lambda x: x["id"], reverse=True)
     return results
+
+def _extraer_vigencia_pdf(content: bytes) -> dict:
+    """Lee las fechas de un certificado PDF (revisión técnica, SOAT, etc.):
+    busca la fecha junto a palabras clave (VENCIMIENTO / VIGENCIA HASTA) y la de
+    emisión; si no hay palabra clave, usa la fecha futura más lejana como
+    vencimiento. Devuelve {'emi': 'dd/mm/yyyy', 'ven': 'dd/mm/yyyy'} (parcial u
+    {} si el PDF es imagen escaneada sin texto)."""
+    try:
+        import io as _io
+        import pdfplumber
+        texto = ""
+        with pdfplumber.open(_io.BytesIO(content)) as pdf:
+            for page in pdf.pages[:3]:
+                texto += (page.extract_text() or "") + "\n"
+    except Exception:
+        return {}
+    if not texto.strip():
+        return {}
+    t = texto.upper()
+    _fecha = r"(\d{2})[/\-.](\d{2})[/\-.](\d{4})"
+
+    def _norm(m):
+        d, mth, a = m
+        try:
+            datetime(int(a), int(mth), int(d))
+            return f"{d}/{mth}/{a}"
+        except Exception:
+            return None
+
+    out = {}
+    m = re.search(r"(?:VENCIMIENTO|VIGENCIA\s+HASTA|VALIDO\s+HASTA|VÁLIDO\s+HASTA|HASTA)[^0-9]{0,60}" + _fecha, t)
+    if m:
+        v = _norm(m.groups())
+        if v:
+            out["ven"] = v
+    m = re.search(r"(?:EMISI[OÓ]N|EMITIDO|EXPEDICI[OÓ]N|DESDE|INICIO)[^0-9]{0,60}" + _fecha, t)
+    if m:
+        v = _norm(m.groups())
+        if v:
+            out["emi"] = v
+    if "ven" not in out:
+        # sin palabra clave: la fecha futura más lejana del certificado suele ser el vencimiento
+        fechas = []
+        for g in re.findall(_fecha, t):
+            v = _norm(g)
+            if v:
+                d, mth, a = v.split("/")
+                fechas.append((datetime(int(a), int(mth), int(d), tzinfo=timezone.utc), v))
+        futuras = [x for x in fechas if x[0] > datetime.now(timezone.utc)]
+        if futuras:
+            out["ven"] = max(futuras)[1]
+    return out
+
+
+def _extraer_tarjeta_propiedad_pdf(content: bytes) -> dict:
+    """Lee la Tarjeta de Identificación Vehicular (tarjeta de propiedad) en PDF con texto
+    y devuelve los datos de la unidad: año de fabricación, categoría, marca, modelo,
+    serie/VIN, motor, color y propietario. {} si es una imagen escaneada."""
+    try:
+        import io as _io
+        import pdfplumber
+        texto = ""
+        with pdfplumber.open(_io.BytesIO(content)) as pdf:
+            for page in pdf.pages[:2]:
+                texto += (page.extract_text() or "") + "\n"
+    except Exception:
+        return {}
+    if not texto.strip():
+        return {}
+    import unicodedata as _ud
+    t = _ud.normalize("NFKD", texto).encode("ascii", "ignore").decode().upper()
+    out: dict = {}
+
+    def _campo(patron, flags=0):
+        m = re.search(patron, t, flags)
+        return m.group(1).strip() if m else ""
+
+    a = _campo(r"ANO\s+(?:DE\s+)?FABRICACION\W{0,12}(\d{4})") or _campo(r"ANO\s+MODELO\W{0,12}(\d{4})")
+    if a and 1950 <= int(a) <= datetime.now().year + 1:
+        out["año"] = int(a)
+    cat = _campo(r"CATEGORIA\W{0,12}([MNOL][1-3](?:[A-Z]\d?)?)\b")
+    if cat:
+        out["categoria"] = cat
+    vin = _campo(r"(?:N[°O.\s]*\s*)?(?:VIN|SERIE|CHASIS)\W{0,15}([A-HJ-NPR-Z0-9]{11,17})\b")
+    if vin:
+        out["chasis"] = vin
+    motor = _campo(r"(?:N[°O.\s]*\s*)?MOTOR\W{0,15}([A-Z0-9\-]{5,20})\b")
+    if motor:
+        out["motor"] = motor
+    # etiquetas de una sola línea: "MARCA: VOLVO" / "MODELO: FMX 6X4 R" / "COLOR: BLANCO"
+    for campo, etiqueta in (("marca", "MARCA"), ("modelo", "MODELO"), ("color", "COLOR")):
+        v = _campo(rf"\b{etiqueta}\W{{0,8}}([A-Z0-9][A-Z0-9 .\-/]{{1,40}}?)(?=\s{{2,}}|\s*\n|\s+(?:MARCA|MODELO|COLOR|CATEGORIA|ANO|SERIE|VIN|MOTOR|PLACA|PROPIETARIO)\b)")
+        if v and len(v) >= 2:
+            out[campo] = v.strip()
+    prop = _campo(r"PROPIETARIO(?:\(S\)|S)?\W{0,8}([A-Z0-9][A-Z0-9 .&\-]{3,80}?)(?=\s{2,}|\s*\n)")
+    if prop:
+        out["titular"] = prop.strip()
+    return out
+
 
 @api.post("/documents")
 async def upload_manual_document(
@@ -7009,6 +7753,45 @@ async def upload_manual_document(
     key = f"documents/{user.get('empresa') or 'general'}/{str(uuid.uuid4())}_{file.filename}"
     content_type = file.content_type or "application/octet-stream"
     storage.save_object(key, content, content_type)
+
+    # Lectura automática de vigencias: si el certificado es un PDF con texto
+    # (revisión técnica, SOAT, tarjeta...), las fechas se extraen solas y el
+    # usuario no tiene que digitarlas. Solo llenamos lo que venga vacío.
+    fechas_pdf = {}
+    if "pdf" in (content_type or "").lower() or (file.filename or "").lower().endswith(".pdf"):
+        try:
+            fechas_pdf = await asyncio.to_thread(_extraer_vigencia_pdf, content)
+        except Exception:
+            fechas_pdf = {}
+        if not emi and fechas_pdf.get("emi"):
+            emi = fechas_pdf["emi"]
+        if not ven and fechas_pdf.get("ven"):
+            ven = fechas_pdf["ven"]
+
+    # Tarjeta de propiedad: completa la ficha del vehículo (año, categoría, VIN, motor,
+    # color, marca/modelo, propietario) con lo que dice el documento, solo en campos vacíos.
+    datos_tarjeta = {}
+    try:
+        import unicodedata as _ud
+        _dn = re.sub(r"[^a-z0-9]", "", _ud.normalize("NFKD", doc or "").encode("ascii", "ignore").decode().lower())
+        es_tarjeta = ("propiedad" in _dn or "identificacionvehicular" in _dn or "tiv" == _dn)
+        if es_tarjeta and placa and fechas_pdf is not None and (
+            "pdf" in (content_type or "").lower() or (file.filename or "").lower().endswith(".pdf")):
+            datos_tarjeta = await asyncio.to_thread(_extraer_tarjeta_propiedad_pdf, content)
+            if datos_tarjeta:
+                placa_t = placa.replace("-", "").replace(" ", "").upper()
+                filt_t = {"placa": placa_t}
+                if user.get("empresa"):
+                    filt_t["empresa"] = user["empresa"]
+                veh = await db.vehiculos.find_one(filt_t)
+                if veh:
+                    nuevos_t = {k: x for k, x in datos_tarjeta.items() if x and not veh.get(k)}
+                    if nuevos_t:
+                        nuevos_t["tarjeta_fuente"] = "pdf"
+                        await db.vehiculos.update_one({"_id": veh["_id"]}, {"$set": nuevos_t})
+                    datos_tarjeta = {"leidos": datos_tarjeta, "aplicados": [k for k in nuevos_t if k != "tarjeta_fuente"]}
+    except Exception:
+        datos_tarjeta = {}
 
     doc_id = str(uuid.uuid4())
     doc_record = {
@@ -7039,11 +7822,70 @@ async def upload_manual_document(
     }
 
     await db.documents.insert_one(doc_record)
+
+    # Si es la revisión técnica o el SOAT de una placa y tenemos vencimiento,
+    # se refleja también en la ficha del vehículo (columna + alertas).
+    try:
+        import unicodedata as _ud
+        d_ascii = _ud.normalize("NFKD", doc or "").encode("ascii", "ignore").decode()
+        d_norm = re.sub(r"[^a-z0-9]", "", d_ascii.lower())
+        placa_n = (placa or "").replace("-", "").replace(" ", "").upper()
+        ven_ok = ven and re.fullmatch(r"\d{2}/\d{2}/\d{4}", ven or "")
+        pref = None
+        if "revision" in d_norm or "revtec" in d_norm or "citv" in d_norm:
+            pref = "revtec"
+        elif "soat" in d_norm:
+            pref = "soat"
+        if pref and placa_n and ven_ok:
+            filt_v = {"placa": placa_n}
+            if user.get("empresa"):
+                filt_v["empresa"] = user["empresa"]
+            await db.vehiculos.update_one(filt_v, {"$set": {
+                f"{pref}_vencimiento": ven,
+                f"{pref}_estado": "VIGENTE",
+                f"{pref}_fuente": "pdf",
+            }})
+    except Exception:
+        pass
+
     doc_record.pop("_id", None)
     doc_record.pop("storage_key", None)
     doc_record.pop("content_type", None)
     doc_record["_origen"] = "manual"
+    if fechas_pdf:
+        doc_record["_fechas_leidas_del_pdf"] = fechas_pdf
+    if datos_tarjeta:
+        doc_record["_datos_tarjeta"] = datos_tarjeta
     return doc_record
+
+class DocumentMetaUpdate(BaseModel):
+    doc: Optional[str] = None
+    emi: Optional[str] = None
+    ven: Optional[str] = None
+    ref: Optional[str] = None
+    desc: Optional[str] = None
+
+
+@api.patch("/documents/{doc_id}")
+async def update_document_meta(
+    doc_id: str,
+    payload: DocumentMetaUpdate,
+    user: dict = Depends(get_current_user),
+):
+    """Edita SOLO los metadatos de un documento (fechas, referencia, nombre, nota)
+    sin exigir volver a subir el archivo — el adjunto existente se conserva."""
+    doc = await db.documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    if user["role"] != "admin_enered" and doc.get("empresa") != user.get("empresa"):
+        raise HTTPException(status_code=403, detail="No autorizado")
+    cambios = {k: v for k, v in payload.model_dump(exclude_unset=True).items() if v is not None}
+    if not cambios:
+        return {"status": "sin_cambios"}
+    cambios["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.documents.update_one({"id": doc_id}, {"$set": cambios})
+    return {"status": "updated", "cambios": list(cambios.keys())}
+
 
 @api.delete("/documents/{doc_id}")
 async def delete_document(
@@ -7502,6 +8344,39 @@ async def temp_backfill_invoices(_: dict = Depends(require_roles("admin_enered")
     return {"ok": True, "backfilled": created}
 
 
+async def _vigencias_nocturnas():
+    """Tarea programada: recorre todas las empresas a ritmo lento (goteo) y actualiza
+    lo que falte o esté por vencer (SOAT, revisión técnica, ficha). Se activa SOLO con
+    VIGENCIAS_AUTO=1; hora local Perú configurable con VIGENCIAS_HORA (default 03)."""
+    hora = int(os.getenv("VIGENCIAS_HORA", "3"))
+    while True:
+        try:
+            # esperar hasta la próxima ejecución (hora Perú = UTC-5)
+            ahora = datetime.now(timezone.utc) - timedelta(hours=5)
+            objetivo = ahora.replace(hour=hora, minute=0, second=0, microsecond=0)
+            if objetivo <= ahora:
+                objetivo += timedelta(days=1)
+            await asyncio.sleep(max(60, (objetivo - ahora).total_seconds()))
+            empresas = [e for e in await db.vehiculos.distinct("empresa") if e]
+            logger.info(f"[vigencias] inicio ciclo nocturno · {len(empresas)} empresas")
+            total = 0
+            for emp in empresas:
+                try:
+                    r = await _enriquecer_flota({"empresa": emp})
+                    total += r.get("campos_completados", 0)
+                    if r.get("mtc_bloqueado"):
+                        logger.warning(f"[vigencias] MTC bloqueado durante {emp}; se sigue con SOAT/otros")
+                except Exception as e:
+                    logger.warning(f"[vigencias] {emp}: {e}")
+                await asyncio.sleep(20)  # pausa entre empresas: nunca en ráfaga
+            logger.info(f"[vigencias] ciclo terminado · {total} campos actualizados")
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"[vigencias] error de ciclo: {e}")
+            await asyncio.sleep(600)
+
+
 @app.on_event("startup")
 async def startup():
     try:
@@ -7523,6 +8398,12 @@ async def startup():
         logger.info("ATU guardián iniciado")
     except Exception as e:
         print("ATU guardián no arrancó:", e)
+
+    # Vigencias automáticas (SOAT / revisión técnica / ficha) a ritmo lento, de noche.
+    # Apagado por defecto: gasta créditos de json.pe; se enciende con VIGENCIAS_AUTO=1.
+    if os.getenv("VIGENCIAS_AUTO", "").strip() == "1":
+        asyncio.create_task(_vigencias_nocturnas())
+        logger.info(f"[vigencias] tarea nocturna activada (hora Perú {os.getenv('VIGENCIAS_HORA', '3')}:00)")
 
     try:
         await db.users.create_index("email", unique=True)

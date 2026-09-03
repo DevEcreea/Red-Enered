@@ -218,6 +218,41 @@ export default function Documentacion() {
     localStorage.setItem("doc_templates", JSON.stringify(templates));
   }, [templates]);
   const [verArch, setVerArch]   = useState(false);
+  const [autoVig, setAutoVig]   = useState(false);
+  // Verificación guiada CITV: la consulta oficial tiene captcha (solo humanos), así que
+  // la persona consulta en el portal y pega aquí el vencimiento; ENERED lo guarda y alerta.
+  const [guiadaOpen, setGuiadaOpen] = useState(false);
+  const [guiadaVehs, setGuiadaVehs] = useState([]);
+  const [guiadaForm, setGuiadaForm] = useState({}); // placa -> {fecha, estado, guardando, ok}
+
+  async function abrirGuiada() {
+    setGuiadaOpen(true);
+    try {
+      const { data } = await api.get("/vehiculos");
+      const vs = (data || [])
+        .filter(v => (v.placa || v.veh))
+        .map(v => ({ placa: (v.placa || v.veh).toUpperCase(), revtec: v.revtec_vencimiento || "" }))
+        .sort((a, b) => (a.revtec ? 1 : 0) - (b.revtec ? 1 : 0) || a.placa.localeCompare(b.placa));
+      setGuiadaVehs(vs);
+    } catch { setGuiadaVehs([]); }
+  }
+
+  async function guardarGuiada(placa) {
+    const f = guiadaForm[placa] || {};
+    if (!f.fecha) { alert("Ingresa la fecha de vencimiento"); return; }
+    const [a, m, d] = f.fecha.split("-");
+    const ven = `${d}/${m}/${a}`;
+    setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: true } }));
+    try {
+      await api.post("/vehiculos/verificacion-manual", { placa, campo: "revtec", vencimiento: ven, estado: f.estado || "VIGENTE" });
+      setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: false, ok: true } }));
+      setGuiadaVehs(p => p.map(v => v.placa === placa ? { ...v, revtec: ven } : v));
+      load();
+    } catch (err) {
+      setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: false } }));
+      alert("Error: " + (err.response?.data?.detail || err.message));
+    }
+  }
   const [openMenu, setOpenMenu] = useState(null); // doc id with open row-menu
   const [addOpen, setAddOpen]   = useState(false);
   const [toast, setToast]       = useState(null);
@@ -632,6 +667,40 @@ export default function Documentacion() {
   const handleSaveDoc = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
+      // Sin archivo nuevo: si el documento ya existe, se editan SOLO los datos
+      // (fechas, referencia, nota) y el adjunto actual se conserva.
+      const slotName = (newDoc.doc || addForm || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const existente = newDoc.id
+        ? docs.find((d) => d.id === newDoc.id)
+        : docs.find((d) => {
+            if (d.tipo !== tab) return false;
+            const dName = (d.doc || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (!(dName.includes(slotName) || slotName.includes(dName))) return false;
+            if (tab === "Vehículos") return newDoc.placa && d.placa === newDoc.placa;
+            if (tab === "Personal") return newDoc.conductor_id && d.conductor_id === newDoc.conductor_id;
+            if (tab === "Viajes") return newDoc.viaje_id && d.viaje_id === newDoc.viaje_id;
+            if (tab === "Empresa") return true;
+            return false;
+          });
+      if (existente) {
+        try {
+          await api.patch(`/documents/${existente.id}`, {
+            doc: newDoc.doc || undefined,
+            emi: newDoc.emi || undefined,
+            ven: newDoc.ven || undefined,
+            ref: newDoc.ref || undefined,
+            desc: newDoc.desc || undefined,
+          });
+          setAddForm(null);
+          setSelectedFile(null);
+          setNewDoc({});
+          showToast("Datos actualizados (se conservó el documento adjunto)");
+          load();
+        } catch (err) {
+          alert("Error al actualizar: " + (err.response?.data?.detail || err.message));
+        }
+        return;
+      }
       alert("Por favor selecciona un archivo");
       return;
     }
@@ -773,9 +842,43 @@ export default function Documentacion() {
           )}
         </div>
         <div style={{ display:"flex",alignItems:"center",gap:12,position:"relative" }}>
+          {/* Vigencias automáticas por placa (SOAT / revisión técnica) desde el motor de placas */}
+          {!isTemplate && tab === "Vehículos" && (
+            <button
+              onClick={async () => {
+                if (autoVig) return;
+                setAutoVig(true);
+                try {
+                  const { data } = await api.post("/vehiculos/enriquecer");
+                  const n = data.campos_completados ?? 0;
+                  let msg = n > 0
+                    ? `✨ ${n} dato(s) de vigencia actualizados automáticamente.`
+                    : "Las vigencias ya estaban al día.";
+                  if (data.aviso) msg += `\n⚠️ ${data.aviso}`;
+                  alert(msg);
+                  load();
+                } catch (err) {
+                  alert("Error: " + (err.response?.data?.detail || err.message));
+                } finally { setAutoVig(false); }
+              }}
+              title="Consulta automáticamente el SOAT y la revisión técnica de cada placa (MTC + API) y actualiza los vencimientos"
+              data-testid="btn-vigencias-auto"
+              style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:600,border:"none",background:"#7C3AED",color:"#fff",borderRadius:8,cursor:"pointer",opacity:autoVig?0.7:1 }}>
+              <RotateCcw style={{ width:15,height:15,animation:autoVig?"spin 1s linear infinite":"none" }}/>
+              {autoVig ? "Consultando..." : "Actualizar vigencias (auto)"}
+            </button>
+          )}
+          {!isTemplate && tab === "Vehículos" && (
+            <button onClick={abrirGuiada}
+              title="Registra la revisión técnica consultando el portal oficial del MTC placa por placa"
+              data-testid="btn-verificacion-guiada"
+              style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:600,border:"1px solid #7C3AED",background:"#F5F0FF",color:"#7C3AED",borderRadius:8,cursor:"pointer" }}>
+              <CheckCircle2 style={{ width:15,height:15 }}/> Verificar CITV (guiado)
+            </button>
+          )}
           {!isTemplate && (
             <button onClick={()=>setMultiAddOpen(true)} style={{ display:"flex",alignItems:"center",gap:8,height:38,padding:"0 14px",fontSize:13,fontWeight:500,border:"1px solid #E5E7EB",background:"#fff",color:"#374151",borderRadius:8,cursor:"pointer" }}>
-              <Plus style={{ width:15,height:15,color:"#8B3DFF" }}/> 
+              <Plus style={{ width:15,height:15,color:"#8B3DFF" }}/>
               {tab === "Vehículos" ? "Agregar vehículo" : tab === "Personal" ? "Agregar personal" : tab === "Viajes" ? "Agregar viaje" : "Agregar empresa"}
             </button>
           )}
@@ -1898,6 +2001,65 @@ export default function Documentacion() {
       )}
 
       {/* ══════ MODAL: CARGA MÚLTIPLE ══════ */}
+      {/* ── Verificación guiada de revisión técnica (CITV) ── */}
+      {guiadaOpen && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(17,24,39,.55)",zIndex:60,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}
+          onClick={()=>setGuiadaOpen(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#fff",borderRadius:16,width:"min(760px,100%)",maxHeight:"86vh",display:"flex",flexDirection:"column",overflow:"hidden" }}>
+            <div style={{ padding:"16px 20px",borderBottom:"1px solid #F3F4F6",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap" }}>
+              <div>
+                <div style={{ fontWeight:800,fontSize:16,color:"#111827" }}>Verificación guiada · Revisión técnica (CITV)</div>
+                <div style={{ fontSize:12,color:"#6b7280",marginTop:2 }}>
+                  La consulta del MTC pide un captcha (solo humanos). Ábrela, escribe la placa, y pega aquí el vencimiento — ENERED lo guarda y te avisa antes de que venza.
+                </div>
+              </div>
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <span style={{ fontSize:11,fontWeight:800,color:"#7C3AED",background:"#F1EAFF",padding:"4px 10px",borderRadius:999 }}>
+                  {guiadaVehs.filter(v=>v.revtec).length} / {guiadaVehs.length} verificadas
+                </span>
+                <button onClick={()=>setGuiadaOpen(false)} style={{ background:"none",border:"none",cursor:"pointer",color:"#9ca3af" }}><X style={{ width:18,height:18 }}/></button>
+              </div>
+            </div>
+            <a href="https://rec.mtc.gob.pe/Citv/ArConsultaCitv" target="_blank" rel="noreferrer"
+              style={{ margin:"12px 20px 0",display:"flex",alignItems:"center",justifyContent:"center",gap:8,padding:"10px 0",background:"#7C3AED",color:"#fff",borderRadius:10,fontSize:13,fontWeight:700,textDecoration:"none" }}>
+              Abrir consulta oficial del MTC ↗
+            </a>
+            <div style={{ overflowY:"auto",padding:"12px 20px 20px" }}>
+              {guiadaVehs.length===0 && <div style={{ color:"#9ca3af",fontSize:13,padding:20,textAlign:"center" }}>Cargando placas…</div>}
+              {guiadaVehs.map(v => {
+                const f = guiadaForm[v.placa] || {};
+                return (
+                  <div key={v.placa} style={{ display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 0",borderBottom:"1px solid #F3F4F6" }}>
+                    <span style={{ fontWeight:800,fontFamily:"ui-monospace,monospace",fontSize:13,minWidth:76 }}>{v.placa}</span>
+                    {v.revtec ? (
+                      <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:12.5,color:"#0EA46B",fontWeight:700 }}>
+                        <CheckCircle2 style={{ width:15,height:15 }}/> vence {v.revtec}{f.ok ? " · guardado ✓" : ""}
+                      </span>
+                    ) : (
+                      <>
+                        <input type="date" value={f.fecha||""}
+                          onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,fecha:e.target.value } }))}
+                          style={{ height:34,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}/>
+                        <select value={f.estado||"VIGENTE"}
+                          onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,estado:e.target.value } }))}
+                          style={{ height:34,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}>
+                          <option value="VIGENTE">Vigente</option>
+                          <option value="VENCIDO">Vencido</option>
+                          <option value="DESAPROBADO">Desaprobado</option>
+                        </select>
+                        <button disabled={f.guardando} onClick={()=>guardarGuiada(v.placa)}
+                          style={{ height:34,padding:"0 14px",background:"#7C3AED",color:"#fff",border:"none",borderRadius:8,fontSize:12.5,fontWeight:700,cursor:"pointer",opacity:f.guardando?0.7:1 }}>
+                          {f.guardando?"…":"Guardar"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
       {multiAddOpen && (
         <ModalOverlay onClose={()=>setMultiAddOpen(false)} maxWidth={700}>
           <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 24px",height:60,borderBottom:"1px solid #EEF0F2",flexShrink:0 }}>
