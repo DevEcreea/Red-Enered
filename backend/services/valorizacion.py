@@ -56,28 +56,35 @@ async def sincronizar(db) -> dict:
             raise RuntimeError(f"gob.pe respondió {r.status_code}")
         contenido = r.content
 
-    wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True)
-    ws = wb.worksheets[0]
     ahora = datetime.now(timezone.utc).isoformat()
-    docs, categorias = [], {}
-    for fila in ws.iter_rows(min_row=7, values_only=True):
-        if not fila or not fila[0] or not fila[1]:
-            continue
-        cat, marca = str(fila[0]).strip().upper(), str(fila[1]).strip().upper()
-        modelo = str(fila[3] or fila[2] or "").strip().upper()
-        try:
-            v25, v24, v23 = (float(fila[4] or 0), float(fila[5] or 0), float(fila[6] or 0))
-        except Exception:
-            continue
-        if not modelo or v25 <= 0:
-            continue
-        docs.append({
-            "ejercicio": EJERCICIO, "categoria": cat, "marca": marca, "marca_norm": _norm(marca),
-            "modelo": modelo, "modelo_norm": _norm(modelo),
-            "valores": {"2025": v25, "2024": v24, "2023": v23},
-            "actualizado_en": ahora,
-        })
-        categorias[cat] = categorias.get(cat, 0) + 1
+
+    def _parsear(contenido_xlsx: bytes):
+        # openpyxl es síncrono y tarda decenas de segundos con 18k filas: fuera del event loop
+        wb = openpyxl.load_workbook(io.BytesIO(contenido_xlsx), read_only=True)
+        ws = wb.worksheets[0]
+        docs, categorias = [], {}
+        for fila in ws.iter_rows(min_row=7, values_only=True):
+            if not fila or not fila[0] or not fila[1]:
+                continue
+            cat, marca = str(fila[0]).strip().upper(), str(fila[1]).strip().upper()
+            modelo = str(fila[3] or fila[2] or "").strip().upper()
+            try:
+                v25, v24, v23 = (float(fila[4] or 0), float(fila[5] or 0), float(fila[6] or 0))
+            except Exception:
+                continue
+            if not modelo or v25 <= 0:
+                continue
+            docs.append({
+                "ejercicio": EJERCICIO, "categoria": cat, "marca": marca, "marca_norm": _norm(marca),
+                "modelo": modelo, "modelo_norm": _norm(modelo),
+                "valores": {"2025": v25, "2024": v24, "2023": v23},
+                "actualizado_en": ahora,
+            })
+            categorias[cat] = categorias.get(cat, 0) + 1
+        return docs, categorias
+
+    import asyncio
+    docs, categorias = await asyncio.to_thread(_parsear, contenido)
     if not docs:
         raise RuntimeError("El anexo vino vacío o con formato inesperado")
 
