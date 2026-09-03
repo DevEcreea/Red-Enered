@@ -5583,6 +5583,8 @@ async def _enriquecer_flota(filt: dict) -> dict:
     revisados, completados_total, detalle = 0, 0, []
     leyenda_caida = False
     fallos_mtc, mtc_bloqueado = 0, False  # freno automático ante 429 del MTC (vía json.pe)
+    # sin token de json.pe no hay SOAT/CITV que consultar (y no debe contar como bloqueo del MTC)
+    hay_jsonpe = bool(os.getenv("JSONPE_TOKEN", "").strip())
 
     # El listado del MTC trae la FLOTA COMPLETA de la autorización en una sola consulta
     # (placa, constancia, categoría, chasis/VIN, año, ejes, carga útil, peso seco):
@@ -5684,13 +5686,13 @@ async def _enriquecer_flota(filt: dict) -> dict:
             if m_vin:
                 nuevos["marca"] = m_vin
         # 2c) SOAT vigente (json.pe / consultadatos)
-        if "soat_vencimiento" in vacios:
+        if "soat_vencimiento" in vacios and hay_jsonpe:
             s = await _placa_soat(placa)
             nuevos["soat_consultado_en"] = datetime.now(timezone.utc).isoformat()
             if s:
                 nuevos.update(s)
         # 2d) Revisión técnica CITV (json.pe → MTC)
-        if "revtec_vencimiento" in vacios and not mtc_bloqueado:
+        if "revtec_vencimiento" in vacios and hay_jsonpe and not mtc_bloqueado:
             rt = await _placa_revtec(placa)
             nuevos["revtec_consultado_en"] = datetime.now(timezone.utc).isoformat()
             if rt:
