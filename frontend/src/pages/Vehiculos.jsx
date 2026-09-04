@@ -610,16 +610,16 @@ export default function Vehiculos() {
             <table style={{ borderCollapse:"collapse",width:"100%",minWidth:1200 }}>
               <thead>
                 <tr style={{ background:"#2A2A3C" }}>
-                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","AÑO","CAT.","EJES","CARGA ÚTIL","PESO SECO","CONSTANCIA MTC","SOAT","REV. TÉC.","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACCIONES"].map((h,i)=>(
+                  {["","MARCA","ESTADO","UNIDAD","CHASIS","VEHÍCULO","MODELO","AÑO","CAT.","EJES","CARGA ÚTIL","PESO SECO","CONSTANCIA MTC","PRÓX. TAREA","TIPO","BASE","TITULAR","CENTRO DE COSTOS","MEDIDOR","ACCIONES"].map((h,i)=>(
                     <th key={i} style={{ textAlign:"left",color:"#fff",fontWeight:600,textTransform:"uppercase",fontSize:10.5,letterSpacing:".03em",padding:"12px 14px",whiteSpace:"nowrap" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading?(
-                  <tr><td colSpan={23} style={{ textAlign:"center",padding:40,color:"#9ca3af",fontSize:14 }}>Cargando...</td></tr>
+                  <tr><td colSpan={21} style={{ textAlign:"center",padding:40,color:"#9ca3af",fontSize:14 }}>Cargando...</td></tr>
                 ):lista.length===0?(
-                  <tr><td colSpan={23} style={{ textAlign:"center",padding:48,color:"#9ca3af",fontSize:14 }}>
+                  <tr><td colSpan={21} style={{ textAlign:"center",padding:48,color:"#9ca3af",fontSize:14 }}>
                     <div style={{ display:"flex",flexDirection:"column",alignItems:"center",gap:10 }}>
                       <Car style={{ width:40,height:40,color:"#D1D5DB" }}/>
                       <span>No hay vehículos registrados aún</span>
@@ -674,31 +674,6 @@ export default function Vehiculos() {
                           {v.peso_seco ? `${Number(v.peso_seco).toLocaleString("es-PE")} kg` : "—"}
                         </td>
                         <td style={{ padding:"10px 14px",fontSize:12,color:"#6b7280",whiteSpace:"nowrap",fontFamily:"ui-monospace,monospace" }}>{v.constancia_mtc||"—"}</td>
-                        <td style={{ padding:"10px 14px",whiteSpace:"nowrap" }} title={v.soat_compania ? `${v.soat_compania} · Póliza ${v.soat_poliza||"—"}` : ""}>
-                          {v.soat_vencimiento ? (
-                            <span style={{ display:"inline-flex",flexDirection:"column",gap:2 }}>
-                              <span style={{ fontSize:12,fontWeight:700,color:v.soat_estado==="VIGENTE"?"#0EA46B":"#DC2626" }}>{v.soat_vencimiento}</span>
-                              <span style={{ fontSize:9.5,color:"#9ca3af" }}>{v.soat_compania||""}</span>
-                            </span>
-                          ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
-                        </td>
-                        <td style={{ padding:"10px 14px",whiteSpace:"nowrap" }}
-                          title={v.revtec_vencimiento ? [
-                            v.revtec_resultado ? `Resultado: ${v.revtec_resultado}` : "",
-                            v.revtec_certificado ? `Certificado: ${v.revtec_certificado}` : "",
-                            v.revtec_centro ? `Centro: ${v.revtec_centro}` : "",
-                            v.revtec_ultimo_resultado ? `Última inspección: ${v.revtec_ultimo_resultado}` : "",
-                            v.revtec_observaciones ? `Obs.: ${v.revtec_observaciones}` : "",
-                          ].filter(Boolean).join("\n") : ""}>
-                          {v.revtec_vencimiento ? (
-                            <span style={{ display:"inline-flex",flexDirection:"column",gap:2 }}>
-                              <span style={{ fontSize:12,fontWeight:700,color:(v.revtec_estado||"").toUpperCase().includes("VIG")?"#0EA46B":"#DC2626" }}>{v.revtec_vencimiento}</span>
-                              <span style={{ fontSize:9.5,color:v.revtec_ultimo_resultado==="DESAPROBADO"?"#DC2626":"#9ca3af" }}>
-                                {v.revtec_ultimo_resultado==="DESAPROBADO" ? "última: DESAPROBADO" : (v.revtec_resultado||"")}
-                              </span>
-                            </span>
-                          ) : <span style={{ color:"#9ca3af",fontSize:12 }}>—</span>}
-                        </td>
                         <td style={{ padding:"10px 14px" }}>
                           {(() => {
                             const kmActual = v.kilometraje || 0;
@@ -788,7 +763,7 @@ export default function Vehiculos() {
 
                       {/* EXPANDED ROW */}
                       {open&&(
-                        <tr><td colSpan={23} style={{ background:"#FAF7FF",borderTop:"1px solid #F1EAFF",padding:0 }}>
+                        <tr><td colSpan={21} style={{ background:"#FAF7FF",borderTop:"1px solid #F1EAFF",padding:0 }}>
                           <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,padding:24 }}>
                             {/* LEFT: costo total (todo 0) */}
                             <div>
