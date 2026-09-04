@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.2-ficha-pdf",
+        "version": "1.8.3-poliza",
     }
 
 # ============================================================
@@ -5439,7 +5439,7 @@ async def ficha_vehiculo_pdf(req: Request, placa: str):
         raise HTTPException(404, "Vehículo no encontrado")
     emp = v.get("empresa") or u.get("empresa") or ""
     docs = await db.documents.find({"placa": p, **({"empresa": emp} if emp else {})},
-                                   {"_id": 0, "doc": 1, "emi": 1, "ven": 1, "est": 1, "filename": 1, "el": 1}).to_list(200)
+                                   {"_id": 0, "doc": 1, "emi": 1, "ven": 1, "est": 1, "filename": 1, "el": 1, "ref": 1}).to_list(200)
     sdocs = await db.subsidio_documents.find({"placa": p, **({"empresa": emp} if emp else {})},
                                              {"_id": 0, "categoria": 1, "filename": 1, "uploaded_at": 1}).to_list(200)
 
@@ -5545,6 +5545,17 @@ async def ficha_vehiculo_pdf(req: Request, placa: str):
     if det.get("regla"):
         page.insert_text((40, y + 6), f"Regla aplicada: {det.get('regla')}", fontsize=8, fontname="helv", color=GRIS); y += 16
     y += 6
+
+    # Seguro vehicular (póliza contra todo riesgo) — documento subido por el cliente
+    pol_docs = [d for d in docs if "poliza" in re.sub(r"[^a-z0-9]", "", __import__("unicodedata").normalize("NFKD", d.get("doc") or "").encode("ascii", "ignore").decode().lower())]
+    if pol_docs:
+        check(80)
+        y = titulo("Seguro vehicular (Póliza)", y)
+        pd0 = sorted(pol_docs, key=lambda d: d.get("ven") or "", reverse=True)[0]
+        for i, (l, vv) in enumerate((("N° de póliza / aseguradora", (pd0.get("ref") or "").replace("Póliza N° ", "") or "-"),
+                                     ("Estado", pd0.get("est")), ("Emisión", pd0.get("emi")), ("Vence", pd0.get("ven")))):
+            fila(l, vv, y + (i // 2) * 30, i % 2)
+        y += 2 * 30 + 6
 
     # Documentos cargados
     check(60)
@@ -7626,6 +7637,29 @@ async def list_documents(
 
     results = []
 
+    # Datos del motor de placas (póliza SOAT, certificado CITV) para rotular también
+    # los documentos subidos a mano: "el código de la póliza es lo que vale en un accidente".
+    veh_meta = {}
+    if target_empresa:
+        async for vm in db.vehiculos.find({"empresa": target_empresa},
+                                          {"_id": 0, "placa": 1, "soat_poliza": 1, "soat_compania": 1,
+                                           "revtec_certificado": 1, "revtec_centro": 1}):
+            if vm.get("placa"):
+                veh_meta[vm["placa"].upper().strip()] = vm
+
+    def _ref_manual(doc_nombre, placa_doc, ref_actual):
+        if ref_actual:
+            return ref_actual
+        vm = veh_meta.get((placa_doc or "").upper().strip())
+        if not vm:
+            return ""
+        n = re.sub(r"[^a-z0-9]", "", (doc_nombre or "").lower())
+        if "soat" in n and vm.get("soat_poliza"):
+            return f"Póliza N° {vm['soat_poliza']}" + (f" · {vm['soat_compania']}" if vm.get("soat_compania") else "")
+        if ("revisi" in n or "citv" in n) and vm.get("revtec_certificado"):
+            return f"Certificado {vm['revtec_certificado']}"
+        return ""
+
     # Map manual documents
     for d in manual_docs:
         results.append({
@@ -7641,6 +7675,7 @@ async def list_documents(
             "grp": d.get("grp") or 0,
             "all": d.get("all") or 0,
             "placa": d.get("placa") or "",
+            "ref": _ref_manual(d.get("doc"), d.get("placa"), d.get("ref") or ""),
             "archived": int(d.get("archived") or 0),
             "est": d.get("est") or "Vigente",
             "filename": d.get("filename") or "",
@@ -7870,6 +7905,38 @@ def _extraer_vigencia_pdf(content: bytes) -> dict:
     return out
 
 
+_ASEGURADORAS = ["RIMAC", "PACIFICO", "PACÍFICO", "LA POSITIVA", "MAPFRE", "INTERSEGURO", "PROTECTA", "CRECER", "QUALITAS", "HDI", "CHUBB", "LIBERTY", "SANITAS"]
+
+
+def _extraer_poliza_pdf(content: bytes) -> dict:
+    """Póliza de seguro vehicular en PDF con texto: N° de póliza y aseguradora."""
+    try:
+        import io as _io
+        import pdfplumber
+        texto = ""
+        with pdfplumber.open(_io.BytesIO(content)) as pdf:
+            for page in pdf.pages[:2]:
+                texto += (page.extract_text() or "") + "\n"
+    except Exception:
+        return {}
+    if not texto.strip():
+        return {}
+    import unicodedata as _ud
+    t = _ud.normalize("NFKD", texto).encode("ascii", "ignore").decode().upper()
+    out = {}
+    # el número debe contener dígitos (evita capturar "POLIZA VEHICULAR"); primero la forma
+    # explícita "N° DE POLIZA: ..." y luego "POLIZA N°/NRO ..."
+    m = (re.search(r"N[°O.\s]*\s*(?:DE\s+)?POLIZA\W{0,12}([A-Z]{0,4}\d[A-Z0-9\-/.]{3,30})", t)
+         or re.search(r"POLIZA\s*(?:N[°O.]?|NRO\.?|NUMERO)\W{0,12}([A-Z]{0,4}\d[A-Z0-9\-/.]{3,30})", t))
+    if m:
+        out["numero"] = m.group(1).strip(" .-")
+    for a in _ASEGURADORAS:
+        if _ud.normalize("NFKD", a).encode("ascii", "ignore").decode().upper() in t:
+            out["aseguradora"] = a.title() if a not in ("HDI",) else a
+            break
+    return out
+
+
 def _extraer_tarjeta_propiedad_pdf(content: bytes) -> dict:
     """Lee la Tarjeta de Identificación Vehicular (tarjeta de propiedad) en PDF con texto
     y devuelve los datos de la unidad: año de fabricación, categoría, marca, modelo,
@@ -7948,6 +8015,16 @@ async def upload_manual_document(
             emi = fechas_pdf["emi"]
         if not ven and fechas_pdf.get("ven"):
             ven = fechas_pdf["ven"]
+
+    # Póliza de seguro vehicular: leer N° de póliza y aseguradora del PDF → referencia
+    if (not ref) and ("poliza" in re.sub(r"[^a-z0-9]", "", __import__("unicodedata").normalize("NFKD", doc or "").encode("ascii", "ignore").decode().lower())) and (
+            "pdf" in (content_type or "").lower() or (file.filename or "").lower().endswith(".pdf")):
+        try:
+            pol = await asyncio.to_thread(_extraer_poliza_pdf, content)
+            if pol.get("numero"):
+                ref = f"Póliza N° {pol['numero']}" + (f" · {pol['aseguradora']}" if pol.get("aseguradora") else "")
+        except Exception:
+            pass
 
     # Tarjeta de propiedad: completa la ficha del vehículo (año, categoría, VIN, motor,
     # color, marca/modelo, propietario) con lo que dice el documento, solo en campos vacíos.
