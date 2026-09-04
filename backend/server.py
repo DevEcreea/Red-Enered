@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.0-motor-placas",
+        "version": "1.8.1-reset-vigencias",
     }
 
 # ============================================================
@@ -5556,6 +5556,30 @@ async def vehiculo_verificacion_manual(payload: VerificacionManualIn, req: Reque
     await db.vehiculos.update_one({"_id": v["_id"]} if "_id" in v else {"id": v.get("id")},
                                   {"$set": cambios})
     return {"ok": True, "placa": placa, "guardado": {k: cambios[k] for k in (f"{pref}_vencimiento", f"{pref}_estado")}}
+
+
+@api.post("/vehiculos/vigencias/reset")
+async def reset_vigencias(req: Request, incluir_sin_registro: int = 0):
+    """Admin: borra las marcas de 'ya consultado' de SOAT/CITV en unidades SIN vigencia,
+    para que la próxima pasada las vuelva a consultar (p.ej. tras configurar el token o
+    cuando el MTC estuvo bloqueado). Con incluir_sin_registro=1 también reintenta las
+    marcadas SIN REGISTRO."""
+    u = await require_auth(req)
+    if u["role"] != "admin_enered":
+        raise HTTPException(403, "Solo administradores ENERED")
+    filt = {}
+    if u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    unset = {"soat_consultado_en": 1, "revtec_consultado_en": 1}
+    if incluir_sin_registro:
+        unset["revtec_estado"] = 1
+    r1 = await db.vehiculos.update_many(
+        {**filt, "soat_vencimiento": {"$in": [None, ""]}}, {"$unset": {"soat_consultado_en": 1}})
+    q_rev = {**filt, "revtec_vencimiento": {"$in": [None, ""]}}
+    if not incluir_sin_registro:
+        q_rev["revtec_estado"] = {"$ne": "SIN REGISTRO"}
+    r2 = await db.vehiculos.update_many(q_rev, {"$unset": {k: 1 for k in unset if k != "soat_consultado_en"}})
+    return {"ok": True, "soat_reiniciadas": r1.modified_count, "revtec_reiniciadas": r2.modified_count}
 
 
 @api.post("/vehiculos/enriquecer")
