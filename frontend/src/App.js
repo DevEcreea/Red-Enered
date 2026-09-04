@@ -97,7 +97,7 @@ function DashboardRouter() {
 /** Redirección raíz: cliente de subsidio → Mi Flota (su vista principal); el resto → Dashboard. */
 function RootRedirect() {
   const { user } = useAuth();
-  if (user?.role === "cliente_subsidio") {
+  if (user?.role === "cliente_subsidio" || user?.tipo_cliente === "subsidio") {
     return <Navigate to="/subsidio/documentos" replace />;
   }
   return <Navigate to="/dashboard" replace />;

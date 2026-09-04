@@ -19,7 +19,9 @@ export default function Login() {
     setLoading(true);
     try {
       const u = await login(email, password);
-      if (u?.role === "cliente_subsidio" && !u?.documentos_completos) {
+      // Clientes de subsidio (por rol o por tipo de cliente de su empresa): la primera
+      // vista es SIEMPRE el expediente DU-004, para que completen sus datos.
+      if (u?.role === "cliente_subsidio" || u?.tipo_cliente === "subsidio") {
         navigate("/subsidio/documentos");
       } else {
         navigate("/dashboard");

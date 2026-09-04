@@ -304,7 +304,10 @@ export default function Layout({ children }) {
       if (!esGrupoSubsidios && !SUBSIDIO_VISIBLES.includes(i.to)) return false;
     }
 
-    if (!i.roles.includes(user.role)) {
+    // El grupo "Subsidios" también aplica a usuarios de empresas de subsidio con otro rol
+    // (p.ej. administrador con plan Tracking): su vista principal es el expediente DU-004.
+    const esEmpresaSubsidio = user?.tipo_cliente === "subsidio" || !!user?.servicios?.subsidio;
+    if (!i.roles.includes(user.role) && !(i.testid === "nav-subsidios" && esEmpresaSubsidio)) {
       // "Mi Flota" también accesible si la empresa tiene servicios.subsidio activo
       if (i.to === "/subsidio/documentos" && user?.servicios?.subsidio) return true;
       // El grupo "Subsidios" (desplegable) también es visible si la empresa tiene el servicio.
@@ -474,7 +477,11 @@ export default function Layout({ children }) {
                 {empresasList.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
               <button disabled={!chooserEmpresa}
-                onClick={async () => { await enterEmpresa(chooserEmpresa); setShowChooser(false); window.location.assign("/dashboard"); }}
+                onClick={async () => {
+                  const eff = await enterEmpresa(chooserEmpresa); setShowChooser(false);
+                  const esSubsidio = eff?.role === "cliente_subsidio" || eff?.tipo_cliente === "subsidio";
+                  window.location.assign(esSubsidio ? "/subsidio/documentos" : "/dashboard");
+                }}
                 className="flex-shrink-0 px-5 h-11 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-sm disabled:opacity-50 transition-colors"
                 data-testid="chooser-entrar">Entrar</button>
             </div>
