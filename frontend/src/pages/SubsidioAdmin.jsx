@@ -372,7 +372,7 @@ function ExpedienteDetalle({ userId, onBack }) {
       {/* Contenido del tab */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         {tab === "general" && <TabGeneral user={user} calculation={calculation} />}
-        {tab === "banco" && <TabBanco bank={bank_account} />}
+        {tab === "banco" && <TabBanco bank={bank_account} documents={documents} />}
         {tab === "documentos" && <TabDocumentos docs={companyDocs} onDelete={deleteDoc} />}
         {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
         {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} />}
@@ -438,11 +438,18 @@ function TabGeneral({ user, calculation }) {
   );
 }
 
-function TabBanco({ bank }) {
-  if (!bank) return <Empty msg="El cliente aún no registró cuenta bancaria." />;
+function TabBanco({ bank, documents }) {
+  const dlToken = useDownloadToken();
+  const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
+  const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/documents/${id}/download?t=${dlToken}`;
+  // Evidencia de la cuenta (captura/constancia del banco con CCI y titular) subida en la Etapa 1
+  const evidencias = (documents || []).filter((d) =>
+    d.categoria === "evidencia_cci" || d.category === "evidencia_cci" || /evidencia|cci/i.test(d.label || ""));
+  if (!bank && !evidencias.length) return <Empty msg="El cliente aún no registró cuenta bancaria." />;
   return (
     <div>
       <h4 className="font-cabinet font-bold mb-3">Cuenta para depósito del subsidio</h4>
+      {bank ? (
       <DefList items={[
         ["Banco", bank.banco + (bank.es_banco_nacion ? " (recomendada)" : "")],
         ["Tipo de cuenta", bank.tipo_cuenta],
@@ -451,6 +458,28 @@ function TabBanco({ bank }) {
         ["CCI", bank.cci || "—"],
         ["Última actualización", fmtDate(bank.updated_at)],
       ]} />
+      ) : <p className="text-sm text-neutral-500">Sin datos de cuenta registrados (solo evidencia).</p>}
+
+      <h4 className="font-cabinet font-bold mt-5 mb-2 flex items-center gap-2">
+        <FileText className="w-4 h-4 text-brand" /> Evidencia de la cuenta (CCI)
+        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-brand/10 text-brand">{evidencias.length}</span>
+      </h4>
+      {evidencias.length === 0 ? (
+        <p className="text-sm text-neutral-500">El cliente aún no subió la captura/constancia del banco.</p>
+      ) : (
+        <ul className="divide-y divide-neutral-100 border border-neutral-200 rounded-lg">
+          {evidencias.map((d) => (
+            <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+              <span className="truncate"><FileText className="w-3.5 h-3.5 inline mr-1 text-neutral-400" />{d.filename || d.label}
+                <span className="text-xs text-neutral-400 ml-2">{fmtDate(d.uploaded_at || d.created_at)}</span></span>
+              <a href={downloadHref(d.id)} target="_blank" rel="noreferrer" data-testid={`evidencia-download-${d.id}`}
+                 className="text-brand hover:text-brand-hover text-xs font-bold inline-flex items-center gap-1 flex-shrink-0">
+                <Download className="w-3.5 h-3.5" /> Descargar
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mt-4 bg-violet-50 border border-violet-200 rounded-lg p-3 flex gap-2 text-xs text-violet-900">
         <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" />
         <p><strong>Seguridad bancaria:</strong> estos datos solo se usan para el depósito ATU. Ni Enered ni la ATU piden claves, PIN, tokens ni acceso a banca por internet.</p>
