@@ -99,11 +99,14 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
     checks: list[dict] = []
 
     # 1) Datos mínimos legibles
-    faltantes = [k for k in ("fecha", "numero_documento", "galones") if not doc.get(k)]
+    _NOMBRES = {"fecha": "fecha", "numero_documento": "N° de comprobante", "galones": "galones",
+                "importe_total": "importe total", "ruc_emisor": "RUC del grifo"}
+    faltantes = [_NOMBRES[k] for k in ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor")
+                 if not doc.get(k)]
     checks.append(_check(
         "datos_completos", "Datos legibles en la factura", not faltantes,
         "Se leyeron los datos principales." if not faltantes
-        else f"No se pudo leer: {', '.join(faltantes)}. Revisa la calidad del archivo.",
+        else f"Falta: {', '.join(faltantes)}. Complétalo en el formulario o revisa la calidad del archivo.",
     ))
 
     # 2) Periodo de compra permitido (DU 004: ventana única; DU 007: alguno de los 3 periodos)

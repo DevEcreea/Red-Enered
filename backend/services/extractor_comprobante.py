@@ -100,6 +100,22 @@ def _qr_de_pdf(contenido: bytes) -> Optional[str]:
                 return r.text
         return None
 
+    # Foto o imagen (JPG/PNG/WEBP): se lee el QR directo de la imagen.
+    if not contenido[:5].startswith(b"%PDF"):
+        try:
+            img = Image.open(io.BytesIO(contenido))
+            img.load()
+            txt = _leer(img.convert("RGB"))
+            if txt:
+                return txt
+            # Fotos grandes: reintenta a mitad de tamaño (mejora el enfoque del QR)
+            w, h = img.size
+            if max(w, h) > 1800:
+                txt = _leer(img.convert("RGB").resize((w // 2, h // 2)))
+                if txt:
+                    return txt
+        except Exception:
+            pass
     try:
         doc = pymupdf.open(stream=contenido, filetype="pdf")
     except Exception:
@@ -140,21 +156,48 @@ def extraer_de_qr(contenido: bytes) -> Optional[dict]:
     c = [p.strip() for p in txt.split("|")]
     if len(c) < 7 or not re.fullmatch(r"\d{11}", c[0] or ""):
         return None
-    serie, numero = (c[2] or None), (c[3] or None)
+    # La norma dice RUC|TIPO|SERIE|NÚMERO|IGV|TOTAL|FECHA|…, pero muchos emisores
+    # (p.ej. Primax/4-fact) juntan "SERIE-NÚMERO" en un solo campo y todo se corre
+    # una posición. Se ancla en la FECHA (único campo con formato inequívoco):
+    # los dos anteriores son IGV y TOTAL; lo que queda entre TIPO y ellos es serie/número.
+    _es_fecha = lambda x: bool(re.fullmatch(r"(\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})", x or ""))
+    i_fecha = next((i for i in range(2, len(c)) if _es_fecha(c[i])), None)
+    if i_fecha is None or i_fecha < 4:
+        return None
+    igv, total, fecha = _f(c[i_fecha - 2]), _f(c[i_fecha - 1]), c[i_fecha]
+    if re.fullmatch(r"\d{2}/\d{2}/\d{4}", fecha):
+        d, m, y = fecha.split("/")
+        fecha = f"{y}-{m}-{d}"
+    campos_sn = [x for x in c[2:i_fecha - 2] if x]
+    if len(campos_sn) >= 2:
+        serie, numero = campos_sn[0], campos_sn[1]
+    elif len(campos_sn) == 1 and "-" in campos_sn[0]:
+        serie, numero = campos_sn[0].split("-", 1)
+    elif campos_sn:
+        serie, numero = campos_sn[0], None
+    else:
+        serie = numero = None
+    serie = (serie or "").strip().upper() or None
+    numero = (numero or "").strip() or None
+    resto = c[i_fecha + 1:]
+    tipo_doc_adq = resto[0] if len(resto) > 0 and resto[0] else None
+    ruc_adq = resto[1] if len(resto) > 1 and re.fullmatch(r"\d{8,11}", resto[1] or "") else None
+    hash_ = resto[2].replace(" ", "+") if len(resto) > 2 and resto[2] else None
     # Algunos emisores ponen mal el tipo de comprobante: se deriva de la letra de la serie.
-    tipo = "01" if (serie or "").upper().startswith("F") else "03" if (serie or "").upper().startswith("B") else (c[1] or None)
+    tipo = "01" if (serie or "").startswith("F") else "03" if (serie or "").startswith("B") else (c[1] or None)
     return {
         "fuente": "QR",
         "ruc_emisor": c[0],
         "tipo_comprobante": tipo,
         "serie": serie, "numero": numero,
         "numero_documento": f"{serie}-{numero}" if serie and numero else None,
-        "igv": _f(c[4]),
-        "importe_total": _f(c[5]),
-        "fecha": c[6] or None,
-        "ruc_adquirente": c[8] if len(c) > 8 else None,
+        "igv": igv,
+        "importe_total": total,
+        "fecha": fecha,
+        "tipo_doc_adquirente": tipo_doc_adq,
+        "ruc_adquirente": ruc_adq,
         # zxing devuelve espacio donde el base64 lleva '+'
-        "hash": (c[9].replace(" ", "+") if len(c) > 9 and c[9] else None),
+        "hash": hash_,
     }
 
 

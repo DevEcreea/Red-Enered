@@ -2095,7 +2095,8 @@ async def invoices_upload(
         if extracted.get("ruc_emisor"):
             try:
                 from services.padron_grifos import buscar_por_ruc as _buscar_grifo
-                _grifo = await _buscar_grifo(db, extracted["ruc_emisor"])
+                _grifo = await _buscar_grifo(db, extracted["ruc_emisor"],
+                                             razon_social=extracted.get("estacion") or base.get("razon_social_emisor"))
                 if _grifo and _grifo.get("inscrito"):
                     extracted.setdefault("estacion", _grifo.get("razon_social"))
                     if not extracted.get("ciudad"):
@@ -2242,6 +2243,28 @@ async def invoices_update(
     if patch.get("serie") and patch.get("numero"):
         patch["numero_documento"] = f"{patch['serie'].upper()}-{patch['numero']}"
     patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Si cambió el RUC del grifo (o la factura no tiene estación), completar grifo desde OSINERGMIN.
+    ruc_nuevo = str(patch.get("ruc_emisor") or inv.get("ruc_emisor") or "").strip()
+    cambio_ruc = bool(patch.get("ruc_emisor")) and patch["ruc_emisor"] != inv.get("ruc_emisor")
+    if _re.fullmatch(r"\d{11}", ruc_nuevo) and (cambio_ruc or not (patch.get("estacion") or inv.get("estacion"))):
+        try:
+            from services.padron_grifos import buscar_por_ruc as _buscar_grifo_upd
+            g = await _buscar_grifo_upd(db, ruc_nuevo, razon_social=patch.get("estacion") or inv.get("estacion"))
+            if g and g.get("inscrito"):
+                if cambio_ruc or not (patch.get("estacion") or inv.get("estacion")):
+                    patch["estacion"] = g.get("razon_social") or patch.get("estacion") or inv.get("estacion")
+                for k_dest, k_src in (("departamento", "departamento"), ("provincia", "provincia"),
+                                      ("distrito", "distrito"), ("direccion_grifo", "direccion")):
+                    if g.get(k_src) and (cambio_ruc or not inv.get(k_dest)):
+                        patch[k_dest] = g[k_src]
+                if cambio_ruc and not patch.get("ciudad") and g.get("distrito"):
+                    patch["ciudad"] = g["distrito"]
+                patch["grifo_inscrito"] = True
+            elif cambio_ruc:
+                patch["grifo_inscrito"] = False
+        except Exception as _e:
+            logger.warning(f"Padrón de grifos al editar factura falló: {_e}")
 
     # Revalidar con los datos corregidos, para que el estado se actualice al instante.
     try:
@@ -2826,9 +2849,29 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         except Exception:
             return None
 
+    # Estación: si la factura no la trae, se toma la razón social del padrón OSINERGMIN (por RUC).
+    try:
+        from services.padron_grifos import COLECCION as _COL_GRIFOS
+        rucs_sin = {str(r.get("ruc_emisor") or "").strip() for r in rows
+                    if not (r.get("estacion") or "").strip() and _re.fullmatch(r"\d{11}", str(r.get("ruc_emisor") or "").strip())}
+        if rucs_sin:
+            nombres = {}
+            async for g in db[_COL_GRIFOS].find({"ruc": {"$in": list(rucs_sin)}}, {"_id": 0, "ruc": 1, "razon_social": 1}):
+                nombres.setdefault(g["ruc"], g.get("razon_social"))
+            for r in rows:
+                if not (r.get("estacion") or "").strip():
+                    r["estacion"] = nombres.get(str(r.get("ruc_emisor") or "").strip()) or r.get("estacion")
+    except Exception:
+        pass
+
     # === KPIs base (galones, importe) ===
     total_gal = sum(_f(r.get("galones")) for r in rows)
     total_importe = sum(_f(r.get("importe_total")) for r in rows)
+    # Precio promedio solo con facturas que traen galones E importe (si no, se distorsiona).
+    _con_imp = [r for r in rows if _f(r.get("importe_total")) > 0 and _f(r.get("galones")) > 0]
+    gal_con_importe = sum(_f(r.get("galones")) for r in _con_imp)
+    imp_con_importe = sum(_f(r.get("importe_total")) for r in _con_imp)
+    facturas_sin_importe = sum(1 for r in rows if _f(r.get("importe_total")) <= 0)
 
     # === Unidades (vehículos) ===
     vehicles = await db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0}).to_list(200)
@@ -2879,7 +2922,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     avg_age = ver["avg_age"]
     older_than_10 = ver["older_than_10"]
 
-    precio_promedio_gl = (total_importe / total_gal) if total_gal > 0 else 0
+    precio_promedio_gl = (imp_con_importe / gal_con_importe) if gal_con_importe > 0 else 0
     # Costo promedio por unidad dividiendo entre unidades_incluidas para coincidir con la maqueta
     costo_promedio_unidad = (total_importe / unidades_incluidas) if unidades_incluidas > 0 else 0
 
@@ -3036,6 +3079,7 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
             "precio_promedio_diff": round(precio_promedio_diff, 2),
             "avg_age": avg_age,
             "older_than_10": older_than_10,
+            "facturas_sin_importe": facturas_sin_importe,
             "anios_conocidos": ver["anios_conocidos"],
             "unidades_mtc": ver["unidades_mtc"],
             "unidades_en_regla": ver["unidades_en_regla"],
@@ -3579,6 +3623,80 @@ async def admin_update_stage(
         }},
     )
     return {"ok": True, "expediente_stage": payload.stage, "updated_at": now}
+
+
+@subsidio_router.post("/admin/subsidio/invoices/releer-qr")
+async def admin_invoices_releer_qr(empresa: Optional[str] = None, dry: int = 1, limit: int = 40,
+                                   user: dict = Depends(_require_admin_enered)):
+    """
+    Relee el QR SUNAT de las facturas ya guardadas y completa SOLO los campos vacíos
+    (importe total, IGV, RUC adquirente). No pisa nada que el cliente haya escrito.
+    Sirve para corregir cargas hechas cuando el lector no entendía el QR "SERIE-NÚMERO".
+    dry=1 solo reporta; dry=0 aplica.
+    """
+    from services.extractor_comprobante import extraer_de_qr as _qr
+    q = {"$or": [{"importe_total": {"$in": [None, 0, ""]}}, {"importe_total": {"$exists": False}}],
+         "factura_storage_key": {"$nin": [None, ""]}}
+    if empresa:
+        q["empresa"] = empresa
+    import asyncio as _asyncio
+    pendientes = await db.consumos_subsidio.count_documents(q)
+    cur = db.consumos_subsidio.find(q, {"_id": 0, "id": 1, "empresa": 1, "numero_documento": 1, "fecha": 1,
+                                        "factura_storage_key": 1, "importe_total": 1, "igv": 1, "ruc_emisor": 1}
+                                    ).sort("created_at", -1).limit(max(1, min(limit, 500)))
+    revisadas, completadas, detalle = 0, 0, []
+    async for d in cur:
+        revisadas += 1
+        try:
+            content = await _asyncio.wait_for(_asyncio.to_thread(storage.get_object_bytes, d["factura_storage_key"]), 20)
+            qr = (await _asyncio.wait_for(_asyncio.to_thread(_qr, content), 30)) if content else None
+        except Exception:
+            qr = None
+        if not qr or not qr.get("importe_total"):
+            detalle.append({"id": d["id"], "empresa": d.get("empresa"), "comprobante": d.get("numero_documento"),
+                            "accion": "omitida: QR no legible (imagen/escaneo sin QR nítido)" if not qr
+                            else "omitida: el QR no trae importe"})
+            continue
+        # Seguridad: el QR debe corresponder al mismo comprobante y al mismo grifo.
+        def _sn(x):  # (serie, número sin ceros a la izquierda) para comparar F005-0012505 con F005-00012505
+            m = _re.match(r"^\s*([A-Z0-9]+)\s*-+\s*0*(\d+)\s*$", str(x or "").upper())
+            return (m.group(1), int(m.group(2))) if m else None
+        mismo_num = _sn(qr.get("numero_documento")) is not None and _sn(qr.get("numero_documento")) == _sn(d.get("numero_documento"))
+        mismo_ruc = (qr.get("ruc_emisor") == d.get("ruc_emisor"))
+        vacia = not (d.get("numero_documento") or d.get("ruc_emisor"))  # nunca se leyó nada: el QR completa todo
+        if vacia:
+            upd = {"importe_total": qr["importe_total"], "ruc_emisor": qr["ruc_emisor"],
+                   "numero_documento": qr.get("numero_documento"), "serie": qr.get("serie"), "numero": qr.get("numero")}
+            if qr.get("fecha") and not d.get("fecha"):
+                upd["fecha"] = qr["fecha"]
+            if qr.get("igv"):
+                upd["igv"] = qr["igv"]
+            if qr.get("ruc_adquirente"):
+                upd["ruc_adquirente"] = qr["ruc_adquirente"]
+            detalle.append({"id": d["id"], "empresa": d.get("empresa"), "comprobante": qr.get("numero_documento"),
+                            "accion": ("aplicado (factura sin datos → completada desde el QR)" if not dry
+                                       else "se aplicaría (factura sin datos → completar desde el QR)"), **upd})
+            completadas += 1
+            if not dry:
+                await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {**upd, "importe_fuente": "QR (relectura)"}})
+            continue
+        if not (mismo_num and mismo_ruc):
+            detalle.append({"id": d["id"], "empresa": d.get("empresa"), "comprobante": d.get("numero_documento"),
+                            "qr": qr.get("numero_documento"), "ruc_qr": qr.get("ruc_emisor"), "ruc": d.get("ruc_emisor"),
+                            "accion": "omitida: el QR no coincide con lo registrado"})
+            continue
+        upd = {"importe_total": qr["importe_total"]}
+        if qr.get("igv") and not d.get("igv"):
+            upd["igv"] = qr["igv"]
+        if qr.get("ruc_adquirente"):
+            upd["ruc_adquirente"] = qr["ruc_adquirente"]
+        detalle.append({"id": d["id"], "empresa": d.get("empresa"), "comprobante": d.get("numero_documento"),
+                        "accion": ("aplicado" if not dry else "se aplicaría"), **upd})
+        completadas += 1
+        if not dry:
+            await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {**upd, "importe_fuente": "QR (relectura)"}})
+    return {"ok": True, "dry": bool(dry), "pendientes": pendientes, "revisadas": revisadas,
+            "completadas": completadas, "detalle": detalle[:200]}
 
 
 @subsidio_router.get("/admin/subsidio/invoices/{invoice_id}/download")

@@ -265,6 +265,11 @@ export default function DashboardSubsidioView() {
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">S/ {fmt(kpis.gasto_total ?? 0)}</div>
                 <span className="text-xs text-neutral-400 font-medium block mt-1">
                   {kpis.num_meses ?? 0} meses • {fmt(kpis.galones_reconocidos ?? 0)} gal
+                  {(kpis.facturas_sin_importe ?? 0) > 0 && (
+                    <span className="block text-amber-600 font-bold mt-0.5">
+                      {kpis.facturas_sin_importe} factura{kpis.facturas_sin_importe > 1 ? "s" : ""} sin importe · edítalas en Facturas
+                    </span>
+                  )}
                 </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
