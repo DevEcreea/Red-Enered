@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.1-reset-vigencias",
+        "version": "1.8.2-ficha-pdf",
     }
 
 # ============================================================
@@ -5417,6 +5417,160 @@ async def _placa_revtec(placa: str) -> dict:
         if ult.get("observaciones"):
             out["revtec_observaciones"] = ult["observaciones"]
     return out
+
+
+@api.get("/vehiculos/ficha-pdf/{placa}")
+async def ficha_vehiculo_pdf(req: Request, placa: str):
+    """Ficha informativa de la unidad en PDF (documento interno ENERED, no es un
+    comprobante oficial): identificación, permiso MTC, SOAT, revisión técnica (con
+    historial), valor referencial MEF y documentos cargados con sus vigencias."""
+    import io as _io
+    import pymupdf
+    from fastapi.responses import StreamingResponse
+    u = await require_auth(req)
+    p = (placa or "").replace("-", "").replace(" ", "").upper()
+    filt = {"placa": p}
+    if u.get("empresa"):
+        filt["empresa"] = u["empresa"]
+    elif u["role"] != "admin_enered":
+        raise HTTPException(403, "Sin empresa activa")
+    v = await db.vehiculos.find_one(filt, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado")
+    emp = v.get("empresa") or u.get("empresa") or ""
+    docs = await db.documents.find({"placa": p, **({"empresa": emp} if emp else {})},
+                                   {"_id": 0, "doc": 1, "emi": 1, "ven": 1, "est": 1, "filename": 1, "el": 1}).to_list(200)
+    sdocs = await db.subsidio_documents.find({"placa": p, **({"empresa": emp} if emp else {})},
+                                             {"_id": 0, "categoria": 1, "filename": 1, "uploaded_at": 1}).to_list(200)
+
+    def _s(x):
+        return "-" if x in (None, "", 0) else str(x)
+
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    y = 40
+    W = 515
+    MOR = (0.49, 0.23, 0.93)
+    GRIS = (0.42, 0.45, 0.5)
+    NEG = (0.07, 0.09, 0.15)
+
+    def linea(y0, color=(0.9, 0.9, 0.92), w=0.6):
+        page.draw_line((40, y0), (40 + W, y0), color=color, width=w)
+
+    def titulo(txt, yy):
+        page.draw_rect(pymupdf.Rect(40, yy - 2, 44, yy + 12), color=MOR, fill=MOR)
+        page.insert_text((50, yy + 9), txt.upper(), fontsize=8.5, fontname="hebo", color=MOR)
+        return yy + 20
+
+    def fila(label, valor, yy, col=0):
+        x = 40 + col * 258
+        page.insert_text((x, yy), label, fontsize=7.5, fontname="helv", color=GRIS)
+        page.insert_text((x, yy + 11), _s(valor)[:60], fontsize=10, fontname="hebo", color=NEG)
+
+    def nueva_pagina():
+        nonlocal page, y
+        page = doc.new_page(width=595, height=842)
+        y = 40
+
+    def check(y_need):
+        nonlocal y
+        if y + y_need > 800:
+            nueva_pagina()
+
+    # Encabezado
+    page.insert_text((40, y + 14), "ENERED", fontsize=20, fontname="hebo", color=MOR)
+    page.insert_text((40, y + 28), "Ficha de la unidad", fontsize=10, fontname="helv", color=GRIS)
+    page.insert_text((300, y + 14), f"Placa {p}", fontsize=20, fontname="hebo", color=NEG)
+    page.insert_text((300, y + 28), (emp or "")[:60], fontsize=9, fontname="helv", color=GRIS)
+    y += 44
+    linea(y, MOR, 1.2)
+    y += 14
+
+    # Identificación
+    y = titulo("Identificación de la unidad", y)
+    for i, (l, vv) in enumerate((("Marca", v.get("marca")), ("Modelo", v.get("modelo")),
+                                 ("Año de fabricación", v.get("año")), ("Categoría", v.get("categoria")),
+                                 ("Chasis / VIN", v.get("chasis")), ("N° motor", v.get("motor")),
+                                 ("Color", v.get("color")), ("Tipo", v.get("tipo")))):
+        fila(l, vv, y + (i // 2) * 30, i % 2)
+    y += 4 * 30 + 6
+    fila("Titular", v.get("titular"), y); y += 30
+
+    # Permiso MTC
+    check(120)
+    y = titulo("Habilitación MTC", y)
+    for i, (l, vv) in enumerate((("Constancia / TUC", v.get("constancia_mtc")), ("Ejes", v.get("ejes")),
+                                 ("Carga útil (kg)", v.get("carga_util")), ("Peso seco (kg)", v.get("peso_seco")))):
+        fila(l, vv, y + (i // 2) * 30, i % 2)
+    y += 2 * 30 + 6
+
+    # SOAT
+    check(110)
+    y = titulo("SOAT", y)
+    for i, (l, vv) in enumerate((("Aseguradora", v.get("soat_compania")), ("Estado", v.get("soat_estado")),
+                                 ("N° de póliza", v.get("soat_poliza")), ("Vence", v.get("soat_vencimiento")))):
+        fila(l, vv, y + (i // 2) * 30, i % 2)
+    y += 2 * 30 + 6
+
+    # Revisión técnica
+    check(140)
+    y = titulo("Revisión técnica (CITV)", y)
+    for i, (l, vv) in enumerate((("Resultado", v.get("revtec_resultado")), ("Estado", v.get("revtec_estado")),
+                                 ("N° certificado", v.get("revtec_certificado")), ("Vigente hasta", v.get("revtec_vencimiento")),
+                                 ("Vigente desde", v.get("revtec_desde")), ("", None))):
+        if l:
+            fila(l, vv, y + (i // 2) * 30, i % 2)
+    y += 3 * 30
+    fila("Centro de inspección", (v.get("revtec_centro") or "")[:80], y); y += 32
+    hist = v.get("revtec_historial") or []
+    if hist:
+        check(20 + 14 * len(hist))
+        page.insert_text((40, y + 8), "Historial de inspecciones", fontsize=7.5, fontname="helv", color=GRIS); y += 16
+        for h in hist[:6]:
+            page.insert_text((44, y + 8), f"{_s(h.get('orden')).title():14} {_s(h.get('numero')):26} {_s(h.get('desde'))} → {_s(h.get('hasta'))}   {_s(h.get('resultado'))}",
+                             fontsize=8.5, fontname="cour", color=NEG)
+            y += 13
+            if h.get("observaciones") and h["observaciones"] != "Sin observaciones":
+                page.insert_text((60, y + 6), f"Obs.: {h['observaciones'][:90]}", fontsize=7.5, fontname="helv", color=(0.86, 0.15, 0.15)); y += 12
+        y += 6
+
+    # Valorización
+    check(70)
+    y = titulo("Valor referencial (MEF · Tabla de Valores Referenciales 2026)", y)
+    vr = v.get("valor_referencial")
+    det = v.get("valor_ref_detalle") or {}
+    fila("Valor referencial", f"S/ {int(vr):,}" if vr else None, y)
+    fila("Modelo de la tabla MEF", f"{det.get('modelo_tabla','-')} ({det.get('match','')})"[:44] if det else None, y, 1)
+    y += 30
+    if det.get("regla"):
+        page.insert_text((40, y + 6), f"Regla aplicada: {det.get('regla')}", fontsize=8, fontname="helv", color=GRIS); y += 16
+    y += 6
+
+    # Documentos cargados
+    check(60)
+    y = titulo("Documentos cargados en ENERED", y)
+    filas_docs = [(d.get("doc"), d.get("emi"), d.get("ven"), d.get("est"), d.get("filename")) for d in docs]
+    mapa_sub = {"tarjeta_propiedad": "Tarjeta de propiedad", "tarjeta_habilitacion": "TUC / Tarjeta de habilitación",
+                "soat": "SOAT", "revision_tecnica": "Revisión técnica"}
+    for sd in sdocs:
+        filas_docs.append((mapa_sub.get(sd.get("categoria"), sd.get("categoria")), "—", "—", "Cargado (subsidio)", sd.get("filename")))
+    if not filas_docs:
+        page.insert_text((44, y + 8), "Sin documentos cargados.", fontsize=9, fontname="helv", color=GRIS); y += 16
+    for (dn, emi, ven, est, fn) in filas_docs[:25]:
+        check(16)
+        page.insert_text((44, y + 8), f"{_s(dn)[:28]:28} emi {_s(emi):10} vence {_s(ven):10} {_s(est):12} {(_s(fn))[:34]}",
+                         fontsize=8, fontname="cour", color=NEG)
+        y += 13
+    y += 8
+
+    # Pie
+    for pg in doc:
+        pg.insert_text((40, 820), f"Documento informativo generado por ENERED el {datetime.now(timezone.utc).strftime('%d/%m/%Y')} · "
+                       f"Fuentes: MTC, SUNAT, OSINERGMIN, APESEG/SOAT, CITV, MEF · No es un comprobante oficial.",
+                       fontsize=6.8, fontname="helv", color=GRIS)
+    buf = _io.BytesIO(doc.tobytes()); doc.close()
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="ENERED_ficha_{p}.pdf"'})
 
 
 @api.get("/vehiculos/ficha/{placa}")
@@ -7626,15 +7780,14 @@ async def list_documents(
             if not placa:
                 continue
             el_api = (v.get("enriquecido_en") or "")[:10]
-            # Rótulo: quién lo emite y el número del documento (no "automático")
-            soat_por = " · ".join(x for x in [v.get("soat_compania") or "",
-                                              f"Póliza {v['soat_poliza']}" if v.get("soat_poliza") else ""] if x) or "SOAT verificado"
-            rev_por = " · ".join(x for x in [(v.get("revtec_centro") or "")[:40],
-                                             f"Cert. {v['revtec_certificado']}" if v.get("revtec_certificado") else "",
-                                             v.get("revtec_resultado") or ""] if x) or "Revisión verificada"
-            for campo, doc_name, extra in (
-                ("soat_vencimiento", "SOAT", soat_por),
-                ("revtec_vencimiento", "Revisión técnica", rev_por),
+            # Rótulo: quién lo emite en "por"; número de póliza / certificado aparte en "ref"
+            soat_por = v.get("soat_compania") or "SOAT verificado"
+            soat_ref = f"Póliza N° {v['soat_poliza']}" if v.get("soat_poliza") else ""
+            rev_por = " · ".join(x for x in [(v.get("revtec_centro") or "")[:48], v.get("revtec_resultado") or ""] if x) or "Revisión verificada"
+            rev_ref = f"Certificado {v['revtec_certificado']}" if v.get("revtec_certificado") else ""
+            for campo, doc_name, extra, ref in (
+                ("soat_vencimiento", "SOAT", soat_por, soat_ref),
+                ("revtec_vencimiento", "Revisión técnica", rev_por, rev_ref),
             ):
                 ven = v.get(campo)
                 if not ven:
@@ -7647,6 +7800,7 @@ async def list_documents(
                     "id": f"api-{d_norm}-{placa}",
                     "tipo": "Vehículos",
                     "doc": doc_name,
+                    "ref": ref,
                     "por": extra,
                     "el": el_api,
                     "emi": (v.get("revtec_desde") or "—") if campo == "revtec_vencimiento" else "—",

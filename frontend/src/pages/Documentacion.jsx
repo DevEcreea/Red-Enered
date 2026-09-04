@@ -225,6 +225,18 @@ export default function Documentacion() {
   const [guiadaVehs, setGuiadaVehs] = useState([]);
   const [guiadaForm, setGuiadaForm] = useState({}); // placa -> {fecha, estado, guardando, ok}
 
+  async function descargarFichaPdf(placa) {
+    try {
+      const r = await api.get(`/vehiculos/ficha-pdf/${placa}`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = `ENERED_ficha_${placa}.pdf`; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+    } catch (err) {
+      alert("No se pudo generar la ficha: " + (err.response?.data?.detail || err.message));
+    }
+  }
+
   async function abrirGuiada() {
     setGuiadaOpen(true);
     try {
@@ -1023,7 +1035,16 @@ export default function Documentacion() {
                               <span style={{ fontSize:11.5,color:"#9ca3af",marginLeft:4 }}>{vigentes}/{SLOTS.length} documentos</span>
                             </span>
                           </td>
-                          <td style={{ ...tdSt, textAlign:"center" }}>
+                          <td style={{ ...tdSt, textAlign:"center", whiteSpace:"nowrap" }}>
+                            {/* Ficha PDF de la unidad: todo lo que ENERED sabe del carro */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); descargarFichaPdf(pl); }}
+                              style={{ height:30,padding:"0 10px",marginRight:6,border:"1px solid #C4B5FD",background:"#F5F0FF",color:"#5B21B6",borderRadius:8,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5,fontSize:11.5,fontWeight:700 }}
+                              title="Descargar ficha PDF de la unidad (datos, MTC, SOAT, revisión técnica, valor, documentos)"
+                              data-testid={`btn-ficha-${pl}`}
+                            >
+                              <Download style={{ width:14,height:14 }}/> Ficha PDF
+                            </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteVehiculo(pl); }}
                               style={{ width:30,height:30,border:"none",background:"#FEF2F2",color:"#DC2626",borderRadius:8,cursor:"pointer",display:"inline-flex",alignItems:"center",justifyContent:"center" }}
@@ -1079,7 +1100,12 @@ export default function Documentacion() {
                               <td style={{ ...tdSt, fontWeight:600, color:"#374151", fontSize:13 }}>
                                 <span style={{ display:"flex",alignItems:"center",gap:7 }}>
                                   <FileText style={{ width:14,height:14,color: hasdoc?"#8B3DFF":"#9ca3af" }}/>
-                                  {slot}
+                                  <span>
+                                    {slot}
+                                    {hasdoc && d.ref && (
+                                      <div style={{ fontSize:11,color:"#6b7280",fontWeight:500,fontFamily:"ui-monospace,monospace",marginTop:2 }}>{d.ref}</div>
+                                    )}
+                                  </span>
                                 </span>
                               </td>
                               {/* estado */}
