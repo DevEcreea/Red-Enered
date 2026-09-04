@@ -56,6 +56,7 @@ export default function DashboardSubsidioView() {
     top_unidades = [], top_estaciones = [],
     documentos_semaforo = { items: [], summary: {} },
     pending_drafts = 0,
+    verificacion = null,
   } = data || {};
 
   const fmt = (n) => Number(n || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
@@ -109,60 +110,45 @@ export default function DashboardSubsidioView() {
   }, [top_estaciones]);
 
   const docRows = useMemo(() => {
-    const res = [];
-    const expiring = (documentos_semaforo?.items || []).find(d => d.status === "expiring" || (d.days_remaining !== null && d.days_remaining <= 30 && d.days_remaining >= 0));
-    if (expiring) {
+    const items = documentos_semaforo?.items || [];
+    const rank = { expired: 0, expiring: 1, missing: 2, unknown: 3, active: 4 };
+    const style = (st) => {
+      if (st === "expired")  return { badge: "VENCIDO",    bg: "bg-red-50/60 border-red-200 text-red-700",       dot: "bg-red-500",     badgeColor: "text-red-600" };
+      if (st === "expiring") return { badge: "POR VENCER", bg: "bg-red-50/60 border-red-200 text-red-700",       dot: "bg-red-500",     badgeColor: "text-red-600" };
+      if (st === "missing")  return { badge: "ATENCIÓN",   bg: "bg-amber-50/60 border-amber-200 text-amber-700", dot: "bg-amber-500",   badgeColor: "text-amber-600" };
+      if (st === "unknown")  return { badge: "SIN DATO",   bg: "bg-neutral-50/60 border-neutral-200 text-neutral-500", dot: "bg-neutral-400", badgeColor: "text-neutral-500" };
+      return { badge: "EN REGLA", bg: "bg-emerald-50/60 border-emerald-200 text-emerald-700", dot: "bg-emerald-500", badgeColor: "text-emerald-600" };
+    };
+    // Primero lo urgente (vencido → por vencer → pendiente); lo verificado en regla se resume abajo.
+    const alertas = items
+      .filter((d) => d.status !== "active")
+      .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || ((a.days_remaining ?? 9999) - (b.days_remaining ?? 9999)));
+    const res = alertas.slice(0, 3).map((d) => ({
+      title: `${d.label}${d.placa ? " - " + d.placa : ""}`,
+      desc: d.detalle || (typeof d.days_remaining === "number" ? `vence en ${d.days_remaining} días` : ""),
+      ...style(d.status),
+    }));
+    const total = kpis.unidades_incluidas ?? 0;
+    const enRegla = kpis.unidades_en_regla ?? 0;
+    const restantes = alertas.length - res.length;
+    if (restantes > 0) {
       res.push({
-        title: `${expiring.label} ${expiring.placa ? '- ' + expiring.placa : ''}`,
-        desc: `vence en ${expiring.days_remaining} días`,
-        badge: "POR VENCER",
-        bg: "bg-red-50/60 border-red-200 text-red-700",
-        dot: "bg-red-500",
-        badgeColor: "text-red-600",
-      });
-    } else {
-      res.push({
-        title: "Habilitación TUC - V18-209",
-        desc: "vence en 28 días",
-        badge: "POR VENCER",
-        bg: "bg-red-50/60 border-red-200 text-red-700",
-        dot: "bg-red-500",
-        badgeColor: "text-red-600",
-      });
-    }
-    
-    const attention = (documentos_semaforo?.items || []).find(d => d.status === "missing");
-    if (attention) {
-      res.push({
-        title: `${attention.label}`,
-        desc: "documento pendiente de carga",
-        badge: "ATENCIÓN",
-        bg: "bg-amber-50/60 border-amber-200 text-amber-700",
-        dot: "bg-amber-500",
-        badgeColor: "text-amber-600",
-      });
-    } else {
-      res.push({
-        title: "Autorización empresa - MTC",
-        desc: "vence en 74 días",
-        badge: "ATENCIÓN",
-        bg: "bg-amber-50/60 border-amber-200 text-amber-700",
-        dot: "bg-amber-500",
-        badgeColor: "text-amber-600",
+        title: `${restantes} alerta${restantes > 1 ? "s" : ""} más`,
+        desc: "revisa el detalle en Documentación",
+        ...style("missing"),
       });
     }
-
-    const totalVehiclesCount = kpis.unidades_incluidas ?? 0;
-    const inReglaCount = totalVehiclesCount > 0 ? totalVehiclesCount - 1 : 0;
     res.push({
-      title: `Resto de flota - ${inReglaCount} unidades`,
-      desc: totalVehiclesCount > 0 ? "habilitaciones y propiedad vigentes" : "No se han registrado vehículos aún",
-      badge: totalVehiclesCount > 0 ? "EN REGLA" : "SIN DATOS",
-      bg: totalVehiclesCount > 0 ? "bg-emerald-50/60 border-emerald-200 text-emerald-700" : "bg-neutral-50/60 border-neutral-200 text-neutral-500",
-      dot: totalVehiclesCount > 0 ? "bg-emerald-500" : "bg-neutral-400",
-      badgeColor: totalVehiclesCount > 0 ? "text-emerald-600" : "text-neutral-500",
+      title: `Unidades en regla - ${enRegla} de ${total}`,
+      desc: total === 0
+        ? "No se han registrado vehículos aún"
+        : enRegla > 0 ? "habilitación MTC y vigencias al día" : "ninguna unidad con todo verificado y vigente",
+      badge: total === 0 ? "SIN DATOS" : enRegla > 0 ? "EN REGLA" : "ATENCIÓN",
+      bg: total === 0 ? "bg-neutral-50/60 border-neutral-200 text-neutral-500"
+        : enRegla > 0 ? "bg-emerald-50/60 border-emerald-200 text-emerald-700" : "bg-amber-50/60 border-amber-200 text-amber-700",
+      dot: total === 0 ? "bg-neutral-400" : enRegla > 0 ? "bg-emerald-500" : "bg-amber-500",
+      badgeColor: total === 0 ? "text-neutral-500" : enRegla > 0 ? "text-emerald-600" : "text-amber-600",
     });
-
     return res;
   }, [documentos_semaforo, kpis]);
 
@@ -355,13 +341,7 @@ export default function DashboardSubsidioView() {
                 {top_unidades.length === 0 ? (
                   <div className="text-xs text-neutral-400 py-2">Sin datos</div>
                 ) : top_unidades.slice(0, 3).map((item, idx) => {
-                  const getMeta = (p, i) => {
-                    if (p === "V18-209") return "N3·2014";
-                    if (p === "T2H-841") return "N3·2015";
-                    if (p === "T2H-842") return "N3·2021";
-                    return i === 0 ? "N3·2014" : i === 1 ? "N3·2015" : "N3·2021";
-                  };
-                  const meta = getMeta(item.placa, idx);
+                  const meta = [item.categoria, item.anio].filter(Boolean).join("·") || "sin datos MTC";
                   return (
                     <div key={idx} className="flex items-center justify-between py-1.5 border-b border-neutral-50/50">
                       <div>
@@ -412,9 +392,11 @@ export default function DashboardSubsidioView() {
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Unidades incluidas</span>
                 <div className="font-cabinet font-black text-2xl md:text-3xl text-neutral-800">
-                  {kpis.unidades_incluidas ?? 0}/{kpis.unidades_incluidas ?? 0}
+                  {kpis.unidades_incluidas ?? 0}{kpis.unidades_mtc != null ? `/${kpis.unidades_mtc}` : ""}
                 </div>
-                <span className="text-xs text-neutral-400 font-medium block mt-1">en el expediente</span>
+                <span className="text-xs text-neutral-400 font-medium block mt-1">
+                  {kpis.unidades_mtc != null ? "en el expediente / habilitadas en el MTC" : "en el expediente"}
+                </span>
               </div>
               <div className="bg-neutral-50 rounded-2xl p-4">
                 <span className="text-sm font-bold text-neutral-500 block mb-1">Habilitadas y activas</span>
@@ -422,7 +404,7 @@ export default function DashboardSubsidioView() {
                   {kpis.unidades_validas ?? 0}/{kpis.unidades_incluidas ?? 0}
                 </div>
                 <span className="text-xs text-emerald-600 font-bold block mt-1">
-                  {kpis.unidades_validas_pct ?? 0}% operativas
+                  {kpis.unidades_validas_pct ?? 0}% habilitadas{verificacion?.mtc ? " · MTC" : ""}
                 </span>
               </div>
             </div>
@@ -462,6 +444,11 @@ export default function DashboardSubsidioView() {
             <div className="mt-1 flex items-baseline gap-1">
               <span className="text-4xl font-cabinet font-black text-neutral-800">{fmt(kpis.avg_age ?? 0)}</span>
               <span className="text-sm font-semibold text-neutral-500">años prom.</span>
+              <span className="text-xs text-neutral-400 font-medium ml-1">
+                {(kpis.anios_conocidos ?? 0) > 0
+                  ? `año de fabricación MTC en ${kpis.anios_conocidos} de ${kpis.unidades_incluidas ?? 0}`
+                  : "sin año de fabricación verificado"}
+              </span>
             </div>
             <p className="text-sm font-bold text-amber-950 mt-3 leading-tight">
               Evaluar mantenimiento o renovación con monitoreo real.
@@ -493,7 +480,11 @@ export default function DashboardSubsidioView() {
               </div>
               <div>
                 <div className="font-bold text-neutral-800 text-sm md:text-base">Documentos en regla</div>
-                <div className="text-xs text-neutral-400 mt-0.5">Semáforo de vencimientos de tu flota</div>
+                <div className="text-xs text-neutral-400 mt-0.5">
+                  {(verificacion?.fuentes || []).length > 0
+                    ? `Verificado en ${verificacion.fuentes.join(" · ")}`
+                    : "Semáforo de vencimientos de tu flota"}
+                </div>
               </div>
             </div>
 
@@ -736,6 +727,7 @@ function DocsSemaforoCard({ semaforo, navigate }) {
     if (status === "active")   return { bg: "bg-emerald-50",  border: "border-emerald-200",  text: "text-emerald-700",  badge: "bg-emerald-500", label: "Activo" };
     if (status === "expiring") return { bg: "bg-amber-50",    border: "border-amber-200",    text: "text-amber-700",    badge: "bg-amber-500",   label: "Por vencer" };
     if (status === "expired")  return { bg: "bg-red-50",      border: "border-red-200",      text: "text-red-700",      badge: "bg-red-500",     label: "Vencido" };
+    if (status === "unknown")  return { bg: "bg-neutral-50", border: "border-neutral-200", text: "text-neutral-500", badge: "bg-neutral-300", label: "Sin dato" };
     return { bg: "bg-neutral-50", border: "border-neutral-200", text: "text-neutral-500", badge: "bg-neutral-300", label: "Falta" };
   };
 
@@ -746,7 +738,7 @@ function DocsSemaforoCard({ semaforo, navigate }) {
           <h3 className="font-cabinet text-lg font-bold flex items-center gap-2">
             <FileText className="w-5 h-5 text-brand" /> Vencimiento de documentos
           </h3>
-          <p className="text-xs text-neutral-500">Vigencia 365 días desde la carga. Reemplaza los documentos antes que venzan.</p>
+          <p className="text-xs text-neutral-500">Vigencias verificadas en SUNAT, MTC y el motor de placas. Renueva antes que venzan.</p>
         </div>
         <div className="flex items-center gap-2 text-xs">
           <SummaryBadge color="emerald" label="Activos" value={summary.active || 0} testid="semaforo-summary-active" />
@@ -765,9 +757,9 @@ function DocsSemaforoCard({ semaforo, navigate }) {
           {items.map((d) => {
             const c = colorFor(d.status);
             return (
-              <div key={d.categoria} className={`border rounded-xl p-4 ${c.bg} ${c.border}`} data-testid={`semaforo-item-${d.categoria}`}>
+              <div key={`${d.categoria}-${d.placa || ""}`} className={`border rounded-xl p-4 ${c.bg} ${c.border}`} data-testid={`semaforo-item-${d.categoria}`}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="text-sm font-bold text-neutral-900 leading-tight">{d.label}</div>
+                  <div className="text-sm font-bold text-neutral-900 leading-tight">{d.label}{d.placa ? ` — ${d.placa}` : ""}</div>
                   <span className={`w-3 h-3 rounded-full ${c.badge} flex-shrink-0 mt-1`} aria-label={c.label} />
                 </div>
                 <div className={`text-xs uppercase tracking-widest font-bold mt-2 ${c.text}`}>{c.label}</div>

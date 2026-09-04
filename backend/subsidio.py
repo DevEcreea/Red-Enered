@@ -903,6 +903,9 @@ async def _mtc_habilitaciones(ruc: str) -> Optional[dict]:
                 "placa": v.get("placa"),
                 "categoria": (v.get("categoria") or "").upper(),
                 "constancia": v.get("constancia") or a.get("codigo") or "",
+                "anio": v.get("anio") or "",
+                "chasis": v.get("chasis") or "",
+                "ejes": v.get("ejes") or "",
                 "vigencia": vig,
                 "vencida": _vencida(vig),
                 "habilitado": bool(a.get("habilitado")) and not _vencida(vig),
@@ -2483,6 +2486,294 @@ async def invoices_confirmed(programa: str = "du004", user: dict = Depends(_requ
     return rows
 
 
+
+def _fecha_any(s):
+    """Fecha en ISO (YYYY-MM-DD), DD/MM/YYYY o DD-MM-YYYY → date | None."""
+    s = str(s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).date()
+        except Exception:
+            pass
+    return None
+
+
+def _estado_por_fecha(d, hoy):
+    """Semáforo por fecha de vencimiento: vencido / ≤30 días por vencer / vigente."""
+    if d is None:
+        return None, None
+    dias = (d - hoy).days
+    return ("expired" if dias < 0 else "expiring" if dias <= 30 else "active"), dias
+
+
+async def _dashboard_verificado(user: dict, uids: list, vehicles: list) -> dict:
+    """
+    KPIs VERIFICADOS del dashboard, sin gastar créditos de pago:
+      · SUNAT (consulta pública)  → Ficha RUC activo y habido.
+      · MTC · DGTT (consulta pública, 1 scrape por RUC, caché 10 min)
+            → autorización de transporte (vigencia) y, por placa, habilitación TUC
+              (constancia, vigencia, categoría, año de fabricación).
+      · Motor de placas (módulo Vehículos, ya guardado en la BD) → SOAT y CITV.
+      · Expediente → adjuntos (DNI del representante, tarjeta de propiedad).
+    Lo que el MTC informa (año, constancia, vigencia, categoría vacía) se persiste en
+    la unidad del expediente para que no vuelva a quedar en blanco.
+    """
+    import asyncio as _asyncio
+    hoy = datetime.now(timezone.utc).date()
+    ahora = datetime.now(timezone.utc).isoformat()
+    ruc = (user.get("ruc") or "").strip()
+    empresa = user.get("empresa")
+
+    def _pn(p):
+        return (p or "").replace("-", "").replace(" ", "").upper().strip()
+
+    def _int(x):
+        try:
+            v = int(str(x).strip()[:4])
+            return v if 1950 <= v <= hoy.year + 1 else None
+        except Exception:
+            return None
+
+    async def _safe(coro, t=45):
+        try:
+            return await _asyncio.wait_for(coro, timeout=t)
+        except Exception:
+            return None
+
+    sunat = aut = mtc_hab = None
+    if _re.fullmatch(r"\d{11}", ruc):
+        t_sunat = _asyncio.ensure_future(_safe(_sunat_ficha(ruc), 15))
+        # Secuencial a propósito: la 2ª llamada reutiliza la caché del scrape del MTC.
+        aut = await _safe(_mtc_autorizacion(ruc))
+        mtc_hab = await _safe(_mtc_habilitaciones(ruc))
+        sunat = await t_sunat
+
+    # Motor de placas: SOAT / CITV / año ya consultados y guardados (0 créditos ahora).
+    motor = {}
+    if empresa:
+        async for mv in db.vehiculos.find(
+            {"empresa": empresa},
+            {"_id": 0, "placa": 1, "año": 1, "anio": 1, "categoria": 1, "constancia_mtc": 1,
+             "soat_vencimiento": 1, "soat_estado": 1, "soat_compania": 1,
+             "revtec_vencimiento": 1, "revtec_estado": 1, "revtec_centro": 1},
+        ):
+            pn = _pn(mv.get("placa"))
+            if pn:
+                motor[pn] = mv
+
+    docs = await db.subsidio_documents.find(_own_q(user, uids), {"_id": 0, "categoria": 1, "category": 1, "placa": 1}).to_list(3000)
+    subidos = {((d.get("categoria") or d.get("category")), _pn(d.get("placa")) or None) for d in docs}
+
+    items = []
+
+    def _item(cat, label, placa, status, dias=None, fecha=None, fuente="", detalle="", verificado=False):
+        items.append({
+            "categoria": cat,
+            "label": label,
+            "placa": placa,
+            "uploaded": (cat, _pn(placa) or None) in subidos,
+            "expires_at": fecha.isoformat() if fecha else None,
+            "days_remaining": dias,
+            "status": status,           # active | expiring | expired | missing | unknown
+            "fuente": fuente,
+            "verificado": verificado,
+            "detalle": detalle,
+        })
+
+    # ---- Empresa ----
+    if sunat and sunat.get("no_encontrado"):
+        _item("ficha_ruc", DOCUMENT_LABELS["ficha_ruc"], None, "expired", fuente="SUNAT", verificado=True,
+              detalle="Este RUC no figura en SUNAT.")
+    elif sunat:
+        ok = bool(sunat.get("activo_habido"))
+        _item("ficha_ruc", DOCUMENT_LABELS["ficha_ruc"], None, "active" if ok else "expired", fuente="SUNAT",
+              verificado=True, detalle=f"SUNAT: {sunat.get('estado') or '—'} y {sunat.get('condicion') or '—'}.")
+    else:
+        up = ("ficha_ruc", None) in subidos
+        _item("ficha_ruc", DOCUMENT_LABELS["ficha_ruc"], None, "unknown" if up else "missing", fuente="SUNAT",
+              detalle="No se pudo verificar en SUNAT en este momento." if up else "documento pendiente de carga")
+
+    if aut and aut.get("encontrada"):
+        d = _fecha_any(aut.get("vigencia"))
+        st, dias = _estado_por_fecha(d, hoy)
+        if st is None:
+            st = "active" if aut.get("habilitado") else "expired"
+        elif not aut.get("habilitado") and st != "expired":
+            st = "expired"
+        _item("resolucion_autorizacion", DOCUMENT_LABELS["resolucion_autorizacion"], None, st, dias, d,
+              fuente="MTC · DGTT", verificado=True,
+              detalle=(f"Autorización {aut.get('codigo') or ''} · vence en {dias} días" if st == "expiring"
+                       else f"Autorización {aut.get('codigo') or ''} vencida el {aut.get('vigencia')}" if st == "expired"
+                       else f"Autorización {aut.get('codigo') or ''} vigente hasta {aut.get('vigencia')}"))
+    elif aut is not None:
+        _item("resolucion_autorizacion", DOCUMENT_LABELS["resolucion_autorizacion"], None, "missing",
+              fuente="MTC · DGTT", verificado=True, detalle="No figura autorización de transporte en el MTC.")
+    else:
+        up = ("resolucion_autorizacion", None) in subidos
+        _item("resolucion_autorizacion", DOCUMENT_LABELS["resolucion_autorizacion"], None, "unknown" if up else "missing",
+              fuente="MTC · DGTT", detalle="No se pudo verificar en el MTC en este momento." if up else "documento pendiente de carga")
+
+    up = ("dni_representante", None) in subidos
+    _item("dni_representante", DOCUMENT_LABELS["dni_representante"], None, "active" if up else "missing",
+          fuente="Expediente", detalle="adjunto en el expediente" if up else "documento pendiente de carga")
+
+    # ---- Flota (por placa) ----
+    unidades_meta, ages = {}, []
+    older_than_10 = habilitadas = en_regla = 0
+    for v in vehicles:
+        placa = (v.get("placa") or "").upper().strip()
+        pn = _pn(placa)
+        h = (mtc_hab or {}).get(pn)
+        m = motor.get(pn, {})
+        anio = _int((h or {}).get("anio")) or _int(m.get("año") or m.get("anio")) or _int(v.get("anio_fabricacion"))
+        cat = ((h or {}).get("categoria") or m.get("categoria") or v.get("categoria") or "").upper()
+        tuc_ok, vencidos_unidad = False, 0
+
+        # TUC / habilitación vehicular (MTC)
+        if h:
+            d = _fecha_any(h.get("vigencia"))
+            st, dias = _estado_por_fecha(d, hoy)
+            if st is None:
+                st = "active" if h.get("habilitado") else "expired"
+            tuc_ok = st in ("active", "expiring") and bool(h.get("habilitado"))
+            if st == "expired":
+                vencidos_unidad += 1
+            _item("tarjeta_habilitacion", "Habilitación TUC", placa, st, dias, d, fuente="MTC · DGTT", verificado=True,
+                  detalle=(f"vence en {dias} días · constancia {h.get('constancia') or '—'}" if st == "expiring"
+                           else f"vencida el {h.get('vigencia')}" if st == "expired"
+                           else f"vigente hasta {h.get('vigencia') or '—'} · constancia {h.get('constancia') or '—'}"))
+        elif mtc_hab is not None:
+            vencidos_unidad += 1
+            _item("tarjeta_habilitacion", "Habilitación TUC", placa, "missing", fuente="MTC · DGTT", verificado=True,
+                  detalle="no figura habilitada en el MTC")
+        else:
+            d = _fecha_any(v.get("vigente_hasta"))
+            st, dias = _estado_por_fecha(d, hoy)
+            _item("tarjeta_habilitacion", "Habilitación TUC", placa, st or "unknown", dias, d, fuente="MTC · DGTT",
+                  detalle="MTC sin respuesta; dato guardado" if st else "MTC sin respuesta")
+
+        # SOAT (ya guardado por el motor de placas)
+        d = _fecha_any(m.get("soat_vencimiento"))
+        st, dias = _estado_por_fecha(d, hoy)
+        if st:
+            if st == "expired":
+                vencidos_unidad += 1
+            _item("soat", "SOAT", placa, st, dias, d, fuente=m.get("soat_compania") or "Motor de placas", verificado=True,
+                  detalle=(f"vence en {dias} días" if st == "expiring" else f"vencido el {d.strftime('%d/%m/%Y')}" if st == "expired"
+                           else f"vigente hasta {d.strftime('%d/%m/%Y')}") + (f" · {m['soat_compania']}" if m.get("soat_compania") else ""))
+        else:
+            _item("soat", "SOAT", placa, "unknown", fuente="Motor de placas",
+                  detalle="sin dato · actualiza vigencias en Documentación")
+
+        # CITV / revisión técnica (ya guardada)
+        d = _fecha_any(m.get("revtec_vencimiento"))
+        st, dias = _estado_por_fecha(d, hoy)
+        if st:
+            if st == "expired":
+                vencidos_unidad += 1
+            _item("revision_tecnica", "Revisión técnica (CITV)", placa, st, dias, d, fuente="MTC · CITV", verificado=True,
+                  detalle=(f"vence en {dias} días" if st == "expiring" else f"vencida el {d.strftime('%d/%m/%Y')}" if st == "expired"
+                           else f"vigente hasta {d.strftime('%d/%m/%Y')}") + (f" · {m['revtec_centro']}" if m.get("revtec_centro") else ""))
+        elif "SIN REGISTRO" in str(m.get("revtec_estado") or "").upper():
+            vencidos_unidad += 1
+            _item("revision_tecnica", "Revisión técnica (CITV)", placa, "missing", fuente="MTC · CITV", verificado=True,
+                  detalle="sin registro de revisión técnica en el MTC")
+        else:
+            _item("revision_tecnica", "Revisión técnica (CITV)", placa, "unknown", fuente="MTC · CITV",
+                  detalle="sin dato · actualiza vigencias en Documentación")
+
+        # Tarjeta de propiedad (adjunto del expediente)
+        up = ("tarjeta_propiedad", pn) in subidos
+        _item("tarjeta_propiedad", "Tarjeta de propiedad", placa, "active" if up else "missing", fuente="Expediente",
+              detalle="adjunta en el expediente" if up else "documento pendiente de carga")
+
+        if anio:
+            edad = hoy.year - anio
+            ages.append(edad)
+            if edad >= 10:
+                older_than_10 += 1
+        if tuc_ok:
+            habilitadas += 1
+            if vencidos_unidad == 0:
+                en_regla += 1
+        unidades_meta[placa] = {
+            "categoria": cat or None, "anio": anio,
+            "tuc": bool(tuc_ok) if (h or mtc_hab is not None) else None,
+            "constancia": (h or {}).get("constancia") or m.get("constancia_mtc") or v.get("constancia") or None,
+            "soat_vencimiento": m.get("soat_vencimiento") or None,
+            "revtec_vencimiento": m.get("revtec_vencimiento") or None,
+        }
+
+        # Persistir lo verificado en la unidad del expediente (solo si cambia)
+        try:
+            upd = {}
+            if anio and v.get("anio_fabricacion") != anio:
+                upd["anio_fabricacion"] = anio
+            if cat and not v.get("categoria"):
+                upd["categoria"] = cat
+            if h:
+                if h.get("constancia") and v.get("constancia") != h["constancia"]:
+                    upd["constancia"] = h["constancia"]
+                dv = _fecha_any(h.get("vigencia"))
+                if dv and v.get("vigente_hasta") != dv.isoformat():
+                    upd["vigente_hasta"] = dv.isoformat()
+            if upd and v.get("id"):
+                upd["verificado_mtc_en"] = ahora
+                await db.subsidio_vehicles.update_one({"id": v["id"]}, {"$set": upd})
+                v.update(upd)
+        except Exception:
+            pass
+
+    n_ok = sum(1 for i in items if i["status"] in ("active", "expiring"))
+    n_bad = sum(1 for i in items if i["status"] in ("expired", "missing"))
+    n_exp = sum(1 for i in items if i["status"] == "expiring")
+    n_ven = sum(1 for i in items if i["status"] == "expired")
+    n_mis = sum(1 for i in items if i["status"] == "missing")
+    n_unk = sum(1 for i in items if i["status"] == "unknown")
+    pct_docs = round(n_ok / (n_ok + n_bad) * 100) if (n_ok + n_bad) > 0 else 0
+    if n_ven:
+        docs_detalle = f"{n_ven} vencido{'s' if n_ven > 1 else ''}"
+    elif n_exp:
+        docs_detalle = f"{n_exp} por vencer pronto"
+    elif n_mis:
+        docs_detalle = f"{n_mis} pendiente{'s' if n_mis > 1 else ''}"
+    elif n_ok:
+        docs_detalle = "Todos al día"
+    else:
+        docs_detalle = "Sin datos"
+
+    fuentes = []
+    if sunat is not None:
+        fuentes.append("SUNAT")
+    if mtc_hab is not None or (aut and aut.get("encontrada")):
+        fuentes.append("MTC")
+    if motor:
+        fuentes.append("Motor de placas")
+    return {
+        "items": items,
+        "summary": {"active": n_ok - n_exp, "expiring": n_exp, "expired": n_ven, "missing": n_mis, "unknown": n_unk},
+        "pct_docs": pct_docs,
+        "docs_detalle": docs_detalle,
+        "unidades_validas": habilitadas if mtc_hab is not None else sum(
+            1 for v in vehicles if _estado_por_fecha(_fecha_any(v.get("vigente_hasta")), hoy)[0] in (None, "active", "expiring")),
+        "unidades_mtc": len(mtc_hab) if mtc_hab is not None else None,
+        "unidades_en_regla": en_regla,
+        "avg_age": round(sum(ages) / len(ages), 1) if ages else 0.0,
+        "older_than_10": older_than_10,
+        "anios_conocidos": len(ages),
+        "unidades_meta": unidades_meta,
+        "verificacion": {
+            "sunat": sunat is not None,
+            "mtc": mtc_hab is not None,
+            "mtc_autorizacion": bool(aut and aut.get("encontrada")),
+            "fuentes": fuentes,
+            "verificado_en": ahora,
+        },
+    }
+
+
 @subsidio_router.get("/subsidio/dashboard-data")
 async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     """Datos del dashboard del cliente_subsidio (5 filas):
@@ -2555,76 +2846,11 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
     detail_parts = [f"{count} {cat}" for cat, count in sorted(cat_counts.items(), key=lambda x: -x[1])]
     unidades_detalle = " - ".join(detail_parts) if detail_parts else "0 unidades"
 
-    today_date = datetime.now(timezone.utc).date()
-    valid_vehicles = 0
-    for v in vehicles:
-        hasta = v.get("vigente_hasta")
-        if not hasta:
-            valid_vehicles += 1
-            continue
-        try:
-            exp_date = datetime.strptime(hasta[:10], "%Y-%m-%d").date()
-            if exp_date >= today_date:
-                valid_vehicles += 1
-        except Exception:
-            valid_vehicles += 1
-
-    # === Documentos en regla percentage and detail ===
-    uploaded_docs_map = {}
-    docs_list = await db.subsidio_documents.find({"user_id": user["id"]}).to_list(1000)
-    for d in docs_list:
-        cat = d.get("categoria") or d.get("category")
-        placa = d.get("placa")
-        uploaded_docs_map[(cat, placa)] = d
-
-    total_req_docs = 3 + 2 * len(vehicles)
-    valid_docs_count = 0
-    expiring_soon_count = 0
-    expired_count = 0
-    missing_count = 0
-
-    def eval_doc(cat, placa):
-        nonlocal valid_docs_count, expiring_soon_count, expired_count, missing_count
-        doc_match = uploaded_docs_map.get((cat, placa))
-        if not doc_match:
-            missing_count += 1
-            return
-        
-        uploaded_at_str = doc_match.get("uploaded_at") or doc_match.get("created_at")
-        if not uploaded_at_str:
-            valid_docs_count += 1
-            return
-        
-        try:
-            up_date = datetime.fromisoformat(uploaded_at_str.replace("Z", "+00:00")).date()
-            expires_at = up_date + timedelta(days=365)
-            days_rem = (expires_at - today_date).days
-            if days_rem < 0:
-                expired_count += 1
-            elif days_rem <= 30:
-                expiring_soon_count += 1
-                valid_docs_count += 1
-            else:
-                valid_docs_count += 1
-        except Exception:
-            valid_docs_count += 1
-
-    for cat in ["ficha_ruc", "resolucion_autorizacion", "dni_representante"]:
-        eval_doc(cat, None)
-    for v in vehicles:
-        for cat in ["tarjeta_habilitacion", "tarjeta_propiedad"]:
-            eval_doc(cat, v["placa"])
-
-    pct_docs = round((valid_docs_count / total_req_docs) * 100) if total_req_docs > 0 else 100
-
-    if expiring_soon_count > 0:
-        docs_detalle = f"{expiring_soon_count} por vencer pronto"
-    elif expired_count > 0:
-        docs_detalle = f"{expired_count} vencidos"
-    elif missing_count > 0:
-        docs_detalle = f"{missing_count} pendientes"
-    else:
-        docs_detalle = "Todos al día"
+    # KPIs verificados (SUNAT + MTC + motor de placas), sin créditos de pago.
+    ver = await _dashboard_verificado(user, uids, vehicles)
+    valid_vehicles = ver["unidades_validas"]
+    pct_docs = ver["pct_docs"]
+    docs_detalle = ver["docs_detalle"]
 
     distinct_months = {r.get("fecha")[:7] for r in rows if r.get("fecha") and len(r.get("fecha")) >= 7}
     num_meses = len(distinct_months) if distinct_months else 1
@@ -2650,21 +2876,8 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         avg_prev = s_prev["importe"] / s_prev["galones"] if s_prev["galones"] > 0 else 0.0
         precio_promedio_diff = avg_curr - avg_prev
 
-    current_year = datetime.now(timezone.utc).year
-    ages = []
-    older_than_10 = 0
-    for v in vehicles:
-        yr = v.get("anio_fabricacion")
-        if yr:
-            try:
-                yr_val = int(yr)
-                age = current_year - yr_val
-                ages.append(age)
-                if age >= 10:
-                    older_than_10 += 1
-            except Exception:
-                pass
-    avg_age = round(sum(ages) / len(ages), 1) if ages else 0.0
+    avg_age = ver["avg_age"]
+    older_than_10 = ver["older_than_10"]
 
     precio_promedio_gl = (total_importe / total_gal) if total_gal > 0 else 0
     # Costo promedio por unidad dividiendo entre unidades_incluidas para coincidir con la maqueta
@@ -2742,8 +2955,16 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         d["galones"] += _f(r.get("galones"))
         d["importe"] += _f(r.get("importe_total"))
         d["cargas"] += 1
+    def _meta_placa(p):
+        pn = p.replace("-", "").replace(" ", "").upper()
+        for k, mm in ver["unidades_meta"].items():
+            if k.replace("-", "").replace(" ", "").upper() == pn:
+                return mm
+        return {}
     top_unidades = sorted(
-        [{"placa": p, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "cargas": v["cargas"]} for p, v in by_placa.items()],
+        [{"placa": p, "galones": round(v["galones"], 2), "importe": round(v["importe"], 2), "cargas": v["cargas"],
+          "categoria": _meta_placa(p).get("categoria"), "anio": _meta_placa(p).get("anio")}
+         for p, v in by_placa.items()],
         key=lambda x: -x["galones"],
     )[:5]
 
@@ -2760,53 +2981,12 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
         key=lambda x: -x["galones"],
     )[:5]
 
-    # === Semáforo de vencimiento de documentos (Fila 5) — MOCK simple ===
-    # Heurística sin créditos extra: cada documento de empresa tiene vigencia
-    # de 365 días desde su carga. Verde > 30d, Amarillo ≤30d, Rojo vencido.
-    docs = await db.subsidio_documents.find(
-        {"user_id": user["id"], "categoria": {"$in": EMPRESA_CATEGORIES}},
-        {"_id": 0, "categoria": 1, "uploaded_at": 1, "filename": 1},
-    ).to_list(50)
-    today = datetime.now(timezone.utc).date()
-    DOC_LIFETIME_DAYS = 365
-    docs_semaforo = []
-    for cat in EMPRESA_CATEGORIES:
-        match = next((d for d in docs if d.get("categoria") == cat), None)
-        if not match:
-            docs_semaforo.append({
-                "categoria": cat,
-                "label": DOCUMENT_LABELS.get(cat, cat),
-                "uploaded": False,
-                "expires_at": None,
-                "days_remaining": None,
-                "status": "missing",
-            })
-            continue
-        try:
-            up_date = datetime.fromisoformat(match["uploaded_at"].replace("Z", "+00:00")).date()
-        except Exception:
-            up_date = today
-        expires_at = up_date + timedelta(days=DOC_LIFETIME_DAYS)
-        days_rem = (expires_at - today).days
-        if days_rem < 0:
-            status = "expired"
-        elif days_rem <= 30:
-            status = "expiring"
-        else:
-            status = "active"
-        docs_semaforo.append({
-            "categoria": cat,
-            "label": DOCUMENT_LABELS.get(cat, cat),
-            "uploaded": True,
-            "expires_at": expires_at.isoformat(),
-            "days_remaining": days_rem,
-            "status": status,
-        })
-
-    summary_active = sum(1 for d in docs_semaforo if d["status"] == "active")
-    summary_expiring = sum(1 for d in docs_semaforo if d["status"] == "expiring")
-    summary_expired = sum(1 for d in docs_semaforo if d["status"] == "expired")
-    summary_missing = sum(1 for d in docs_semaforo if d["status"] == "missing")
+    # === Semáforo de vencimientos (Fila 5) — VERIFICADO (SUNAT / MTC / motor de placas) ===
+    docs_semaforo = ver["items"]
+    summary_active = ver["summary"]["active"]
+    summary_expiring = ver["summary"]["expiring"]
+    summary_expired = ver["summary"]["expired"]
+    summary_missing = ver["summary"]["missing"]
 
     # Calc para subsidio_estimado (legacy)
     calc = await db.calculations.find_one({"id": user.get("calc_id")}, {"_id": 0}) or {}
@@ -2856,6 +3036,9 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
             "precio_promedio_diff": round(precio_promedio_diff, 2),
             "avg_age": avg_age,
             "older_than_10": older_than_10,
+            "anios_conocidos": ver["anios_conocidos"],
+            "unidades_mtc": ver["unidades_mtc"],
+            "unidades_en_regla": ver["unidades_en_regla"],
             # Legacy (no romper UI antigua/admin)
             "unidades_activas": unidades_activas,
             "facturas_confirmadas": len(rows),
@@ -2878,8 +3061,11 @@ async def subsidio_dashboard_data(user: dict = Depends(_require_subsidio)):
                 "expiring": summary_expiring,
                 "expired": summary_expired,
                 "missing": summary_missing,
+                "unknown": ver["summary"]["unknown"],
             },
         },
+        "unidades_meta": ver["unidades_meta"],
+        "verificacion": ver["verificacion"],
         # Legacy
         "serie_mensual": serie_mensual,
         "top_placas": top_unidades,
