@@ -664,6 +664,25 @@ const pill = {
 // --- MODAL CREAR EMPRESA ---
 function CrearEmpresaModal({ onClose, onSaved }) {
   const [form, setForm] = useState({ empresa: "", ruc: "", tipo_cliente: "enered", plan: "tracking" });
+  // Validación por RUC: SUNAT (razón social, estado) + representante legal → autollena el formulario
+  const [sunat, setSunat] = useState(null);       // { razon_social, estado, condicion, representante_legal, error }
+  const [validando, setValidando] = useState(false);
+  useEffect(() => {
+    const ruc = (form.ruc || "").replace(/\D/g, "");
+    if (ruc.length !== 11) { setSunat(null); return; }
+    let vivo = true; setValidando(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/admin/empresas/validar-ruc", { params: { ruc } });
+        if (!vivo) return;
+        setSunat(data);
+        if (data.razon_social) setForm((f) => ({ ...f, empresa: f.empresa || data.razon_social }));
+      } catch (e) {
+        if (vivo) setSunat({ error: e?.response?.data?.detail || "SUNAT no respondió" });
+      } finally { if (vivo) setValidando(false); }
+    }, 500);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [form.ruc]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
 
@@ -713,6 +732,21 @@ function CrearEmpresaModal({ onClose, onSaved }) {
             style={styles.input}
             placeholder="Ej. 20123456789"
           />
+          {(validando || sunat) && (
+            <div data-testid="sunat-preview" style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, fontSize: 12.5,
+              background: sunat?.error ? "#FEF2F2" : "#F5F0FF", border: `1px solid ${sunat?.error ? "#FECACA" : "#DDD6FE"}`, color: sunat?.error ? "#B91C1C" : "#3B0764" }}>
+              {validando && !sunat ? "Consultando SUNAT…" : sunat?.error ? sunat.error : (
+                <>
+                  <div><b>{sunat.razon_social || "—"}</b>{sunat.estado ? ` · ${sunat.estado}` : ""}{sunat.condicion ? ` · ${sunat.condicion}` : ""}</div>
+                  <div style={{ marginTop: 3 }}>
+                    Representante legal: <b>{sunat.representante_legal?.nombre || "no disponible"}</b>
+                    {sunat.representante_legal?.cargo ? ` · ${sunat.representante_legal.cargo}` : ""}
+                    {sunat.representante_legal?.numero_documento ? ` · DNI ${sunat.representante_legal.numero_documento}` : ""}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <label style={styles.label}>Tipo de Cliente</label>

@@ -2369,6 +2369,34 @@ async def list_empresas_config(user: dict = Depends(require_roles("admin_enered"
     return configs
 
 
+async def _sunat_ficha_ruc(ruc: str) -> dict:
+    """Ficha RUC (SUNAT vía json.pe): razón social, estado, condición, dirección."""
+    jp = await _jsonpe("ruc", {"ruc": ruc})
+    if not jp or not jp.get("nombre_o_razon_social"):
+        return {}
+    return {"razon_social": jp.get("nombre_o_razon_social", "").strip(), "estado": jp.get("estado", ""),
+            "condicion": jp.get("condicion", ""), "direccion": jp.get("direccion_completa") or jp.get("direccion", ""),
+            "departamento": jp.get("departamento", ""), "provincia": jp.get("provincia", ""), "distrito": jp.get("distrito", "")}
+
+
+@api.get("/admin/empresas/validar-ruc")
+async def admin_validar_ruc(ruc: str, user: dict = Depends(require_roles("admin_enered"))):
+    """Valida un RUC al crear la empresa: razón social/estado desde SUNAT y representante(s)
+    legal(es). Lo que devuelve se usa para autollenar el formulario y la declaración jurada."""
+    ruc = (ruc or "").strip()
+    if len(ruc) != 11 or not ruc.isdigit():
+        raise HTTPException(400, "RUC inválido (11 dígitos)")
+    ficha = await _sunat_ficha_ruc(ruc)
+    reps = await _ruc_representantes(ruc)
+    if not ficha and not reps:
+        raise HTTPException(404, "SUNAT no devolvió datos para este RUC")
+    principal = next((r for r in reps if "GERENTE" in r["cargo"].upper() or "TITULAR" in r["cargo"].upper()), reps[0] if reps else None)
+    if reps:
+        ahora = datetime.now(timezone.utc).isoformat()
+        await db.representantes_ruc.update_one({"ruc": ruc}, {"$set": {"ruc": ruc, "representantes": reps, "consultado_en": ahora}}, upsert=True)
+    return {"ruc": ruc, **ficha, "representantes": reps, "representante_legal": principal}
+
+
 @api.post("/empresas-config")
 async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(require_roles("admin_enered"))):
     doc = data.model_dump(exclude_none=True)
@@ -2376,6 +2404,23 @@ async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(requir
         doc["servicios"] = _svc._normalize_servicios(doc["servicios"])
     doc["updated_at"] = datetime.now(timezone.utc).isoformat()
     existing = await db.empresas_config.find_one({"empresa": data.empresa}, {"_id": 0})
+    # Con RUC: razón social SUNAT + representante legal quedan en la ficha (si SUNAT responde)
+    ruc_n = (doc.get("ruc") or "").strip()
+    if len(ruc_n) == 11 and ruc_n.isdigit() and not (existing or {}).get("representante_legal"):
+        try:
+            ficha = await _sunat_ficha_ruc(ruc_n)
+            if ficha:
+                doc["sunat"] = ficha
+            reps = await _ruc_representantes(ruc_n)
+            if not reps:
+                cache = await db.representantes_ruc.find_one({"ruc": ruc_n}, {"_id": 0})
+                reps = (cache or {}).get("representantes") or []
+            if reps:
+                doc["representantes"] = reps
+                doc["representante_legal"] = next((r for r in reps if "GERENTE" in r["cargo"].upper() or "TITULAR" in r["cargo"].upper()), reps[0])
+                doc["representantes_actualizado_en"] = doc["updated_at"]
+        except Exception:
+            pass
     if existing:
         await db.empresas_config.update_one({"empresa": data.empresa}, {"$set": doc})
     else:
@@ -5048,7 +5093,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.5-representante",
+        "version": "1.8.6-ruc-sunat",
     }
 
 # ============================================================

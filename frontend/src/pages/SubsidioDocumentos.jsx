@@ -912,7 +912,10 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const already = data.declaracion;
 
   const empresa = data.user?.empresa || "[RAZÓN SOCIAL]";
-  const repre = data.user?.contacto || data.user?.name || "[REPRESENTANTE LEGAL]";
+  // Representante legal: primero el registrado en SUNAT (ficha de la empresa), luego el contacto
+  const repLegal = data.user?.representante_legal;
+  const repre = repLegal?.nombre || data.user?.contacto || data.user?.name || "[REPRESENTANTE LEGAL]";
+  const repreDni = repLegal?.numero_documento || "";
 
   const empresaOk = totals.byEtapa.empresa.done === totals.byEtapa.empresa.total;
   const flotaOk = totals.byEtapa.flota.done === totals.byEtapa.flota.total;
@@ -927,7 +930,7 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await api.post("/subsidio/declaracion", { accepted: true, representante: repre });
+      const res = await api.post("/subsidio/declaracion", { accepted: true, representante: repre, representante_dni: repreDni || undefined });
       onAccepted?.(res.data?.declaracion);
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -944,7 +947,7 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
           <ul className="space-y-1 text-emerald-900">
             <li><strong>Fecha y hora:</strong> {new Date(already.accepted_at).toLocaleString("es-PE")}</li>
             <li><strong>Empresa:</strong> {already.empresa} (RUC {already.ruc})</li>
-            <li><strong>Representante:</strong> {already.representante}</li>
+            <li><strong>Representante:</strong> {already.representante}{already.representante_dni ? ` · DNI ${already.representante_dni}` : ""}</li>
           </ul>
         </div>
       </div>

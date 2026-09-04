@@ -1410,8 +1410,23 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
         if agg and agg[0].get("total_gal"):
             ahorro_reconocido_real = round(float(agg[0]["total_gal"]) * 4.0, 2)
 
+    user_out = {k: v for k, v in user.items() if k not in ("password_hash", "_id")}
+    # Representante legal registrado en SUNAT (ficha de la empresa) → declaración jurada
+    try:
+        cfg_rep = await db.empresas_config.find_one({"empresa": user.get("empresa")}, {"_id": 0, "representante_legal": 1, "ruc": 1})
+        rep = (cfg_rep or {}).get("representante_legal")
+        if not rep:
+            ruc_e = ((cfg_rep or {}).get("ruc") or user.get("ruc") or "").strip()
+            if ruc_e:
+                cache = await db.representantes_ruc.find_one({"ruc": ruc_e}, {"_id": 0, "representantes": 1})
+                reps = (cache or {}).get("representantes") or []
+                rep = next((r for r in reps if "GERENTE" in r.get("cargo", "").upper() or "TITULAR" in r.get("cargo", "").upper()), reps[0] if reps else None)
+        if rep:
+            user_out["representante_legal"] = rep
+    except Exception:
+        pass
     return {
-        "user": {k: v for k, v in user.items() if k not in ("password_hash", "_id")},
+        "user": user_out,
         "calculation": calc,
         "ahorro_estimado": calc.get("subsidio_estimado", 0),
         "ahorro_reconocido": ahorro_reconocido_real,
@@ -1435,6 +1450,7 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
 class DeclaracionPayload(BaseModel):
     accepted: bool
     representante: Optional[str] = None
+    representante_dni: Optional[str] = None
 
 
 @subsidio_router.post("/subsidio/declaracion")
@@ -1494,6 +1510,7 @@ async def aceptar_declaracion(
         "empresa": user.get("empresa"),
         "ruc": user.get("ruc"),
         "representante": payload.representante or user.get("contacto") or user.get("name"),
+        "representante_dni": (payload.representante_dni or "").strip() or None,
         "accepted_at": datetime.now(timezone.utc).isoformat(),
         "ip": (request.client.host if request.client else None),
         "user_agent": request.headers.get("user-agent", ""),
