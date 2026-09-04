@@ -5565,7 +5565,8 @@ async def reset_vigencias(req: Request, incluir_sin_registro: int = 0):
     cuando el MTC estuvo bloqueado). Con incluir_sin_registro=1 también reintenta las
     marcadas SIN REGISTRO."""
     u = await require_auth(req)
-    if u["role"] != "admin_enered":
+    # admin real aunque esté "entrando como" una empresa (la identidad admin viaja en _admin_role)
+    if u["role"] != "admin_enered" and u.get("_admin_role") != "admin_enered":
         raise HTTPException(403, "Solo administradores ENERED")
     filt = {}
     if u.get("empresa"):
