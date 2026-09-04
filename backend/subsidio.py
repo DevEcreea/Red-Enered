@@ -134,6 +134,29 @@ def _set_auth_cookies(response: Response, access: str, refresh: str):
                         max_age=7 * 86400, path="/")
 
 
+async def _heredar_ruc(u: dict) -> dict:
+    """Si el usuario no tiene RUC propio, toma el de su empresa (empresas_config) o el de
+    un usuario hermano de la misma empresa — igual que /auth/me — y lo persiste en su ficha.
+    Sin esto, acciones como 'Traer unidades de mi diagnóstico' fallaban en cuentas nuevas."""
+    try:
+        ruc = (u.get("ruc") or "").strip()
+        if _re.fullmatch(r"\d{11}", ruc) or not u.get("empresa"):
+            return u
+        cfg = await db.empresas_config.find_one({"empresa": u["empresa"]}, {"_id": 0, "ruc": 1})
+        ruc_emp = ((cfg or {}).get("ruc") or "").strip()
+        if not _re.fullmatch(r"\d{11}", ruc_emp):
+            hermano = await db.users.find_one({"empresa": u["empresa"], "ruc": {"$regex": r"^\d{11}$"}}, {"_id": 0, "ruc": 1})
+            ruc_emp = ((hermano or {}).get("ruc") or "").strip()
+        if _re.fullmatch(r"\d{11}", ruc_emp):
+            u["ruc"] = ruc_emp
+            if u.get("id") and not u.get("_impersonando") and not u.get("_empresa_activa"):
+                await db.users.update_one({"id": u["id"], "$or": [{"ruc": {"$in": [None, ""]}}, {"ruc": {"$exists": False}}]},
+                                          {"$set": {"ruc": ruc_emp}})
+    except Exception:
+        pass
+    return u
+
+
 async def _get_current_user(request: Request) -> dict:
     token = request.cookies.get("access_token")
     if not token:
@@ -169,7 +192,7 @@ async def _get_current_user(request: Request) -> dict:
                     eff["_admin_id"] = user.get("id")
                     eff["_admin_role"] = user.get("role")
                     eff["_impersonando"] = True
-                    return eff
+                    return await _heredar_ruc(eff)
             else:
                 asignadas = user.get("empresas_asignadas") or []
                 match = next((e for e in asignadas if (e or {}).get("empresa") == imp), None)
@@ -178,8 +201,8 @@ async def _get_current_user(request: Request) -> dict:
                     eff["empresa"] = match.get("empresa")
                     eff["ruc"] = match.get("ruc", "")
                     eff["_empresa_activa"] = match.get("empresa")
-                    return eff
-        return user
+                    return await _heredar_ruc(eff)
+        return await _heredar_ruc(user)
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Sesión expirada")
     except jwt.InvalidTokenError:
