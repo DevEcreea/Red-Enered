@@ -219,6 +219,19 @@ export default function Documentacion() {
   }, [templates]);
   const [verArch, setVerArch]   = useState(false);
   const [autoVig, setAutoVig]   = useState(false);
+  // Representante legal (SUNAT vía json.pe) de la empresa activa — pestaña Empresa
+  const [repLegal, setRepLegal] = useState(null);      // {representantes:[...], consultado_en, cache}
+  const [repCargando, setRepCargando] = useState(false);
+  const cargarRepresentante = async (refresh = false) => {
+    setRepCargando(true);
+    try {
+      const { data } = await api.get("/empresas/representantes", { params: refresh ? { refresh: 1 } : {} });
+      setRepLegal(data);
+    } catch (err) {
+      setRepLegal({ error: err.response?.data?.detail || err.message });
+    } finally { setRepCargando(false); }
+  };
+  useEffect(() => { if (tab === "Empresa" && !repLegal) cargarRepresentante(); /* eslint-disable-next-line */ }, [tab]);
   // Verificación guiada CITV: la consulta oficial tiene captcha (solo humanos), así que
   // la persona consulta en el portal y pega aquí el vencimiento; ENERED lo guarda y alerta.
   const [guiadaOpen, setGuiadaOpen] = useState(false);
@@ -815,6 +828,45 @@ export default function Documentacion() {
           <KpiCard key={i} icon={k.icon} value={k.n} label={k.l} iconColor={k.iconColor} iconBg={k.iconBg}/>
         ))}
       </div>
+
+      {/* Representante legal (SUNAT) — pestaña Empresa */}
+      {tab === "Empresa" && !isTemplate && (
+        <div data-testid="card-representante" style={{ background:"#fff",border:"1px solid #E5E7EB",borderRadius:14,padding:"14px 18px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:14,flexWrap:"wrap" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:12,minWidth:260 }}>
+            <div style={{ width:42,height:42,borderRadius:12,background:"#F1EAFF",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <User style={{ width:20,height:20,color:"#8B3DFF" }}/>
+            </div>
+            <div>
+              <div style={{ fontSize:10.5,fontWeight:800,letterSpacing:.8,textTransform:"uppercase",color:"#9ca3af" }}>Representante legal · SUNAT</div>
+              {repCargando && !repLegal ? (
+                <div style={{ fontSize:13,color:"#6b7280" }}>Consultando SUNAT…</div>
+              ) : repLegal?.error ? (
+                <div style={{ fontSize:13,color:"#DC2626" }}>{repLegal.error}</div>
+              ) : (repLegal?.representantes || []).length ? (
+                <div>
+                  {repLegal.representantes.map((r, i) => (
+                    <div key={i} style={{ fontSize:14,fontWeight:700,color:"#111827",lineHeight:1.3 }}>
+                      {r.nombre}
+                      <span style={{ fontSize:12,fontWeight:500,color:"#6b7280",marginLeft:8 }}>
+                        {r.cargo}{r.numero_documento ? ` · ${r.tipo_documento || "DNI"} ${r.numero_documento}` : ""}{r.desde ? ` · desde ${r.desde}` : ""}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ fontSize:10.5,color:"#9ca3af",marginTop:2 }}>
+                    RUC {repLegal.ruc} · consultado {String(repLegal.consultado_en || "").slice(0,10)}{repLegal.aviso ? ` · ${repLegal.aviso}` : ""}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize:13,color:"#6b7280" }}>Sin datos aún.</div>
+              )}
+            </div>
+          </div>
+          <button onClick={() => cargarRepresentante(true)} disabled={repCargando} data-testid="btn-representante-sunat"
+            style={{ display:"flex",alignItems:"center",gap:8,height:36,padding:"0 14px",fontSize:12.5,fontWeight:600,border:"1px solid #C4B5FD",background:"#F5F0FF",color:"#5B21B6",borderRadius:8,cursor:"pointer",opacity:repCargando?0.7:1 }}>
+            <RotateCcw style={{ width:14,height:14,animation:repCargando?"spin 1s linear infinite":"none" }}/> {repCargando ? "Consultando…" : "Actualizar desde SUNAT"}
+          </button>
+        </div>
+      )}
 
       {/* FILTER BAR */}
       <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16 }}>

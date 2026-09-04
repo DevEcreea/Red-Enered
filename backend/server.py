@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.4-sbs-poliza",
+        "version": "1.8.5-representante",
     }
 
 # ============================================================
@@ -5582,6 +5582,59 @@ async def ficha_vehiculo_pdf(req: Request, placa: str):
     buf = _io.BytesIO(doc.tobytes()); doc.close()
     return StreamingResponse(buf, media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="ENERED_ficha_{p}.pdf"'})
+
+
+async def _ruc_representantes(ruc: str) -> list:
+    """Representantes legales del RUC (SUNAT vía json.pe): nombre, cargo, documento, desde."""
+    jp = await _jsonpe("ruc/representantes", {"ruc": ruc})
+    items = jp.get("_lista") if isinstance(jp.get("_lista"), list) else ([jp] if jp and jp.get("nombre") else [])
+    out = []
+    for it in items:
+        if not isinstance(it, dict) or not it.get("nombre"):
+            continue
+        out.append({"nombre": it.get("nombre", "").strip(), "cargo": it.get("cargo", "").strip(),
+                    "tipo_documento": it.get("tipo_de_documento") or it.get("tipo_documento") or "",
+                    "numero_documento": it.get("numero_de_documento") or it.get("numero_documento") or "",
+                    "desde": it.get("fecha_desde") or ""})
+    return out
+
+
+@api.get("/empresas/representantes")
+async def empresa_representantes(req: Request, ruc: Optional[str] = None, refresh: int = 0):
+    """Representante(s) legal(es) de la empresa activa (o del RUC indicado) desde SUNAT.
+    Se cachea 90 días por RUC para no gastar créditos; refresh=1 fuerza la consulta."""
+    u = await require_auth(req)
+    ruc = (ruc or u.get("ruc") or "").strip()
+    if not ruc and u.get("empresa"):
+        cfg = await db.empresas_config.find_one({"empresa": u["empresa"]}, {"_id": 0, "ruc": 1})
+        ruc = ((cfg or {}).get("ruc") or "").strip()
+        if not ruc:
+            usr = await db.users.find_one({"empresa": u["empresa"], "ruc": {"$nin": [None, ""]}}, {"_id": 0, "ruc": 1})
+            ruc = ((usr or {}).get("ruc") or "").strip()
+    if len(ruc) != 11 or not ruc.isdigit():
+        raise HTTPException(400, "RUC de la empresa no disponible")
+    cache = await db.representantes_ruc.find_one({"ruc": ruc}, {"_id": 0})
+    if cache and not refresh:
+        try:
+            edad = (datetime.now(timezone.utc) - datetime.fromisoformat(cache["consultado_en"])).days
+        except Exception:
+            edad = 10**6
+        if edad <= 90 and cache.get("representantes"):
+            return {"ruc": ruc, "representantes": cache["representantes"], "fuente": "SUNAT (json.pe)",
+                    "consultado_en": cache["consultado_en"], "cache": True}
+    reps = await _ruc_representantes(ruc)
+    if not reps:
+        if cache and cache.get("representantes"):
+            return {"ruc": ruc, "representantes": cache["representantes"], "fuente": "SUNAT (json.pe)",
+                    "consultado_en": cache["consultado_en"], "cache": True,
+                    "aviso": "SUNAT no respondió ahora; se muestra la última consulta guardada."}
+        raise HTTPException(503, "SUNAT no devolvió representantes para este RUC en este momento. Intenta más tarde.")
+    ahora = datetime.now(timezone.utc).isoformat()
+    await db.representantes_ruc.update_one({"ruc": ruc}, {"$set": {"ruc": ruc, "representantes": reps, "consultado_en": ahora}}, upsert=True)
+    # el principal (gerente general / titular) queda también en la ficha de la empresa
+    principal = next((r for r in reps if "GERENTE" in r["cargo"].upper() or "TITULAR" in r["cargo"].upper()), reps[0])
+    await db.empresas_config.update_many({"ruc": ruc}, {"$set": {"representante_legal": principal, "representantes_actualizado_en": ahora}})
+    return {"ruc": ruc, "representantes": reps, "fuente": "SUNAT (json.pe)", "consultado_en": ahora, "cache": False}
 
 
 @api.get("/vehiculos/ficha/{placa}")
