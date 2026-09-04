@@ -5048,7 +5048,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.3-poliza",
+        "version": "1.8.4-sbs-poliza",
     }
 
 # ============================================================
@@ -7924,6 +7924,21 @@ def _extraer_poliza_pdf(content: bytes) -> dict:
     import unicodedata as _ud
     t = _ud.normalize("NFKD", texto).encode("ascii", "ignore").decode().upper()
     out = {}
+    # Reporte de la Central de Riesgo de la SBS (versión impresa guardada como PDF):
+    # filas "Compañía · Clase · Uso · N° accidentes · N° póliza · N° certificado · inicio · fin".
+    if "CENTRAL DE RIESGO" in t or "POLIZAS DE SEGURO VEHICULAR" in t or "POLIZAS SOAT" in t:
+        filas = re.findall(r"([A-Z][A-Z .&]{2,40}?)\s+(?:CAMION|AUTOMOVIL|CAMIONETA|OMNIBUS|REMOLCADOR|[A-Z]+)\s+[A-Z]+\s+(\d+)\s+(\d{6,})\s+(\d+)\s+(\d{2}/\d{2}/\d{4})\s+(\d{2}/\d{2}/\d{4})", t)
+        if filas:
+            def _f(s):
+                d, m, a = s.split("/"); return f"{a}{m}{d}"
+            filas.sort(key=lambda r: _f(r[5]), reverse=True)
+            comp, acc, num, cert, ini, fin = filas[0]
+            out.update({"numero": num, "aseguradora": comp.strip().title(), "emi": ini, "ven": fin,
+                        "accidentes": int(acc), "fuente": "SBS Central de Riesgo"})
+            m_tot = re.search(r"ULTIMOS 5 ANOS:\s*(\d+)", t)
+            if m_tot:
+                out["accidentes_5_anios"] = int(m_tot.group(1))
+            return out
     # el número debe contener dígitos (evita capturar "POLIZA VEHICULAR"); primero la forma
     # explícita "N° DE POLIZA: ..." y luego "POLIZA N°/NRO ..."
     m = (re.search(r"N[°O.\s]*\s*(?:DE\s+)?POLIZA\W{0,12}([A-Z]{0,4}\d[A-Z0-9\-/.]{3,30})", t)
@@ -8023,6 +8038,12 @@ async def upload_manual_document(
             pol = await asyncio.to_thread(_extraer_poliza_pdf, content)
             if pol.get("numero"):
                 ref = f"Póliza N° {pol['numero']}" + (f" · {pol['aseguradora']}" if pol.get("aseguradora") else "")
+                if not emi and pol.get("emi"):
+                    emi = pol["emi"]
+                if not ven and pol.get("ven"):
+                    ven = pol["ven"]
+                if pol.get("fuente") == "SBS Central de Riesgo":
+                    desc = (desc or "") + f" [SBS: {pol.get('accidentes_5_anios', pol.get('accidentes', 0))} accidente(s) cubiertos en 5 años]"
         except Exception:
             pass
 
