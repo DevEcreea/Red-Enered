@@ -4,7 +4,7 @@ services:
   - type: web
     name: enered-api
     runtime: python
-    plan: free
+    plan: starter
     rootDir: backend
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
@@ -28,7 +28,11 @@ services:
       - key: CORS_ORIGIN_REGEX
         sync: false           # optional: ^https://.*--YOUR-SITE\.netlify\.app$
       - key: FRONTEND_URL
-        sync: false
+        sync: false           # https://enered.pe
+      - key: COOKIE_DOMAIN
+        sync: false           # .enered.pe (solo cuando app y API cuelguen de enered.pe)
+      - key: COOKIE_SAMESITE
+        sync: false           # lax con dominio propio; none mientras app y API estén en dominios distintos
       - key: DECOLECTA_TOKEN
         sync: false           # set to your Decolecta API key
       # ---- Cloudflare R2 (file storage) ----

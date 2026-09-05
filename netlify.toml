@@ -10,6 +10,14 @@
   YARN_VERSION = "1.22.22"
   CI = "false"   # CRA treats warnings as errors otherwise
 
+# Dominio propio (activar el día que enered.pe ya resuelva a Netlify con certificado):
+# manda a quien entre por la URL provisional de Netlify a enered.pe, conservando la ruta.
+# [[redirects]]
+#   from   = "https://enered.netlify.app/*"
+#   to     = "https://enered.pe/:splat"
+#   status = 301
+#   force  = true
+
 # SPA fallback — all unknown routes go to index.html
 [[redirects]]
   from   = "/*"

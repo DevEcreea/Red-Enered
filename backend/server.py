@@ -136,16 +136,30 @@ def create_refresh_token(user_id: str) -> str:
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 
+def _cookie_extra() -> dict:
+    """Atributos de cookie según el dominio en uso.
+    Hoy (enered.netlify.app + enered-api.onrender.com) la cookie viaja entre dominios
+    distintos y necesita SameSite=None. Con enered.pe + api.enered.pe se configura en
+    Render: COOKIE_DOMAIN=.enered.pe y COOKIE_SAMESITE=lax (mismo dominio padre)."""
+    dom = (os.environ.get("COOKIE_DOMAIN") or "").strip()
+    ss = (os.environ.get("COOKIE_SAMESITE") or "none").strip().lower()
+    out = {"samesite": ss if ss in ("lax", "strict", "none") else "none"}
+    if dom:
+        out["domain"] = dom
+    return out
+
+
 def set_auth_cookies(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none",
+    response.set_cookie("access_token", access, httponly=True, secure=True, **_cookie_extra(),
                         max_age=JWT_ACCESS_MINUTES * 60, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=True, samesite="none",
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=True, **_cookie_extra(),
                         max_age=JWT_REFRESH_DAYS * 86400, path="/")
 
 
 def clear_auth_cookies(response: Response):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    _dom = _cookie_extra().get("domain")
+    response.delete_cookie("access_token", path="/", domain=_dom)
+    response.delete_cookie("refresh_token", path="/", domain=_dom)
 
 
 def user_public(u: dict) -> dict:
@@ -1607,7 +1621,7 @@ async def refresh_token(request: Request, response: Response):
         if not user:
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
         access = create_access_token(user["id"], user["email"], user["role"], user.get("empresa"))
-        response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none",
+        response.set_cookie("access_token", access, httponly=True, secure=True, **_cookie_extra(),
                             max_age=JWT_ACCESS_MINUTES * 60, path="/")
         return {"access_token": access}
     except jwt.InvalidTokenError:

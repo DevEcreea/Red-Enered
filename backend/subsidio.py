@@ -127,10 +127,23 @@ def _guest_public(u: dict) -> dict:
     }
 
 
+def _cookie_extra() -> dict:
+    """Atributos de cookie según el dominio en uso.
+    Hoy (enered.netlify.app + enered-api.onrender.com) la cookie viaja entre dominios
+    distintos y necesita SameSite=None. Con enered.pe + api.enered.pe se configura en
+    Render: COOKIE_DOMAIN=.enered.pe y COOKIE_SAMESITE=lax (mismo dominio padre)."""
+    dom = (os.environ.get("COOKIE_DOMAIN") or "").strip()
+    ss = (os.environ.get("COOKIE_SAMESITE") or "none").strip().lower()
+    out = {"samesite": ss if ss in ("lax", "strict", "none") else "none"}
+    if dom:
+        out["domain"] = dom
+    return out
+
+
 def _set_auth_cookies(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none",
+    response.set_cookie("access_token", access, httponly=True, secure=True, **_cookie_extra(),
                         max_age=60 * 60 * 8, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=True, samesite="none",
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=True, **_cookie_extra(),
                         max_age=7 * 86400, path="/")
 
 
@@ -685,7 +698,7 @@ async def entrar_por_ruc(payload: EntrarRucIn, response: Response):
     empresa_name = (await _sunat_nombre(ruc)) or f"RUC {ruc}"
     token = _create_guest_token(ruc, empresa_name)
     # Cookie de acceso (sin refresh: la sesión invitada dura 8h y no se renueva).
-    response.set_cookie("access_token", token, httponly=True, secure=True, samesite="none",
+    response.set_cookie("access_token", token, httponly=True, secure=True, **_cookie_extra(),
                         max_age=8 * 3600, path="/")
     response.headers["X-Access-Token"] = token
     return {"user": _guest_public(_guest_user_from_payload({"ruc": ruc, "empresa": empresa_name})),
