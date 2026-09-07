@@ -931,6 +931,41 @@ async def subsidio_ficha_ruc(user: dict = Depends(_require_subsidio), ruc: Optio
     return ficha
 
 
+async def _grifo_por_ruc(ruc: str, razon: Optional[str] = None) -> Optional[dict]:
+    """
+    Grifo por RUC con TODAS las fuentes gratuitas:
+      1) padrón CSV de OSINERGMIN (Datos Abiertos, incompleto),
+      2) Facilito por razón social (toda estación que declara precios está inscrita),
+      3) si nadie dio la razón social, se toma de SUNAT (consulta pública) y se reintenta.
+    Así un RUC como 20515401076 (SERVIKYA / Primax Huaura), que no está en el CSV,
+    sale inscrito sin que el cliente escriba nada.
+    """
+    from services.padron_grifos import buscar_por_ruc
+    g = await buscar_por_ruc(db, ruc, razon_social=razon or None)
+    if g is None or g.get("inscrito"):
+        return g
+    ficha = await _sunat_ficha(ruc)
+    nombre = ((ficha or {}).get("nombre") or "").strip()
+    if not nombre:
+        return g
+    # SUNAT suele traer "NOMBRE LARGO-NOMBRE CORTO": se prueban las partes y el completo.
+    candidatos = []
+    for parte in nombre.split("-"):
+        parte = parte.strip()
+        if parte and parte not in candidatos and parte != (razon or ""):
+            candidatos.append(parte)
+    if nombre not in candidatos:
+        candidatos.append(nombre)
+    for c in candidatos:
+        g2 = await buscar_por_ruc(db, ruc, razon_social=c)
+        if g2 and g2.get("inscrito"):
+            g2["razon_social_sunat"] = nombre
+            g2["fuente"] = (g2.get("fuente") or "OSINERGMIN") + " · razón social de SUNAT"
+            return g2
+    g["razon_social_sunat"] = nombre
+    return g
+
+
 @subsidio_router.get("/subsidio/grifo/{ruc}")
 async def subsidio_grifo(ruc: str, razon: str = "", user: dict = Depends(_require_subsidio)):
     """
@@ -939,8 +974,7 @@ async def subsidio_grifo(ruc: str, razon: str = "", user: dict = Depends(_requir
     Si el RUC no figura en el CSV de Datos Abiertos (incompleto), busca la razón social en
     las estaciones de Facilito antes de marcarlo en rojo.
     """
-    from services.padron_grifos import buscar_por_ruc
-    g = await buscar_por_ruc(db, ruc, razon_social=razon or None)
+    g = await _grifo_por_ruc(ruc, razon)
     if g is None:
         raise HTTPException(status_code=400, detail="RUC inválido (11 dígitos)")
     return g
@@ -963,7 +997,7 @@ async def subsidio_extraer_comprobante(file: UploadFile = File(...), user: dict 
     # Completar los datos del grifo desde OSINERGMIN con el RUC del emisor
     # (con respaldo Facilito por razón social si el CSV no lo tiene).
     if datos.get("ruc_emisor"):
-        g = await buscar_por_ruc(db, datos["ruc_emisor"], razon_social=datos.get("razon_social_emisor"))
+        g = await _grifo_por_ruc(datos["ruc_emisor"], datos.get("razon_social_emisor"))
         if g:
             datos["grifo"] = g
             if g.get("inscrito"):
@@ -1039,7 +1073,7 @@ async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict
         ruc_g = f.get("ruc_emisor")
         if ruc_g:
             if ruc_g not in grifos:
-                grifos[ruc_g] = await buscar_por_ruc(db, ruc_g) or {}
+                grifos[ruc_g] = await _grifo_por_ruc(ruc_g) or {}
             g = grifos[ruc_g]
             if g.get("inscrito"):
                 f.setdefault("estacion", g.get("razon_social"))
@@ -2094,9 +2128,8 @@ async def invoices_upload(
         _grifo = None
         if extracted.get("ruc_emisor"):
             try:
-                from services.padron_grifos import buscar_por_ruc as _buscar_grifo
-                _grifo = await _buscar_grifo(db, extracted["ruc_emisor"],
-                                             razon_social=extracted.get("estacion") or base.get("razon_social_emisor"))
+                _grifo = await _grifo_por_ruc(extracted["ruc_emisor"],
+                                              extracted.get("estacion") or base.get("razon_social_emisor"))
                 if _grifo and _grifo.get("inscrito"):
                     extracted.setdefault("estacion", _grifo.get("razon_social"))
                     if not extracted.get("ciudad"):
@@ -2249,8 +2282,7 @@ async def invoices_update(
     cambio_ruc = bool(patch.get("ruc_emisor")) and patch["ruc_emisor"] != inv.get("ruc_emisor")
     if _re.fullmatch(r"\d{11}", ruc_nuevo) and (cambio_ruc or not (patch.get("estacion") or inv.get("estacion"))):
         try:
-            from services.padron_grifos import buscar_por_ruc as _buscar_grifo_upd
-            g = await _buscar_grifo_upd(db, ruc_nuevo, razon_social=patch.get("estacion") or inv.get("estacion"))
+            g = await _grifo_por_ruc(ruc_nuevo, patch.get("estacion") or inv.get("estacion"))
             if g and g.get("inscrito"):
                 if cambio_ruc or not (patch.get("estacion") or inv.get("estacion")):
                     patch["estacion"] = g.get("razon_social") or patch.get("estacion") or inv.get("estacion")
