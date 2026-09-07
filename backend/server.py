@@ -5109,7 +5109,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.8.9-facturas-qr",
+        "version": "1.9.0-conductores",
     }
 
 # ============================================================
@@ -5328,7 +5328,7 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
                 msg = str(json.loads(e.read()).get("message", ""))
             except Exception:
                 msg = ""
-            if re.search(r"no se encontr", msg, re.I) and not re.search(r"error de red|429|timeout", msg, re.I):
+            if re.search(r"no se encontr|no cuenta con", msg, re.I) and not re.search(r"error de red|429|timeout", msg, re.I):
                 return {"_sin_registro": True}
         return {}
     except Exception:
@@ -7802,6 +7802,9 @@ async def list_documents(
             "archived": int(d.get("archived") or 0),
             "est": d.get("est") or "Vigente",
             "filename": d.get("filename") or "",
+            "content_type": d.get("content_type") or "",
+            "meta": d.get("meta") or {},
+            "foto_auto": bool(d.get("foto_auto")),
             "_origen": "manual",
         })
 
@@ -8121,6 +8124,122 @@ def _extraer_tarjeta_propiedad_pdf(content: bytes) -> dict:
     return out
 
 
+
+def _recortar_rostro(content: bytes, content_type: str = "", filename: str = "") -> Optional[bytes]:
+    """Recorta el rostro de la foto/escaneo del DNI o brevete para usarlo como foto del
+    conductor. Devuelve JPEG o None si no hay rostro claro. OpenCV es opcional: sin él,
+    simplemente no hay foto automática."""
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+    img = None
+    ct = (content_type or "").lower()
+    fn = (filename or "").lower()
+    try:
+        if "pdf" in ct or fn.endswith(".pdf") or content[:4] == b"%PDF":
+            import pymupdf
+            pdf = pymupdf.open(stream=content, filetype="pdf")
+            png = pdf[0].get_pixmap(dpi=150).tobytes("png")
+            pdf.close()
+            img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+        else:
+            img = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    if max(h, w) > 1600:
+        k = 1600 / max(h, w)
+        img = cv2.resize(img, (int(w * k), int(h * k)))
+        h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    faces = casc.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(max(40, w // 25), max(40, h // 25)))
+    if len(faces) == 0:
+        return None
+    x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+    mx, my = int(fw * 0.45), int(fh * 0.6)
+    x0, y0 = max(0, x - mx), max(0, y - my)
+    x1, y1 = min(w, x + fw + mx), min(h, y + fh + int(fh * 0.5))
+    crop = img[y0:y1, x0:x1]
+    ch, cw = crop.shape[:2]
+    if max(ch, cw) > 600:
+        k = 600 / max(ch, cw)
+        crop = cv2.resize(crop, (int(cw * k), int(ch * k)))
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 88])
+    return buf.tobytes() if ok else None
+
+
+@api.get("/personal/consulta-dni/{dni}")
+async def personal_consulta_dni(dni: str, refresh: int = 0, user: dict = Depends(get_current_user)):
+    """
+    Autollenado del conductor por DNI: nombre (RENIEC) y licencia de conducir del MTC
+    (número, categoría, vigencia, restricciones), ambos vía json.pe. Caché en `personas_dni`:
+    nombre 180 días, licencia 30 días, "sin licencia" 7 días. refresh=1 fuerza reconsulta.
+    """
+    dni = re.sub(r"\D", "", dni or "")
+    if len(dni) != 8:
+        raise HTTPException(status_code=400, detail="DNI inválido (8 dígitos)")
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    cache = await db.personas_dni.find_one({"dni": dni}, {"_id": 0}) or {}
+
+    def _vigente(iso, dias):
+        try:
+            return (now - datetime.fromisoformat(iso)).days <= dias
+        except Exception:
+            return False
+
+    persona = cache.get("persona") if (cache.get("persona") and _vigente(cache.get("persona_en", ""), 180) and not refresh) else None
+    if persona is None:
+        d = await _jsonpe("dni", {"dni": dni})
+        if d and d.get("numero"):
+            persona = {"nombre_completo": d.get("nombre_completo") or "", "nombres": d.get("nombres") or "",
+                       "apellido_paterno": d.get("apellido_paterno") or "", "apellido_materno": d.get("apellido_materno") or ""}
+            cache.update({"persona": persona, "persona_en": now_iso})
+        elif d.get("_sin_registro"):
+            persona = {"no_existe": True}
+            cache.update({"persona": persona, "persona_en": now_iso})
+        elif cache.get("persona"):
+            persona = cache["persona"]  # sin respuesta ahora: se usa lo último conocido
+
+    lic_fresca = cache.get("licencia_en") and _vigente(cache["licencia_en"], 7 if cache.get("sin_licencia") else 30) and not refresh
+    if not lic_fresca:
+        l = await _jsonpe("licencia", {"dni": dni})
+        if l and (l.get("numero") or l.get("categoria")):
+            cache.update({"licencia": {k: (l.get(k) or "") for k in ("numero", "categoria", "fecha_expedicion", "fecha_vencimiento", "estado", "restricciones")},
+                          "sin_licencia": False, "licencia_en": now_iso})
+        elif l.get("_sin_registro"):
+            cache.update({"licencia": None, "sin_licencia": True, "licencia_en": now_iso})
+
+    cache["dni"] = dni
+    cache["actualizado_en"] = now_iso
+    await db.personas_dni.update_one({"dni": dni}, {"$set": cache}, upsert=True)
+
+    lic = cache.get("licencia")
+    if lic:
+        m = re.match(r"(\d{2})/(\d{2})/(\d{4})", lic.get("fecha_vencimiento") or "")
+        if m:
+            venc = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), tzinfo=timezone.utc)
+            lic = {**lic, "dias_para_vencer": (venc - now).days, "vencida": venc < now}
+    p = persona if (persona and not persona.get("no_existe")) else None
+    nombre_sugerido = " ".join(x for x in [(p or {}).get("nombres"), (p or {}).get("apellido_paterno"), (p or {}).get("apellido_materno")] if x).strip()
+    return {
+        "dni": dni,
+        "persona": p,
+        "no_existe": bool(persona and persona.get("no_existe")),
+        "nombre_sugerido": nombre_sugerido,
+        "licencia": lic,
+        "sin_licencia": bool(cache.get("sin_licencia")) and not lic,
+        "verificado": {"reniec": p is not None, "mtc": bool(lic) or bool(cache.get("sin_licencia"))},
+        "consultado_en": cache.get("licencia_en") or cache.get("persona_en") or now_iso,
+        "fuente": "RENIEC y MTC (vía json.pe)",
+    }
+
+
 @api.post("/documents")
 async def upload_manual_document(
     file: UploadFile = File(...),
@@ -8133,11 +8252,36 @@ async def upload_manual_document(
     viaje_id: Optional[str] = Form(None),
     ref: Optional[str] = Form(None),
     desc: Optional[str] = Form(None),
+    extra: Optional[str] = Form(None),
     user: dict = Depends(get_current_user),
 ):
     content = await file.read()
-    key = f"documents/{user.get('empresa') or 'general'}/{str(uuid.uuid4())}_{file.filename}"
     content_type = file.content_type or "application/octet-stream"
+    meta = {}
+    if extra:
+        try:
+            import json as _json_meta
+            meta = _json_meta.loads(extra) if isinstance(extra, str) else {}
+            if not isinstance(meta, dict):
+                meta = {}
+        except Exception:
+            meta = {}
+    # Perfil del conductor: si ya existe uno con FOTO para esa persona, no se crea otro
+    # (el modal manda un "perfil.txt" de relleno cuando no adjuntan foto); solo se
+    # actualizan sus datos (DNI, licencia verificada).
+    if (tipo or "").lower().startswith("personal") and doc == "Perfil" and placa and not content_type.startswith("image/"):
+        existente = await db.documents.find_one({"tipo": tipo, "doc": "Perfil", "placa": placa.upper().strip(),
+                                                 "archived": {"$ne": 1}, "content_type": {"$regex": "^image/"}})
+        if existente:
+            upd = {}
+            if desc: upd["desc"] = desc
+            if ref: upd["ref"] = ref
+            if meta: upd["meta"] = meta
+            if upd:
+                await db.documents.update_one({"id": existente["id"]}, {"$set": upd})
+            existente.pop("_id", None)
+            return existente
+    key = f"documents/{user.get('empresa') or 'general'}/{str(uuid.uuid4())}_{file.filename}"
     storage.save_object(key, content, content_type)
 
     # Lectura automática de vigencias: si el certificado es un PDF con texto
@@ -8221,9 +8365,35 @@ async def upload_manual_document(
         "storage_key": key,
         "content_type": content_type,
         "size": len(content),
+        "meta": meta,
     }
 
     await db.documents.insert_one(doc_record)
+
+    # Foto del conductor automática: al subir el DNI o el brevete, si la persona aún no tiene
+    # foto, se recorta el rostro del documento y se usa como foto de perfil.
+    try:
+        d_key = re.sub(r"[^a-z]", "", (doc or "").lower())
+        if (tipo or "").lower().startswith("personal") and d_key in ("dni", "brevete", "licencia") and placa:
+            placa_p = placa.upper().strip()
+            perfil = await db.documents.find_one({"tipo": tipo, "doc": "Perfil", "placa": placa_p, "archived": {"$ne": 1}})
+            tiene_foto = bool(perfil and str(perfil.get("content_type") or "").startswith("image/"))
+            if not tiene_foto:
+                foto = await asyncio.to_thread(_recortar_rostro, content, content_type, file.filename or "")
+                if foto:
+                    fkey = f"documents/{user.get('empresa') or 'general'}/{uuid.uuid4()}_foto_conductor.jpg"
+                    storage.save_object(fkey, foto, "image/jpeg")
+                    campos = {"storage_key": fkey, "content_type": "image/jpeg", "filename": "foto_conductor.jpg",
+                              "size": len(foto), "foto_auto": True, "foto_origen": doc}
+                    if perfil:
+                        await db.documents.update_one({"id": perfil["id"]}, {"$set": campos})
+                    else:
+                        base = {k: v for k, v in doc_record.items() if k != "_id"}
+                        await db.documents.insert_one({**base, **campos, "id": str(uuid.uuid4()), "doc": "Perfil",
+                                                       "emi": "—", "ven": "—", "meta": {}})
+                    doc_record["foto_auto"] = True
+    except Exception as _e:
+        logger.warning(f"Recorte de rostro del conductor falló: {_e}")
 
     # Si es la revisión técnica o el SOAT de una placa y tenemos vencimiento,
     # se refleja también en la ficha del vehículo (columna + alertas).

@@ -295,6 +295,36 @@ export default function Documentacion() {
   const [newTpl, setNewTpl]       = useState({});
   const [multiAddOpen, setMultiAddOpen] = useState(false);
   const [multiAddData, setMultiAddData] = useState({ identifier: "", docs: {} });
+  // Autollenado del conductor por DNI (RENIEC + licencia MTC vía backend)
+  const [dniInfo, setDniInfo] = useState(null);
+  const [dniLoading, setDniLoading] = useState(false);
+  const aIso = (s) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ""); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+  const consultarDni = async (dni) => {
+    setDniLoading(true);
+    try {
+      const { data } = await api.get(`/personal/consulta-dni/${dni}`);
+      setDniInfo(data);
+      setMultiAddData(p => {
+        const next = { ...p };
+        if (data.nombre_sugerido && (!p.identifier || p._autoNombre)) { next.identifier = data.nombre_sugerido; next._autoNombre = true; }
+        if (data.licencia) {
+          const l = data.licencia;
+          next.docs = { ...p.docs, Brevete: { ...(p.docs.Brevete || {}), emi: aIso(l.fecha_expedicion) || (p.docs.Brevete || {}).emi || "",
+            ven: aIso(l.fecha_vencimiento) || (p.docs.Brevete || {}).ven || "", ref: `Licencia ${l.numero} · ${l.categoria}`.trim() } };
+        }
+        return next;
+      });
+    } catch (e) {
+      setDniInfo({ error: e.response?.data?.detail || "No se pudo consultar el DNI" });
+    } finally { setDniLoading(false); }
+  };
+  useEffect(() => {
+    const d = (multiAddData.dni || "").replace(/\D/g, "");
+    if (tab !== "Personal" || d.length !== 8) { if (d.length < 8) setDniInfo(null); return; }
+    if (dniInfo && dniInfo.dni === d) return;
+    consultarDni(d);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multiAddData.dni, tab]);
   
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerUrl, setViewerUrl] = useState(null);
@@ -641,7 +671,7 @@ export default function Documentacion() {
         const encodedName = data.dni ? `${multiAddData.identifier}:::${data.dni}` : multiAddData.identifier;
         fd.append("placa", encodedName); // Abuse placa to ensure the backend saves and returns the conductor name AND dni!
         fd.append("conductor_id", multiAddData.identifier);
-        fd.append("ref", multiAddData.identifier); 
+        fd.append("ref", data.ref || multiAddData.identifier); 
         if (multiAddData.foto) fd.append("foto", multiAddData.foto);
       }
       else if (tab === "Viajes") {
@@ -663,6 +693,10 @@ export default function Documentacion() {
       fd.append("conductor_id", multiAddData.identifier);
       fd.append("ref", multiAddData.identifier);
       if (multiAddData.dni) fd.append("desc", multiAddData.dni); // Store DNI number
+      if (dniInfo && !dniInfo.error) {
+        fd.append("extra", JSON.stringify({ reniec: dniInfo.persona || null, licencia: dniInfo.licencia || null,
+          sin_licencia: !!dniInfo.sin_licencia, verificado_en: dniInfo.consultado_en || null, fuente: dniInfo.fuente || "" }));
+      }
       if (multiAddData.foto) {
         fd.append("file", multiAddData.foto);
         fd.append("foto", multiAddData.foto);
@@ -685,6 +719,7 @@ export default function Documentacion() {
       showToast("Documentos guardados correctamente");
       setMultiAddOpen(false);
       setMultiAddData({ identifier: "", docs: {} });
+      setDniInfo(null);
       load();
     } catch (err) {
       alert("Hubo un error al guardar los documentos: " + (err.response?.data?.detail || err.message));
@@ -1299,7 +1334,8 @@ export default function Documentacion() {
                   nombre: name,
                   apellidos: "",
                   dni: dniPart || perfil?.desc || d.desc || d.dni || "—",
-                  licencia: d.licencia || "—",
+                  licencia: (perfil?.meta && perfil.meta.licencia) || null,
+                  sin_licencia: !!(perfil?.meta && perfil.meta.sin_licencia),
                   perfilId: perfil?.id || (d.doc === "Perfil" ? d.id : null),
                 });
               }
@@ -1416,6 +1452,14 @@ export default function Documentacion() {
                               <div style={{ display:"flex",flexDirection:"column",gap:2 }}>
                                 <span style={{ fontSize:12.5 }}>{cName}</span>
                                 <span style={{ fontSize:11,color:"#6b7280",fontWeight:500 }}>{c.dni || "—"}</span>
+                                {c.licencia && typeof c.licencia === "object" && (
+                                  <span style={{ fontSize:10.5,fontWeight:600,color: c.licencia.vencida ? "#DC2626" : "#059669" }} title="Licencia verificada en el MTC">
+                                    Lic. {c.licencia.numero} · {c.licencia.categoria} · vence {c.licencia.fecha_vencimiento}
+                                  </span>
+                                )}
+                                {!c.licencia && c.sin_licencia && (
+                                  <span style={{ fontSize:10.5,fontWeight:600,color:"#DC2626" }}>Sin licencia en el MTC</span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -2168,13 +2212,35 @@ export default function Documentacion() {
           <div style={{ padding: 24, overflowY: "auto" }}>
             <div style={{ marginBottom: 20 }}>
               <label style={lblSt}>{tab === "Vehículos" ? "Placa del vehículo" : tab === "Personal" ? "Nombre del conductor" : tab === "Viajes" ? "Código de viaje / Ruta" : "Empresa"}</label>
-              <input style={inputSt} placeholder={tab === "Vehículos" ? "Ej. ABC-123" : ""} value={multiAddData.identifier} onChange={e => setMultiAddData(p => ({ ...p, identifier: e.target.value }))} />
+              <input style={inputSt} placeholder={tab === "Vehículos" ? "Ej. ABC-123" : tab === "Personal" ? "Se completa solo con el DNI" : ""} value={multiAddData.identifier} onChange={e => setMultiAddData(p => ({ ...p, identifier: e.target.value, _autoNombre: false }))} />
             </div>
             {tab === "Personal" && (
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:20 }}>
                 <div>
                   <label style={lblSt}>Nro de DNI</label>
-                  <input style={inputSt} placeholder="Ej. 74582910" value={multiAddData.dni || ""} onChange={e => setMultiAddData(p => ({ ...p, dni: e.target.value }))} />
+                  <input style={inputSt} placeholder="Ej. 74582910" value={multiAddData.dni || ""} maxLength={8}
+                    onChange={e => setMultiAddData(p => ({ ...p, dni: e.target.value.replace(/\D/g, "") }))} />
+                  <div style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.5 }} data-testid="dni-verificacion">
+                    {dniLoading && <span style={{ color: "#6b7280" }}>Consultando RENIEC y MTC…</span>}
+                    {!dniLoading && dniInfo?.error && <span style={{ color: "#DC2626" }}>{dniInfo.error}</span>}
+                    {!dniLoading && dniInfo && !dniInfo.error && (
+                      <>
+                        {dniInfo.persona
+                          ? <div style={{ color: "#059669", fontWeight: 600 }}>✓ RENIEC: {dniInfo.persona.nombre_completo}</div>
+                          : dniInfo.no_existe
+                            ? <div style={{ color: "#DC2626" }}>DNI no figura en RENIEC</div>
+                            : <div style={{ color: "#6b7280" }}>RENIEC sin respuesta; escribe el nombre a mano</div>}
+                        {dniInfo.licencia
+                          ? <div style={{ color: dniInfo.licencia.vencida ? "#DC2626" : "#059669" }}>
+                              {dniInfo.licencia.vencida ? "⚠" : "✓"} Licencia MTC {dniInfo.licencia.numero} · {dniInfo.licencia.categoria} · vence {dniInfo.licencia.fecha_vencimiento}
+                              {dniInfo.licencia.restricciones && dniInfo.licencia.restricciones !== "SIN RESTRICCIONES" ? ` · ${dniInfo.licencia.restricciones}` : ""}
+                            </div>
+                          : dniInfo.sin_licencia
+                            ? <div style={{ color: "#DC2626" }}>⚠ Sin licencia de conducir registrada en el MTC</div>
+                            : <div style={{ color: "#6b7280" }}>MTC sin respuesta para la licencia</div>}
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label style={lblSt}>Fotografía del conductor</label>
