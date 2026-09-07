@@ -5319,11 +5319,37 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
     def _fetch():
         with _ur.urlopen(req, timeout=25) as r:
             return json.loads(r.read())
+
+    def _fetch_por_ip(ip: str):
+        """Respaldo cuando el DNS de api.json.pe no resuelve (07/09/2026: el dominio json.pe
+        quedó 'inactive' en NIC.PE y Render no lo resolvía). Conecta a la IP conocida del
+        proveedor manteniendo SNI y Host = api.json.pe, así el certificado sigue validándose."""
+        import http.client, ssl, socket, io as _io
+        ctx = ssl.create_default_context()
+
+        class _Conn(http.client.HTTPSConnection):
+            def connect(self):
+                sock = socket.create_connection((ip, 443), timeout=25)
+                self.sock = ctx.wrap_socket(sock, server_hostname="api.json.pe")
+
+        conn = _Conn("api.json.pe", 443, timeout=25)
+        cuerpo = json.dumps(body).encode()
+        conn.request("POST", f"/api/{recurso}", body=cuerpo,
+                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                              "Host": "api.json.pe", "Content-Length": str(len(cuerpo))})
+        resp = conn.getresponse()
+        data = resp.read()
+        conn.close()
+        if resp.status >= 400:
+            raise _ue.HTTPError(f"https://api.json.pe/api/{recurso}", resp.status, resp.reason, resp.headers, _io.BytesIO(data))
+        return json.loads(data)
+
     import urllib.error as _ue
     global _JSONPE_ULTIMO_ERROR
+    ip_respaldo = os.getenv("JSONPE_FALLBACK_IP", "178.156.192.142").strip()
     try:
-        # Render a veces no resuelve api.json.pe a la primera ("Name or service not known"):
-        # se reintenta hasta 3 veces con espera corta antes de darse por vencido.
+        # Si el DNS falla ("Name or service not known"), se va directo por IP; si es otra
+        # falla de red, se reintenta hasta 3 veces con espera corta.
         res = None
         for _intento in range(3):
             try:
@@ -5332,6 +5358,12 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
             except _ue.HTTPError:
                 raise
             except (_ue.URLError, TimeoutError, OSError) as _e_red:
+                es_dns = "not known" in str(_e_red).lower() or "nodename" in str(_e_red).lower() or "name resolution" in str(_e_red).lower()
+                if es_dns and ip_respaldo:
+                    _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "via": f"ip {ip_respaldo}", "dns_error": str(_e_red)[:120],
+                                            "en": datetime.now(timezone.utc).isoformat()}
+                    res = await asyncio.to_thread(_fetch_por_ip, ip_respaldo)
+                    break
                 if _intento == 2:
                     raise
                 _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "reintento": _intento + 1, "error": str(_e_red)[:200],
