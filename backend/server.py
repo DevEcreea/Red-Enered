@@ -5322,7 +5322,21 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
     import urllib.error as _ue
     global _JSONPE_ULTIMO_ERROR
     try:
-        res = await asyncio.to_thread(_fetch)
+        # Render a veces no resuelve api.json.pe a la primera ("Name or service not known"):
+        # se reintenta hasta 3 veces con espera corta antes de darse por vencido.
+        res = None
+        for _intento in range(3):
+            try:
+                res = await asyncio.to_thread(_fetch)
+                break
+            except _ue.HTTPError:
+                raise
+            except (_ue.URLError, TimeoutError, OSError) as _e_red:
+                if _intento == 2:
+                    raise
+                _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "reintento": _intento + 1, "error": str(_e_red)[:200],
+                                        "en": datetime.now(timezone.utc).isoformat()}
+                await asyncio.sleep(1.5 * (_intento + 1))
     except _ue.HTTPError as e:
         try:
             _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "http": e.code, "msg": str(e.read()[:300], "utf-8", "ignore"),
