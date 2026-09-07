@@ -1417,6 +1417,8 @@ async def precios_publico(combustible: Optional[str] = None):
             "calidad": (5 if precio_e else (4 if any(r in nombre_est for r in REDES) else 2)),
             "acepta_factura": bool(precio_e or p.get("acepta_factura")),
             "acepta_tarjeta": bool(precio_e or p.get("acepta_tarjeta")),
+            # GPS de Facilito: los botones "Ver en mapa" / "Cómo llegar" abren el punto exacto.
+            "lat": p.get("lat"), "lon": p.get("lon"),
         })
     # Dedup por (estación, dirección COMPLETA, distrito, combustible). Antes usaba dirección[:20]
     # y colapsaba sedes distintas de una misma cadena (mismo prefijo de dirección) → grifos perdidos.

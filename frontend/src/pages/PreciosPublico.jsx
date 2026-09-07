@@ -6,8 +6,13 @@ const LOGO_IMG = "https://customer-assets.emergentagent.com/job_enered-insight/a
 const WSP = "51997389536";
 const WSP_MSG = encodeURIComponent("Hola ENERED, quiero acceder a los mejores precios de combustible con la calidad asegurada de la Red ENERED para mi flota.");
 const fmtSoles = (n) => "S/ " + (Number(n) || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const mapUrl = (est, ciudad) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${est} ${ciudad} peru`)}`;
-const rutaUrl = (est, ciudad) => `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${est} ${ciudad} peru`)}`;
+// Con GPS (Facilito) se abre el punto exacto; por nombre Google no ubica bien los grifos.
+const gpsDe = (e) => {
+  const lat = Number(e?.lat), lon = Number(e?.lon);
+  return Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0 ? `${lat},${lon}` : null;
+};
+const mapUrl = (est, ciudad, e) => `https://www.google.com/maps/search/?api=1&query=${gpsDe(e) || encodeURIComponent(`${est} ${ciudad} peru`)}`;
+const rutaUrl = (est, ciudad, e) => `https://www.google.com/maps/dir/?api=1&destination=${gpsDe(e) || encodeURIComponent(`${est} ${ciudad} peru`)}`;
 
 export default function PreciosPublico() {
   const [data, setData] = useState([]);
@@ -173,11 +178,11 @@ export default function PreciosPublico() {
                     {/* Acción */}
                     <td style={{ padding: "13px 16px", textAlign: "center", whiteSpace: "nowrap" }}>
                       <div style={{ display: "inline-flex", gap: 6 }}>
-                        <a href={mapUrl(e.estacion, ciudad(e))} target="_blank" rel="noreferrer"
+                        <a href={mapUrl(e.estacion, ciudad(e), e)} target="_blank" rel="noreferrer"
                           style={{ fontSize: 11.5, fontWeight: 800, textDecoration: "none", padding: "6px 12px", borderRadius: 999, ...(e.es_enered ? { background: "#7C3AED", color: "#fff" } : { background: "#fff", color: "#374151", border: "1px solid #D1D5DB" }) }}>
                           {e.es_enered ? "Dirigir" : "Evaluar"}
                         </a>
-                        <a href={rutaUrl(e.estacion, ciudad(e))} target="_blank" rel="noreferrer"
+                        <a href={rutaUrl(e.estacion, ciudad(e), e)} target="_blank" rel="noreferrer"
                           style={{ fontSize: 11.5, fontWeight: 800, textDecoration: "none", padding: "6px 12px", borderRadius: 999, background: "#fff", color: "#6b7280", border: "1px solid #D1D5DB" }}>Ruta</a>
                       </div>
                     </td>

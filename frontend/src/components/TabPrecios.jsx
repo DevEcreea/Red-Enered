@@ -251,7 +251,13 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
   }, [selDepartamento, selProvincia, selDistrito, selCombustible, selEstacion, soloEnered]);
 
 
-  const openStationMap = (estacion, ciudad) => {
+  const openStationMap = (estacion, ciudad, p) => {
+    const lat = Number(p?.lat), lon = Number(p?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0) {
+      // GPS de Facilito: abre el punto exacto (por nombre Google no ubica bien los grifos)
+      window.open(`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`, "_blank");
+      return;
+    }
     const q = encodeURIComponent(`${estacion} ${ciudad} peru`);
     window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, "_blank");
   };
@@ -921,7 +927,7 @@ export default function TabPrecios({ user, ahorroCapturado = 0, handleSync, sync
                             <MapPin className="w-3 h-3" /> Cómo llegar
                           </button>
                           <button
-                            onClick={() => openStationMap(nombreEst, ciudad)}
+                            onClick={() => openStationMap(nombreEst, ciudad, p)}
                             className="bg-white border border-neutral-300 text-neutral-600 text-[11px] font-semibold px-2.5 py-1 rounded-full hover:bg-neutral-50 transition-colors"
                           >
                             Ver

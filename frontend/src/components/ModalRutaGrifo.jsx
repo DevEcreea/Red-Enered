@@ -50,11 +50,22 @@ export default function ModalRutaGrifo({ grifo, onClose }) {
   const nombre = grifo.establecimiento || grifo.estacion || "Grifo";
   const consultaDir = `${nombre} ${grifo.direccion || ""} ${grifo.distrito || grifo.ciudad || ""} ${grifo.provincia || ""} peru`.replace(/\s+/g, " ").trim();
 
+  // Con GPS de Facilito se navega al punto exacto; el nombre/dirección solo se usa si no hay coordenadas
+  // (Google Maps no encuentra "COESTI S.A. EE SS ESPANA 2 ESQ. AV. ESPAÑA…" como texto).
+  const lat = Number(grifo.lat), lon = Number(grifo.lon);
+  const tieneGps = Number.isFinite(lat) && Number.isFinite(lon) && lat !== 0 && lon !== 0;
   const irAExterna = (app) => {
-    const q = encodeURIComponent(consultaDir);
-    const url = app === "waze"
-      ? `https://waze.com/ul?q=${q}&navigate=yes`
-      : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+    let url;
+    if (tieneGps) {
+      url = app === "waze"
+        ? `https://waze.com/ul?ll=${lat},${lon}&navigate=yes`
+        : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}`;
+    } else {
+      const q = encodeURIComponent(consultaDir);
+      url = app === "waze"
+        ? `https://waze.com/ul?q=${q}&navigate=yes`
+        : `https://www.google.com/maps/dir/?api=1&destination=${q}`;
+    }
     window.open(url, "_blank");
     onClose();
   };
