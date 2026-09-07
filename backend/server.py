@@ -5300,6 +5300,9 @@ def _marca_por_vin(vin: str) -> str:
     return _WMI_MARCAS.get(wmi, "")
 
 
+_JSONPE_ULTIMO_ERROR: dict = {}
+
+
 async def _jsonpe(recurso: str, body: dict) -> dict:
     """POST a api.json.pe (placa, soat, revision-tecnica, licencia). Devuelve el
     dict `data` o {} si no hay token, falla la red o el proveedor no tiene datos."""
@@ -5317,9 +5320,15 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
         with _ur.urlopen(req, timeout=25) as r:
             return json.loads(r.read())
     import urllib.error as _ue
+    global _JSONPE_ULTIMO_ERROR
     try:
         res = await asyncio.to_thread(_fetch)
     except _ue.HTTPError as e:
+        try:
+            _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "http": e.code, "msg": str(e.read()[:300], "utf-8", "ignore"),
+                                    "en": datetime.now(timezone.utc).isoformat()}
+        except Exception:
+            _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "http": e.code, "en": datetime.now(timezone.utc).isoformat()}
         # json.pe responde 404 tanto para "no hay registro" (unidad nueva sin CITV) como
         # para fallas del MTC ("Error de red MTC: 429"). Solo el primero se marca como
         # SIN REGISTRO; la falla es transitoria y se reintenta en la siguiente pasada.
@@ -5331,9 +5340,13 @@ async def _jsonpe(recurso: str, body: dict) -> dict:
             if re.search(r"no se encontr|no cuenta con", msg, re.I) and not re.search(r"error de red|429|timeout", msg, re.I):
                 return {"_sin_registro": True}
         return {}
-    except Exception:
+    except Exception as e:
+        _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "error": f"{type(e).__name__}: {str(e)[:200]}",
+                                "en": datetime.now(timezone.utc).isoformat()}
         return {}
     if not res.get("success"):
+        _JSONPE_ULTIMO_ERROR = {"recurso": recurso, "success": False, "msg": str(res.get("message", ""))[:300],
+                                "en": datetime.now(timezone.utc).isoformat()}
         return {}
     data = res.get("data")
     # placa/soat devuelven un objeto; revision-tecnica devuelve una LISTA de inspecciones
@@ -8174,7 +8187,7 @@ def _recortar_rostro(content: bytes, content_type: str = "", filename: str = "")
 
 
 @api.get("/personal/consulta-dni/{dni}")
-async def personal_consulta_dni(dni: str, refresh: int = 0, user: dict = Depends(get_current_user)):
+async def personal_consulta_dni(dni: str, refresh: int = 0, debug: int = 0, user: dict = Depends(get_current_user)):
     """
     Autollenado del conductor por DNI: nombre (RENIEC) y licencia de conducir del MTC
     (número, categoría, vigencia, restricciones), ambos vía json.pe. Caché en `personas_dni`:
@@ -8209,6 +8222,9 @@ async def personal_consulta_dni(dni: str, refresh: int = 0, user: dict = Depends
     lic_fresca = cache.get("licencia_en") and _vigente(cache["licencia_en"], 7 if cache.get("sin_licencia") else 30) and not refresh
     if not lic_fresca:
         l = await _jsonpe("licencia", {"dni": dni})
+        # json.pe anida los datos: {"numero_documento", "nombre_completo", "licencia": {...}}
+        if isinstance(l, dict) and isinstance(l.get("licencia"), dict):
+            l = l["licencia"]
         if l and (l.get("numero") or l.get("categoria")):
             cache.update({"licencia": {k: (l.get(k) or "") for k in ("numero", "categoria", "fecha_expedicion", "fecha_vencimiento", "estado", "restricciones")},
                           "sin_licencia": False, "licencia_en": now_iso})
@@ -8237,6 +8253,8 @@ async def personal_consulta_dni(dni: str, refresh: int = 0, user: dict = Depends
         "verificado": {"reniec": p is not None, "mtc": bool(lic) or bool(cache.get("sin_licencia"))},
         "consultado_en": cache.get("licencia_en") or cache.get("persona_en") or now_iso,
         "fuente": "RENIEC y MTC (vía json.pe)",
+        **({"_debug": {"jsonpe_token": bool(os.getenv("JSONPE_TOKEN", "").strip()), "ultimo_error": _JSONPE_ULTIMO_ERROR}}
+           if (debug and user.get("role") == "admin_enered") else {}),
     }
 
 
