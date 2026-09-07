@@ -502,14 +502,28 @@ export default function Documentacion() {
 
   const handleDeleteVehiculo = async (pl) => {
     if (!window.confirm("¿Estás seguro de eliminar este vehículo y sus documentos?")) return;
-    const plLower = (pl || "").toLowerCase();
-    const toDelete = docs.filter(d => d.tipo === "Vehículos" && (d.placa || "").toLowerCase() === plLower);
+    const plNorm = (pl || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const normP = (x) => (x || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    // 1) Documentos reales de la placa (las filas "api-…" son automáticas del motor de placas
+    //    y desaparecen solas al borrar el vehículo; "300"/"400" son de muestra).
+    const toDelete = docs.filter(d => d.tipo === "Vehículos" && normP(d.placa) === plNorm);
     for (const d of toDelete) {
-      if (!String(d.id).startsWith("300") && !String(d.id).startsWith("400")) {
+      const id = String(d.id);
+      if (!id.startsWith("300") && !id.startsWith("400") && !id.startsWith("api-")) {
         await api.delete(`/documents/${d.id}`).catch(()=>({}));
       }
     }
-    setDocs(prev => prev.filter(d => !toDelete.includes(d)));
+    // 2) El vehículo en sí (antes nunca se borraba y "reaparecía" al recargar).
+    const vehs = vehiculos.filter(v => normP(v.placa || v.veh) === plNorm);
+    let borrado = vehs.length === 0;
+    for (const v of vehs) {
+      if (!v.id) continue;
+      try { await api.delete(`/vehiculos/${v.id}`); borrado = true; }
+      catch (err) { alert("No se pudo eliminar el vehículo: " + (err.response?.data?.detail || err.message)); }
+    }
+    if (!borrado) return;
+    setDocs(prev => prev.filter(d => !(d.tipo === "Vehículos" && normP(d.placa) === plNorm)));
+    setVehiculos(prev => prev.filter(v => normP(v.placa || v.veh) !== plNorm));
     showToast("Vehículo eliminado");
   };
 

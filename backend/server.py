@@ -6281,8 +6281,17 @@ async def delete_vehiculo(req: Request, vehiculo_id: str):
     v = await db.vehiculos.find_one({"id": vehiculo_id})
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
-    
+    # Solo admin ENERED o alguien de la misma empresa puede borrar (antes bastaba con el id).
+    if u.get("role") != "admin_enered" and (v.get("empresa") or "") != (u.get("empresa") or ""):
+        raise HTTPException(403, "No puedes eliminar vehículos de otra empresa")
     await db.vehiculos.delete_one({"id": vehiculo_id})
+    # Los documentos subidos de esa placa (SOAT, CITV, tarjeta…) se archivan para no dejar huérfanos.
+    placa = (v.get("placa") or "").upper().strip()
+    if placa:
+        await db.documents.update_many(
+            {"placa": placa, "empresa": v.get("empresa")},
+            {"$set": {"archived": 1, "archived_at": datetime.now(timezone.utc).isoformat(),
+                      "archived_reason": "vehículo eliminado"}})
     return {"ok": True}
 
 # --- CONDUCTORES ENDPOINTS ---
