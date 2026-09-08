@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /precios
+Allow: /subsidio
+Allow: /privacidad
+Disallow: /dashboard
+Disallow: /admin
+Disallow: /api/
+Sitemap: https://enered.pe/sitemap.xml
