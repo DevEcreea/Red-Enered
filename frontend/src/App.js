@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
 import DashboardSubsidioView from "./pages/DashboardSubsidioView";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Reportes from "./pages/Reportes";
 import Facturacion from "./pages/Facturacion";
 import EstadoCuentaHistorial from "./pages/EstadoCuentaHistorial";
@@ -123,6 +124,7 @@ function App() {
       <BrowserRouter>
         <Toaster richColors position="top-right" />
         <ConstanciaModal />
+        <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
@@ -188,6 +190,7 @@ function App() {
           <Route path="/captura/:token" element={<CapturaMovil />} />
           <Route path="*" element={<RootRedirect />} />
         </Routes>
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
   );
