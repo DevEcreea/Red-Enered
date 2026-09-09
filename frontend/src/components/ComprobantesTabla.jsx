@@ -609,6 +609,7 @@ export function CargaMasiva({ onDone }) {
       setPreview(null); setPasoPdf(false); setPdfs([]);
       onDone?.(data);
       setFacturas({ guardadas: data.guardadas || 0, pendientes: data.sin_pdf || 0, resultado: data, sinPdf: data.sin_pdf_detalle || [] });
+      if (!(data.sin_pdf > 0)) setTimeout(() => setFacturas(null), 6000); // resumen breve y vuelve a la tabla
     } catch (e2) { setErr(e2?.response?.data?.detail || "No se pudo guardar"); }
     finally { setBusy(false); }
   };
@@ -648,10 +649,11 @@ export function CargaMasiva({ onDone }) {
               <FileText className="w-4 h-4 text-brand" /> Adjunta las facturas (PDF)
             </div>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Guardamos {facturas.guardadas} comprobante(s) en borradores{facturas.resultado?.con_pdf != null ? `, ${facturas.resultado.con_pdf} con su PDF enganchado` : ""}.
+              Guardamos {facturas.guardadas} comprobante(s) en borradores{facturas.resultado?.con_pdf != null ? `: ${facturas.resultado.con_pdf} con su factura ubicada por QR` : ""}
+              {facturas.resultado?.con_lote > 0 ? ` y ${facturas.resultado.con_lote} con el PDF completo adjunto (ENERED ubicará la factura dentro del archivo)` : ""}.
               {facturas.pendientes > 0
                 ? ` Faltan ${facturas.pendientes} por adjuntar: sube su PDF aquí (uno por factura o varias por página) o desde "Editar comprobante".`
-                : " ¡Todos tienen su PDF! 🎉"}
+                : " Ya está todo en manos de ENERED. 🎉"}
             </p>
           </div>
           <div className="flex gap-2">

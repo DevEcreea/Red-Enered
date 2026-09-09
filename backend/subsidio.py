@@ -1310,32 +1310,38 @@ async def subsidio_confirmar_masiva_con_pdf(
         for d in r["detalle"]:
             resultados.append({"filename": f.filename, **d})
 
-    # Marcar en la validación si el PDF quedó adjunto o no (para que se vea el motivo en la tabla)
-    con_pdf, sin_pdf = 0, []
-    async for d in db.consumos_subsidio.find({"id": {"$in": nuevos_ids}}, {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1, "factura_storage_key": 1, "validacion": 1, "validacion_estado": 1}):
-        tiene = bool(d.get("factura_storage_key"))
-        val = d.get("validacion") or {"estado": d.get("validacion_estado") or "OBSERVADA", "checks": [], "motivos": []}
-        checks = [c for c in (val.get("checks") or []) if c.get("codigo") != "pdf_adjunto"]
-        checks.append({"codigo": "pdf_adjunto", "nombre": "PDF de la factura adjunto", "ok": tiene,
-                       "detalle": "Factura enganchada por su QR." if tiene else "No se encontró esta factura en el PDF; adjúntala desde 'Editar comprobante'.",
-                       "bloqueante": False})
-        val["checks"] = checks
-        motivos = [m for m in (val.get("motivos") or []) if "PDF" not in m]
-        estado = val.get("estado") or d.get("validacion_estado") or "OBSERVADA"
-        if not tiene:
-            motivos.insert(0, "Falta el PDF de la factura")
-            if estado == "CONFORME":
-                estado = "OBSERVADA"
-            sin_pdf.append({"id": d["id"], "numero_documento": d.get("numero_documento"), "placa": d.get("placa")})
-        else:
-            con_pdf += 1
-        val["motivos"] = motivos
-        val["estado"] = estado
-        val["requiere_revision"] = estado != "CONFORME"
-        await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {"validacion": val, "validacion_estado": estado, "requiere_revision": val["requiere_revision"]}})
-
-    return {"guardadas": len(docs), "omitidas": len(lista) - len(docs), "con_pdf": con_pdf, "sin_pdf": len(sin_pdf),
-            "sin_pdf_detalle": sin_pdf[:100], "adjuntadas": adjuntadas, "resultados": resultados}
+    # Filas cuya factura no se ubicó por QR: se les adjunta el PDF completo tal cual lo subió el
+    # cliente (sin observar la fila). Admin ENERED lo revisa y, si hace falta, lo reemplaza
+    # desde el expediente o "Editar comprobante".
+    lote_keys = []
+    for f in files:
+        try:
+            await f.seek(0)
+            content = await f.read()
+        except Exception:
+            content = b""
+        if content[:4] != b"%PDF":
+            continue
+        nombre = _re.sub(r"[^A-Za-z0-9_.-]", "_", (f.filename or "facturas.pdf"))[:60]
+        key = _subsidio_key(user["id"], "factura_subsidio", None, f"lote_{nombre}")
+        storage.save_object(key, content, "application/pdf")
+        lote_keys.append({"key": key, "filename": f.filename or "facturas.pdf", "size": len(content)})
+    sin_qr = [d async for d in db.consumos_subsidio.find(
+        {"id": {"$in": nuevos_ids}, "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
+        {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1})]
+    if sin_qr and lote_keys:
+        principal = lote_keys[0]
+        await db.consumos_subsidio.update_many(
+            {"id": {"$in": [d["id"] for d in sin_qr]}},
+            {"$set": {"factura_filename": principal["filename"], "factura_storage_key": principal["key"],
+                      "factura_content_type": "application/pdf", "factura_size": principal["size"],
+                      "factura_adjunta_at": ahora, "factura_lote": True,
+                      "factura_lote_archivos": lote_keys,
+                      "nota_enered": "PDF del lote adjunto sin coincidencia de QR: ubicar la factura dentro del PDF."}})
+    con_pdf = len(nuevos_ids) - len(sin_qr)
+    return {"guardadas": len(docs), "omitidas": len(lista) - len(docs), "con_pdf": con_pdf,
+            "con_lote": len(sin_qr) if lote_keys else 0, "sin_pdf": 0 if lote_keys else len(sin_qr),
+            "sin_pdf_detalle": [] if lote_keys else sin_qr[:100], "adjuntadas": adjuntadas, "resultados": resultados}
 
 
 @subsidio_router.get("/subsidio/carga-masiva/pendientes-factura")
