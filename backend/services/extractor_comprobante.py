@@ -173,6 +173,9 @@ def extraer_de_qr(contenido: bytes) -> Optional[dict]:
         serie, numero = campos_sn[0], campos_sn[1]
     elif len(campos_sn) == 1 and "-" in campos_sn[0]:
         serie, numero = campos_sn[0].split("-", 1)
+    elif len(campos_sn) == 1 and re.fullmatch(r"[A-Z]\d{3}\d{6,8}", campos_sn[0].strip().upper()):
+        # Serie y número pegados sin guion (tickets térmicos: 'F0010002660' = F001 + 0002660)
+        serie, numero = campos_sn[0].strip().upper()[:4], campos_sn[0].strip()[4:]
     elif campos_sn:
         serie, numero = campos_sn[0], None
     else:
