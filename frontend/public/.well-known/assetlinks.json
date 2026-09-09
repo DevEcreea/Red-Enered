@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "pe.enered.app",
+        "sha256_cert_fingerprints": ["56:7A:33:75:CA:C1:1B:59:1D:2B:4E:96:6C:4A:7C:B0:F7:E6:1F:06:9E:D9:21:AA:1A:5C:4A:EB:C4:F7:81:62"]
+      }
+    }]
