@@ -168,38 +168,122 @@ _GENERICAS = {
     "ESTACION", "ESTACIN", "DE", "SERVICIOS", "SERVICIO", "SERVICENTRO", "GRIFO", "GRIFOS",
     "S", "A", "C", "SA", "SAC", "SRL", "EIRL", "SCRL", "E", "I", "R", "L", "Y", "DEL", "LA",
     "EL", "LOS", "LAS", "EMPRESA", "CORPORACION", "INVERSIONES", "COMBUSTIBLES", "MULTISERVICIOS",
+    # forma societaria completa que trae SUNAT (no aparece así en Facilito)
+    "SOCIEDAD", "ANONIMA", "ANNIMA", "CERRADA", "ABIERTA", "INDIVIDUAL", "RESPONSABILIDAD", "LIMITADA",
+    "COMERCIAL", "SUCURSAL", "PERU", "GENERALES", "NEGOCIOS", "NEGOCIACIONES", "NEGOCIACION",
+    "TRANSPORTES", "TRANSPORTE", "SERVICENTROS", "GRIFOS", "ESTACIONES", "COMPANIA", "COMPAÑIA",
 }
 
 
 def _tokens_significativos(nombre: str) -> list[str]:
     import re as _re
-    limpio = _re.sub(r"[^A-Z0-9 ]", " ", (nombre or "").upper())
+    import unicodedata as _ud
+    limpio = _ud.normalize("NFKD", (nombre or "").upper()).encode("ascii", "ignore").decode()
+    limpio = _re.sub(r"[^A-Z0-9 ]", " ", limpio)
     return [t for t in limpio.split() if len(t) >= 3 and t not in _GENERICAS]
 
 
-async def _buscar_en_facilito(db, razon_social: str) -> list[dict]:
-    """Respaldo: el padrón CSV de Datos Abiertos está incompleto, pero toda estación
-    que declara precios en Facilito está inscrita en OSINERGMIN por definición.
-    Busca el establecimiento por los tokens distintivos de la razón social."""
+def _regex_nombre_corto(nombre: str):
+    """Para razones sociales sin tokens significativos ('ESTACION DE SERVICIOS J & F S.A.C.'):
+    arma un patrón con las letras/números cortos que quedan (J, F) en orden, tolerando
+    símbolos entre ellos: r'\bJ\W{0,4}F\b'. Devuelve None si no hay nada usable."""
     import re as _re
+    import unicodedata as _ud
+    limpio = _ud.normalize("NFKD", (nombre or "").upper()).encode("ascii", "ignore").decode()
+    limpio = _re.sub(r"[^A-Z0-9 ]", " ", limpio)
+    cortos = [t for t in limpio.split() if t not in _GENERICAS and t not in ("S", "A", "C", "E", "I", "R", "L")]
+    if not cortos or len("".join(cortos)) < 2:
+        return None
+    return r"\b" + r"\W{0,4}".join(_re.escape(t) for t in cortos) + r"\b"
+
+
+_SUFIJOS = {"SOCIEDAD", "ANONIMA", "ANNIMA", "CERRADA", "ABIERTA", "INDIVIDUAL", "RESPONSABILIDAD", "LIMITADA",
+            "S", "A", "C", "SA", "SAC", "SRL", "EIRL", "SCRL", "E", "I", "R", "L", "SUCURSAL", "PERU"}
+
+
+def _normalizar(nombre: str) -> list[str]:
+    import re as _re
+    import unicodedata as _ud
+    limpio = _ud.normalize("NFKD", (nombre or "").upper()).encode("ascii", "ignore").decode()
+    limpio = _re.sub(r"[^A-Z0-9 ]", " ", limpio)
+    return limpio.split()
+
+
+def _frase_base(nombre: str):
+    """Razón social sin la forma societaria del final, como patrón exacto de palabras en orden:
+    'EMPRESA DE SERVICIOS Y TRANSPORTES EL NEGRO E.I.R.L.' → EMPRESA\W+DE\W+…\W+NEGRO.
+    Es la coincidencia más confiable: Facilito suele copiar el nombre tal cual."""
+    import re as _re
+    palabras = _normalizar(nombre)
+    while palabras and palabras[-1] in _SUFIJOS:
+        palabras.pop()
+    palabras = [w for w in palabras if w not in ("S", "A", "C", "E", "I", "R", "L")]
+    if len(palabras) < 2 or len("".join(palabras)) < 5:
+        return None
+    return r"\b" + r"\W+".join(_re.escape(w) for w in palabras) + r"\b"
+
+
+async def _buscar_por_nombre(db, razon_social: str):
+    """Busca una razón social en Facilito (precios_facilito.establecimiento) y en el CSV de
+    OSINERGMIN (razon_social), de más a menos estricta:
+      1) frase completa sin forma societaria, en orden;
+      2) todos los tokens significativos (AND);
+      3) un único token corto (3-6 letras) solo si la coincidencia es única.
+    Devuelve (fuente, filas) o (None, [])."""
+    import re as _re
+    proy_f = {"_id": 0, "establecimiento": 1, "codigo_osinergmin": 1, "direccion": 1,
+              "departamento": 1, "provincia": 1, "distrito": 1}
+
+    async def _fac(cond):
+        rows = await db.precios_facilito.find(cond, proy_f).to_list(300)
+        vistos, out = set(), []
+        for r in rows:
+            cod = r.get("codigo_osinergmin") or r.get("direccion")
+            if cod in vistos:
+                continue
+            vistos.add(cod)
+            out.append(r)
+        return out
+
+    async def _csv(cond):
+        return await db[COLECCION].find(cond, {"_id": 0}).to_list(50)
+
+    intentos = []  # (cond_facilito, cond_csv, exigir_unico)
+    frase = _frase_base(razon_social)
+    if frase:
+        intentos.append(({"establecimiento": {"$regex": frase, "$options": "i"}},
+                         {"razon_social": {"$regex": frase, "$options": "i"}}, False))
     tokens = _tokens_significativos(razon_social)
-    if not tokens:
-        return []
-    cond = [{"establecimiento": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]
-    rows = await db.precios_facilito.find(
-        {"$and": cond},
-        {"_id": 0, "establecimiento": 1, "codigo_osinergmin": 1, "direccion": 1,
-         "departamento": 1, "provincia": 1, "distrito": 1},
-    ).to_list(300)
-    # un local por código osinergmin
-    vistos, locales = set(), []
-    for r in rows:
-        cod = r.get("codigo_osinergmin") or r.get("direccion")
-        if cod in vistos:
-            continue
-        vistos.add(cod)
-        locales.append(r)
-    return locales
+    if tokens and (len(tokens) >= 2 or len(tokens[0]) >= 7):
+        intentos.append(({"$and": [{"establecimiento": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]},
+                         {"$and": [{"razon_social": {"$regex": _re.escape(t), "$options": "i"}} for t in tokens]}, False))
+    elif tokens:  # un solo token corto (KIO, NEGRO): palabra completa y coincidencia única
+        pat = r"\b" + _re.escape(tokens[0]) + r"\b"
+        intentos.append(({"establecimiento": {"$regex": pat, "$options": "i"}},
+                         {"razon_social": {"$regex": pat, "$options": "i"}}, True))
+    else:
+        pat = _regex_nombre_corto(razon_social)
+        if pat:
+            intentos.append(({"establecimiento": {"$regex": pat, "$options": "i"}},
+                             {"razon_social": {"$regex": pat, "$options": "i"}}, True))
+
+    def _nombres(rows, campo):
+        return {(r.get(campo) or "").strip().upper() for r in rows}
+
+    for cond_f, cond_c, unico in intentos:
+        rows = await _fac(cond_f)
+        if rows and (not unico or len(_nombres(rows, "establecimiento")) <= 2):
+            return "facilito", rows
+        rows = await _csv(cond_c)
+        if rows and (not unico or len(_nombres(rows, "razon_social")) <= 2):
+            return "csv", rows
+    return None, []
+
+
+async def _buscar_en_facilito(db, razon_social: str) -> list[dict]:
+    """Compatibilidad: solo Facilito (usa la búsqueda por nombre unificada)."""
+    fuente, rows = await _buscar_por_nombre(db, razon_social)
+    return rows if fuente == "facilito" else []
 
 
 async def buscar_por_ruc(db, ruc: str, razon_social: str | None = None) -> dict | None:
@@ -215,9 +299,12 @@ async def buscar_por_ruc(db, ruc: str, razon_social: str | None = None) -> dict 
     docs = await db[COLECCION].find({"ruc": ruc}, {"_id": 0}).to_list(200)
     if not docs:
         if razon_social:
-            fac = await _buscar_en_facilito(db, razon_social)
-            if fac:
-                f0 = fac[0]
+            fuente, rows = await _buscar_por_nombre(db, razon_social)
+            if fuente == "csv":
+                docs = [{**d, "ruc_padron": d.get("ruc"), "ruc": ruc, "fuente": "OSINERGMIN (por razón social)",
+                         "advertencia": "El RUC no figura en el CSV de Datos Abiertos; coincide por razón social."} for d in rows]
+            elif fuente == "facilito" and rows:
+                f0 = rows[0]
                 return {
                     "ruc": ruc, "inscrito": True, "fuente": "OSINERGMIN (vía Facilito)",
                     "razon_social": razon_social,
@@ -232,11 +319,12 @@ async def buscar_por_ruc(db, ruc: str, razon_social: str | None = None) -> dict 
                          "provincia": (x.get("provincia") or "").upper(),
                          "departamento": (x.get("departamento") or "").upper(),
                          "codigo_osinergmin": x.get("codigo_osinergmin", "")}
-                        for x in fac
+                        for x in rows
                     ],
-                    "total_locales": len(fac),
+                    "total_locales": len(rows),
                 }
-        return {"ruc": ruc, "inscrito": False, "locales": []}
+        if not docs:
+            return {"ruc": ruc, "inscrito": False, "locales": []}
     d = dict(docs[0])
     d["inscrito"] = True
     # Todos los locales del RUC: el formulario los usa para que el usuario elija la
