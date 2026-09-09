@@ -5,6 +5,7 @@ Aislado del resto del backend: solo añade endpoints, no modifica los existentes
 from __future__ import annotations
 
 import os
+import asyncio
 import io
 import uuid
 import logging
@@ -1149,14 +1150,202 @@ async def subsidio_confirmar_masiva(payload: dict, user: dict = Depends(_require
     return {"guardadas": len(docs), "omitidas": len(filas) - len(docs)}
 
 
+
+def _sn_comprobante(x) -> Optional[tuple]:
+    """(SERIE, número sin ceros) para comparar 'F001-2660', 'F001-0002660' y 'F0010002660'."""
+    t = _re.sub(r"[^A-Z0-9-]", "", str(x or "").upper())
+    m = _re.match(r"^([A-Z]{1,2}\d{2,3})-?0*(\d+)$", t)
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def _partir_pdf_por_factura(content: bytes) -> list:
+    """Divide un PDF con varias facturas (una por página, o la misma repetida en páginas
+    seguidas) en trozos [{numero_documento, ruc_emisor, importe_total, fecha, paginas, pdf}].
+    Las páginas sin QR legible salen con numero_documento=None para reportarlas."""
+    import pymupdf
+    from services.extractor_comprobante import extraer_de_qr as _qr
+    doc = pymupdf.open(stream=content, filetype="pdf")
+    n = len(doc)
+    if n <= 1:
+        q = _qr(content) or {}
+        doc.close()
+        return [{"numero_documento": q.get("numero_documento"), "ruc_emisor": q.get("ruc_emisor"),
+                 "importe_total": q.get("importe_total"), "fecha": q.get("fecha"), "paginas": [1], "pdf": content}]
+    trozos = []
+    for i in range(n):
+        sub = pymupdf.open()
+        sub.insert_pdf(doc, from_page=i, to_page=i)
+        b = sub.tobytes()
+        sub.close()
+        q = _qr(b) or {}
+        num = q.get("numero_documento")
+        # misma factura en páginas seguidas (original + copia) → un solo trozo
+        if trozos and num and trozos[-1]["numero_documento"] == num:
+            trozos[-1]["paginas"].append(i + 1)
+            continue
+        trozos.append({"numero_documento": num, "ruc_emisor": q.get("ruc_emisor"), "importe_total": q.get("importe_total"),
+                       "fecha": q.get("fecha"), "paginas": [i + 1], "pdf": b})
+    doc.close()
+    return trozos
+
+
+async def _enganchar_pdf(user: dict, uids: list, content: bytes, filename: str, solo_ids: Optional[list] = None) -> dict:
+    """Engancha las facturas contenidas en `content` (1 o varias páginas) a los comprobantes
+    de la empresa que aún no tienen archivo, identificándolas por el QR (serie-número y RUC).
+    `solo_ids` restringe a comprobantes concretos (p.ej. desde 'Editar comprobante')."""
+    q = {**_own_q(user, uids), "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]}
+    if solo_ids:
+        q["id"] = {"$in": solo_ids}
+    pendientes = await db.consumos_subsidio.find(q, {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1, "placa": 1, "origin": 1}).to_list(4000)
+    por_num: dict = {}
+    for p in pendientes:
+        k = _sn_comprobante(p.get("numero_documento"))
+        if k:
+            por_num.setdefault(k, []).append(p)
+    ahora = datetime.now(timezone.utc).isoformat()
+    try:
+        trozos = await asyncio.to_thread(_partir_pdf_por_factura, content)
+    except Exception as e:
+        logger.warning(f"No se pudo partir el PDF {filename}: {e}")
+        trozos = [{"numero_documento": None, "paginas": [1], "pdf": content}]
+    adjuntadas, detalle = 0, []
+    for t in trozos:
+        num = t.get("numero_documento")
+        pags = ",".join(str(x) for x in t["paginas"])
+        if not num:
+            # Sin QR: si se pidió un comprobante concreto y el PDF es de 1 página, se adjunta igual.
+            if solo_ids and len(solo_ids) == 1 and len(trozos) == 1:
+                objetivos = [p for p in pendientes if p["id"] in solo_ids]
+            else:
+                detalle.append({"paginas": pags, "ok": False, "error": "Sin QR legible; adjúntala desde 'Editar comprobante'"})
+                continue
+        else:
+            cands = por_num.get(_sn_comprobante(num)) or []
+            if t.get("ruc_emisor"):
+                con_ruc = [c for c in cands if _re.sub(r"\D", "", str(c.get("ruc_emisor") or "")) == t["ruc_emisor"]]
+                cands = con_ruc or cands
+            objetivos = cands
+        if not objetivos:
+            detalle.append({"paginas": pags, "numero_documento": num, "ok": False,
+                            "error": "No hay un comprobante con ese número sin archivo (¿ya tiene PDF o no está en la carga?)"})
+            continue
+        base = _re.sub(r"[^A-Za-z0-9_.-]", "_", (filename or "factura").rsplit(".", 1)[0])[:40]
+        nombre = f"{base}_{(num or 'pag' + pags).replace('/', '-')}.pdf"
+        key = _subsidio_key(user["id"], "factura_subsidio", None, nombre)
+        storage.save_object(key, t["pdf"], "application/pdf")
+        ids = [o["id"] for o in objetivos]
+        upd = {"factura_filename": nombre, "factura_storage_key": key, "factura_content_type": "application/pdf",
+               "factura_size": len(t["pdf"]), "factura_adjunta_at": ahora, "factura_paginas_origen": pags}
+        # Datos del QR: solo llenan lo que esté vacío (importe, fecha, RUC) — no pisan lo escrito.
+        for camp, val in (("importe_total", t.get("importe_total")), ("ruc_emisor", t.get("ruc_emisor"))):
+            if val:
+                await db.consumos_subsidio.update_many({"id": {"$in": ids}, "$or": [{camp: {"$in": [None, "", 0]}}, {camp: {"$exists": False}}]}, {"$set": {camp: val}})
+        await db.consumos_subsidio.update_many({"id": {"$in": ids}}, {"$set": upd})
+        ids_set = set(ids)
+        if num:
+            por_num[_sn_comprobante(num)] = [c for c in (por_num.get(_sn_comprobante(num)) or []) if c["id"] not in ids_set]
+        adjuntadas += len(ids)
+        detalle.append({"paginas": pags, "numero_documento": num, "ok": True, "consumos": len(ids),
+                        "placas": [o.get("placa") for o in objetivos if o.get("placa")]})
+    return {"adjuntadas": adjuntadas, "trozos": len(trozos), "detalle": detalle}
+
+@subsidio_router.post("/subsidio/carga-masiva/confirmar-con-pdf")
+async def subsidio_confirmar_masiva_con_pdf(
+    filas: str = Form(...),
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(_require_subsidio),
+):
+    """Flujo de carga masiva: Excel validado + el PDF con las facturas (obligatorio) → recién
+    se guardan los borradores, cada uno con su factura enganchada por QR (serie-número y RUC).
+    Acepta un PDF por factura o un solo PDF con todas (una por página). Las filas cuya factura
+    no aparece en el PDF se guardan igual, pero quedan OBSERVADAS con el motivo 'falta el PDF'."""
+    import json as _json
+    try:
+        lista = _json.loads(filas) if isinstance(filas, str) else (filas or [])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Filas inválidas")
+    if not lista:
+        raise HTTPException(status_code=400, detail="No hay filas para guardar")
+    if not files:
+        raise HTTPException(status_code=400, detail="Adjunta el PDF con las facturas para continuar")
+    ahora = datetime.now(timezone.utc).isoformat()
+    docs = []
+    for f in lista:
+        if (f.get("validacion_estado") or "").upper() == "RECHAZADA":
+            continue
+        docs.append({
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"], "empresa": user.get("empresa"), "empresa_id": user.get("empresa"),
+            "origin": "carga_masiva",
+            "numero_documento": f.get("numero_documento"), "serie": f.get("serie"), "numero": f.get("numero"),
+            "fecha": f.get("fecha"), "ruc_emisor": f.get("ruc_emisor"),
+            "estacion": f.get("estacion"), "ciudad": normalize_city(f.get("distrito")),
+            "departamento": f.get("departamento"), "provincia": f.get("provincia"), "distrito": f.get("distrito"),
+            "direccion_grifo": f.get("direccion_grifo"),
+            "placa": f.get("placa"), "placa_match": f.get("placa"), "categoria": f.get("categoria"),
+            "producto": f.get("producto"), "galones": f.get("galones"),
+            "tiene_nc": f.get("tiene_nc"), "serie_nc": f.get("serie_nc"),
+            "numero_nc": f.get("numero_nc"), "alcance_nc": f.get("alcance_nc"),
+            "validacion": f.get("validacion"), "validacion_estado": f.get("validacion_estado"),
+            "requiere_revision": (f.get("validacion") or {}).get("requiere_revision", True),
+            "status": "draft", "created_at": ahora, "confirmed_at": None,
+        })
+    if not docs:
+        raise HTTPException(status_code=400, detail="Todas las filas fueron rechazadas; corrige la plantilla")
+    await db.consumos_subsidio.insert_many(docs)
+    nuevos_ids = [d["id"] for d in docs]
+
+    uids = await _get_company_uids(user)
+    adjuntadas, resultados = 0, []
+    for f in files:
+        content = await f.read()
+        if content[:4] != b"%PDF":
+            resultados.append({"filename": f.filename, "ok": False, "error": "Solo se aceptan facturas en PDF"})
+            continue
+        if len(content) > 40 * 1024 * 1024:
+            resultados.append({"filename": f.filename, "ok": False, "error": "Archivo > 40MB"})
+            continue
+        r = await _enganchar_pdf(user, uids, content, f.filename or "facturas.pdf", solo_ids=nuevos_ids)
+        adjuntadas += r["adjuntadas"]
+        for d in r["detalle"]:
+            resultados.append({"filename": f.filename, **d})
+
+    # Marcar en la validación si el PDF quedó adjunto o no (para que se vea el motivo en la tabla)
+    con_pdf, sin_pdf = 0, []
+    async for d in db.consumos_subsidio.find({"id": {"$in": nuevos_ids}}, {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1, "factura_storage_key": 1, "validacion": 1, "validacion_estado": 1}):
+        tiene = bool(d.get("factura_storage_key"))
+        val = d.get("validacion") or {"estado": d.get("validacion_estado") or "OBSERVADA", "checks": [], "motivos": []}
+        checks = [c for c in (val.get("checks") or []) if c.get("codigo") != "pdf_adjunto"]
+        checks.append({"codigo": "pdf_adjunto", "nombre": "PDF de la factura adjunto", "ok": tiene,
+                       "detalle": "Factura enganchada por su QR." if tiene else "No se encontró esta factura en el PDF; adjúntala desde 'Editar comprobante'.",
+                       "bloqueante": False})
+        val["checks"] = checks
+        motivos = [m for m in (val.get("motivos") or []) if "PDF" not in m]
+        estado = val.get("estado") or d.get("validacion_estado") or "OBSERVADA"
+        if not tiene:
+            motivos.insert(0, "Falta el PDF de la factura")
+            if estado == "CONFORME":
+                estado = "OBSERVADA"
+            sin_pdf.append({"id": d["id"], "numero_documento": d.get("numero_documento"), "placa": d.get("placa")})
+        else:
+            con_pdf += 1
+        val["motivos"] = motivos
+        val["estado"] = estado
+        val["requiere_revision"] = estado != "CONFORME"
+        await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {"validacion": val, "validacion_estado": estado, "requiere_revision": val["requiere_revision"]}})
+
+    return {"guardadas": len(docs), "omitidas": len(lista) - len(docs), "con_pdf": con_pdf, "sin_pdf": len(sin_pdf),
+            "sin_pdf_detalle": sin_pdf[:100], "adjuntadas": adjuntadas, "resultados": resultados}
+
+
 @subsidio_router.get("/subsidio/carga-masiva/pendientes-factura")
 async def subsidio_masiva_pendientes(user: dict = Depends(_require_subsidio)):
     """Comprobantes cargados por plantilla (Excel) que aún no tienen su PDF adjunto."""
-    uids = await _get_company_uids(user["id"])
+    uids = await _get_company_uids(user)
     pend = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "origin": "carga_masiva",
+        {**_own_q(user, uids),
          "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
-        {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1, "ruc_emisor": 1, "fecha": 1, "galones": 1},
+        {"_id": 0, "id": 1, "numero_documento": 1, "placa": 1, "ruc_emisor": 1, "fecha": 1, "galones": 1, "origin": 1},
     ).sort("fecha", 1).to_list(2000)
     return {"pendientes": pend, "total": len(pend)}
 
@@ -1166,91 +1355,51 @@ async def subsidio_masiva_adjuntar(
     files: List[UploadFile] = File(...),
     user: dict = Depends(_require_subsidio),
 ):
-    """Adjunta los PDF a los comprobantes ya cargados por plantilla (Excel).
+    """Adjunta los PDF a los comprobantes ya cargados (Excel o a mano) que no tienen archivo.
 
-    Cada PDF se identifica por su QR/XML (serie-número exactos, norma SUNAT) y
-    se engancha a la fila de carga masiva que le corresponde. Así el cliente
-    carga rápido por Excel y luego sube los respaldos sin duplicar registros.
+    Acepta un PDF por factura O un solo PDF con varias facturas (una por página, o la
+    misma repetida en páginas seguidas): se parte por página, se lee el QR de cada una
+    (serie-número y RUC, norma SUNAT) y cada trozo se guarda como el PDF de su comprobante.
+    Si una factura cubre varias placas, se engancha a todas.
     """
-    from services.extractor_comprobante import extraer as _extraer_comprobante
-
     if not files:
         raise HTTPException(status_code=400, detail="Sin archivos")
     if len(files) > 60:
-        raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
-
-    uids = await _get_company_uids(user["id"])
-    _norm = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
-
-    # Índice de comprobantes de carga masiva SIN factura, por número normalizado.
-    pendientes = await db.consumos_subsidio.find(
-        {"user_id": {"$in": uids}, "origin": "carga_masiva",
-         "$or": [{"factura_storage_key": {"$in": [None, ""]}}, {"factura_storage_key": {"$exists": False}}]},
-        {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1, "placa": 1},
-    ).to_list(4000)
-    por_numero: dict = {}
-    for p in pendientes:
-        if p.get("numero_documento"):
-            por_numero.setdefault(_norm(p["numero_documento"]), []).append(p)
-
-    ahora = datetime.now(timezone.utc).isoformat()
-    resultados = []
-    adjuntadas = 0
+        raise HTTPException(status_code=400, detail="Máximo 60 archivos por carga")
+    uids = await _get_company_uids(user)
+    adjuntadas, resultados = 0, []
     for f in files:
         content = await f.read()
-        if len(content) > 20 * 1024 * 1024:
-            resultados.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
+        if len(content) > 40 * 1024 * 1024:
+            resultados.append({"filename": f.filename, "ok": False, "error": "Archivo > 40MB"})
             continue
-        if not (content[:4] == b"%PDF"):
+        if content[:4] != b"%PDF":
             resultados.append({"filename": f.filename, "ok": False, "error": "Solo se aceptan facturas en PDF"})
             continue
-
-        # QR/XML del PDF → serie-número exacto
-        try:
-            base = _extraer_comprobante(content, f.filename or "")
-        except Exception as e:
-            logger.warning(f"Extracción QR/XML falló en {f.filename}: {e}")
-            base = {}
-        num_doc = base.get("numero_documento")
-        if not num_doc:
-            resultados.append({"filename": f.filename, "ok": False,
-                               "error": "No se pudo leer el número del comprobante (QR/XML)"})
-            continue
-
-        candidatos = por_numero.get(_norm(num_doc)) or []
-        # Una misma factura puede cubrir VARIAS placas → varias filas con el mismo
-        # número. Si el PDF trae RUC, nos quedamos solo con las filas de ese emisor
-        # (desempata facturas distintas que coincidan en número); si no, todas.
-        objetivos = candidatos
-        if base.get("ruc_emisor"):
-            con_ruc = [c for c in candidatos
-                       if _norm(c.get("ruc_emisor")) == _norm(base["ruc_emisor"])]
-            if con_ruc:
-                objetivos = con_ruc
-        if not objetivos:
-            resultados.append({"filename": f.filename, "ok": False, "numero_documento": num_doc,
-                               "error": "Sin coincidencia en la carga masiva (ya tiene factura o no fue cargado)"})
-            continue
-
-        # Guardamos el PDF una sola vez y lo enganchamos a TODAS las placas de la factura.
-        key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
-        storage.save_object(key, content, "application/pdf")
-        ids = [o["id"] for o in objetivos]
-        await db.consumos_subsidio.update_many(
-            {"id": {"$in": ids}},
-            {"$set": {"factura_filename": f.filename, "factura_storage_key": key,
-                      "factura_content_type": "application/pdf", "factura_size": len(content),
-                      "factura_adjunta_at": ahora}},
-        )
-        # Quitar del índice las filas ya enganchadas (evita readjuntar con otro PDF igual).
-        ids_set = set(ids)
-        por_numero[_norm(num_doc)] = [c for c in candidatos if c["id"] not in ids_set]
-        adjuntadas += len(ids)
-        resultados.append({"filename": f.filename, "ok": True, "numero_documento": num_doc,
-                           "consumos": len(ids),
-                           "placas": [o.get("placa") for o in objetivos if o.get("placa")]})
-
+        r = await _enganchar_pdf(user, uids, content, f.filename or "factura.pdf")
+        adjuntadas += r["adjuntadas"]
+        for d in r["detalle"]:
+            resultados.append({"filename": f.filename, **d})
     return {"adjuntadas": adjuntadas, "total": len(files), "resultados": resultados}
+
+
+@subsidio_router.post("/subsidio/invoices/{invoice_id}/adjuntar-pdf")
+async def subsidio_invoice_adjuntar_pdf(invoice_id: str, file: UploadFile = File(...), user: dict = Depends(_require_subsidio)):
+    """Adjunta (o reemplaza) el PDF de UN comprobante desde 'Editar comprobante'. Si el PDF trae
+    varias facturas, se usa solo la página cuyo QR coincide con este comprobante."""
+    uids = await _get_company_uids(user)
+    inv = await db.consumos_subsidio.find_one({"id": invoice_id, **_own_q(user, uids)}, {"_id": 0, "id": 1, "numero_documento": 1, "ruc_emisor": 1, "factura_storage_key": 1})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Comprobante no encontrado")
+    content = await file.read()
+    if content[:4] != b"%PDF":
+        raise HTTPException(status_code=400, detail="Solo se acepta PDF")
+    if inv.get("factura_storage_key"):  # reemplazo: se libera el enganche actual
+        await db.consumos_subsidio.update_one({"id": invoice_id}, {"$set": {"factura_storage_key": None, "factura_reemplazada_at": datetime.now(timezone.utc).isoformat()}})
+    r = await _enganchar_pdf(user, uids, content, file.filename or "factura.pdf", solo_ids=[invoice_id])
+    if not r["adjuntadas"]:
+        raise HTTPException(status_code=422, detail={"message": "No se encontró en el PDF una página cuyo QR coincida con este comprobante", "detalle": r["detalle"]})
+    return {"ok": True, **r}
 
 
 @subsidio_router.post("/subsidio/padron-grifos/sync")

@@ -165,6 +165,8 @@ def extraer_de_qr(contenido: bytes) -> Optional[dict]:
     if i_fecha is None or i_fecha < 4:
         return None
     igv, total, fecha = _f(c[i_fecha - 2]), _f(c[i_fecha - 1]), c[i_fecha]
+    igv = round(igv, 2) if isinstance(igv, (int, float)) else igv
+    total = round(total, 2) if isinstance(total, (int, float)) else total
     if re.fullmatch(r"\d{2}/\d{2}/\d{4}", fecha):
         d, m, y = fecha.split("/")
         fecha = f"{y}-{m}-{d}"

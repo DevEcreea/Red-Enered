@@ -252,7 +252,29 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
   const [buscando, setBuscando] = useState(false);
   // Previsualización del archivo subido, al costado del formulario (guía para completarlo).
   const [archivo, setArchivo] = useState({ url: null, esImagen: false, error: "" });
+  const [adjuntando, setAdjuntando] = useState(false);
+  const [adjuntoMsg, setAdjuntoMsg] = useState("");
+  const [archivoVersion, setArchivoVersion] = useState(0);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  // Adjuntar o reemplazar el PDF de este comprobante (si el PDF trae varias facturas, se usa la página cuyo QR coincide).
+  const adjuntarPdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAdjuntando(true); setAdjuntoMsg("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const { data } = await api.post(`/subsidio/invoices/${item.id}/adjuntar-pdf`, fd,
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
+      const d = (data.detalle || []).find((x) => x.ok);
+      setAdjuntoMsg(d?.paginas && data.trozos > 1 ? `PDF adjuntado (página ${d.paginas} del archivo).` : "PDF adjuntado.");
+      setArchivoVersion((v) => v + 1);
+    } catch (e2) {
+      const det = e2?.response?.data?.detail;
+      setAdjuntoMsg(typeof det === "string" ? det : det?.message || "No se pudo adjuntar el PDF");
+    } finally { setAdjuntando(false); e.target.value = ""; }
+  };
 
   useEffect(() => {
     let vivo = true, url = null;
@@ -270,7 +292,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
       }
     })();
     return () => { vivo = false; if (url) URL.revokeObjectURL(url); };
-  }, [item.id]);
+  }, [item.id, archivoVersion]);
 
   // Ubigeo en cascada (mismo catálogo que usa el módulo de precios).
   // OSINERGMIN a veces nombra distinto (p. ej. "PROV. CONST. DEL CALLAO"): si el valor
@@ -500,9 +522,15 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
 
         {/* La factura subida, al costado: la guía real para completar el formulario */}
         <aside className="lg:w-[440px] flex-shrink-0 border-t lg:border-t-0 lg:border-l border-neutral-200 bg-neutral-50 p-4 rounded-b-2xl lg:rounded-bl-none lg:rounded-r-2xl">
-          <div className="text-[11px] font-bold text-brand uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <FileText className="w-3.5 h-3.5" /> Factura subida
+          <div className="text-[11px] font-bold text-brand uppercase tracking-wide mb-2 flex items-center justify-between gap-1.5">
+            <span className="flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Factura subida</span>
+            <label className="px-2 py-1 border border-neutral-300 bg-white rounded-lg text-[11px] font-bold cursor-pointer hover:bg-neutral-50 flex items-center gap-1 normal-case tracking-normal text-neutral-700">
+              {adjuntando ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+              {archivo.url ? "Reemplazar PDF" : "Adjuntar PDF"}
+              <input type="file" hidden accept="application/pdf,.pdf" onChange={adjuntarPdf} />
+            </label>
           </div>
+          {adjuntoMsg && <div className={`text-xs mb-2 ${adjuntoMsg.startsWith("PDF adjuntado") ? "text-emerald-700" : "text-red-600"}`}>{adjuntoMsg}</div>}
           {archivo.url ? (
             archivo.esImagen ? (
               <img src={archivo.url} alt="Factura subida"
@@ -514,6 +542,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
           ) : archivo.error ? (
             <div className="text-xs text-neutral-500 bg-white border border-dashed border-neutral-300 rounded-lg p-6 text-center">
               {archivo.error}
+              <div className="mt-2 text-neutral-400">Usa "Adjuntar PDF": puede ser el PDF de esta factura o uno con varias facturas (se toma la página cuyo QR coincide).</div>
             </div>
           ) : (
             <div className="text-xs text-neutral-500 flex items-center justify-center gap-2 p-8">
@@ -563,19 +592,23 @@ export function CargaMasiva({ onDone }) {
     finally { setBusy(false); e.target.value = ""; }
   };
 
+  // Paso 2 (obligatorio): el PDF con las facturas. Recién con él se guardan los borradores.
+  const [pdfs, setPdfs] = useState([]);
+  const [pasoPdf, setPasoPdf] = useState(false);
+  const pdfPasoRef = useRef(null);
+
   const confirmar = async () => {
+    if (!pdfs.length) { setErr("Adjunta el PDF con las facturas para guardar."); return; }
     setBusy(true); setErr("");
     try {
-      const { data } = await api.post("/subsidio/carga-masiva/confirmar", { filas: preview.filas });
-      setPreview(null);
+      const fd = new FormData();
+      fd.append("filas", JSON.stringify(preview.filas));
+      pdfs.forEach((f) => fd.append("files", f));
+      const { data } = await api.post("/subsidio/carga-masiva/confirmar-con-pdf", fd,
+        { headers: { "Content-Type": "multipart/form-data" }, timeout: 600000 });
+      setPreview(null); setPasoPdf(false); setPdfs([]);
       onDone?.(data);
-      // Pasar al paso de adjuntar los PDF a lo recién guardado.
-      let pendientes = data.guardadas || 0;
-      try {
-        const p = await api.get("/subsidio/carga-masiva/pendientes-factura");
-        pendientes = p.data?.total ?? pendientes;
-      } catch { /* si falla, usamos el conteo de guardadas */ }
-      setFacturas({ guardadas: data.guardadas || 0, pendientes, resultado: null });
+      setFacturas({ guardadas: data.guardadas || 0, pendientes: data.sin_pdf || 0, resultado: data, sinPdf: data.sin_pdf_detalle || [] });
     } catch (e2) { setErr(e2?.response?.data?.detail || "No se pudo guardar"); }
     finally { setBusy(false); }
   };
@@ -615,9 +648,10 @@ export function CargaMasiva({ onDone }) {
               <FileText className="w-4 h-4 text-brand" /> Adjunta las facturas (PDF)
             </div>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Guardamos {facturas.guardadas} comprobante(s). Sube los PDF y los enganchamos por su
-              número (QR/XML). Si una factura cubre varias placas, se adjunta a todas. {facturas.pendientes > 0
-                ? `Faltan ${facturas.pendientes} por adjuntar.` : "¡Todos tienen su PDF! 🎉"}
+              Guardamos {facturas.guardadas} comprobante(s) en borradores{facturas.resultado?.con_pdf != null ? `, ${facturas.resultado.con_pdf} con su PDF enganchado` : ""}.
+              {facturas.pendientes > 0
+                ? ` Faltan ${facturas.pendientes} por adjuntar: sube su PDF aquí (uno por factura o varias por página) o desde "Editar comprobante".`
+                : " ¡Todos tienen su PDF! 🎉"}
             </p>
           </div>
           <div className="flex gap-2">
@@ -647,6 +681,7 @@ export function CargaMasiva({ onDone }) {
                   <thead className="bg-neutral-50 sticky top-0">
                     <tr className="text-[10px] uppercase text-neutral-500">
                       <th className="px-3 py-2 text-left">Archivo</th>
+                      <th className="px-3 py-2 text-left">Página</th>
                       <th className="px-3 py-2 text-left">Comprobante</th>
                       <th className="px-3 py-2 text-left">Motivo</th>
                     </tr>
@@ -655,6 +690,7 @@ export function CargaMasiva({ onDone }) {
                     {sinMatch.map((x, i) => (
                       <tr key={i}>
                         <td className="px-3 py-2 truncate max-w-[180px]">{x.filename}</td>
+                        <td className="px-3 py-2">{x.paginas || "—"}</td>
                         <td className="px-3 py-2 font-bold">{x.numero_documento || "—"}</td>
                         <td className="px-3 py-2 text-amber-700">{x.error}</td>
                       </tr>
@@ -733,14 +769,44 @@ export function CargaMasiva({ onDone }) {
               </tbody>
             </table>
           </div>
-          <div className="flex justify-end gap-2 mt-3">
-            <button onClick={() => setPreview(null)} className="px-4 py-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 rounded-lg">Cancelar</button>
-            <button onClick={confirmar} disabled={busy || !preview.listas_para_guardar}
-              className="btn-brand px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5">
-              {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Guardar {preview.listas_para_guardar} comprobante(s)
-            </button>
-          </div>
+          {!pasoPdf ? (
+            <div className="flex justify-end gap-2 mt-3">
+              <button onClick={() => setPreview(null)} className="px-4 py-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 rounded-lg">Cancelar</button>
+              <button onClick={() => { setPasoPdf(true); setErr(""); }} disabled={busy || !preview.listas_para_guardar}
+                className="btn-brand px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5">
+                Continuar: adjuntar el PDF de las facturas
+              </button>
+            </div>
+          ) : (
+            <div className="mt-4 border border-brand/30 bg-brand/5 rounded-xl p-4" data-testid="masiva-paso-pdf">
+              <div className="font-bold text-sm flex items-center gap-2"><FileText className="w-4 h-4 text-brand" /> Paso 2 · Adjunta el PDF con las facturas</div>
+              <p className="text-xs text-neutral-600 mt-1">
+                Puede ser un solo PDF con todas las facturas (una por página) o un PDF por factura. ENERED lee el QR
+                de cada página y engancha cada factura a su fila; así contabilidad siempre verá el documento.
+              </p>
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <button onClick={() => pdfPasoRef.current?.click()} disabled={busy}
+                  className="px-3 py-2 border border-neutral-300 bg-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-neutral-50">
+                  <Upload className="w-3.5 h-3.5" /> Elegir PDF
+                </button>
+                <input ref={pdfPasoRef} type="file" hidden multiple accept="application/pdf,.pdf"
+                  onChange={(e) => { setPdfs(Array.from(e.target.files || [])); e.target.value = ""; }} />
+                {pdfs.length > 0 && (
+                  <span className="text-xs text-neutral-700">
+                    {pdfs.map((f) => f.name).join(", ")} <button onClick={() => setPdfs([])} className="text-neutral-400 hover:text-red-500 ml-1">quitar</button>
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 mt-3">
+                <button onClick={() => setPasoPdf(false)} className="px-4 py-2 text-xs font-semibold text-neutral-600 hover:bg-neutral-100 rounded-lg">Atrás</button>
+                <button onClick={confirmar} disabled={busy || !pdfs.length}
+                  className="btn-brand px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50">
+                  {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  Guardar {preview.listas_para_guardar} comprobante(s) en borradores
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
