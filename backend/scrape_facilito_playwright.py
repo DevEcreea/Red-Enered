@@ -267,6 +267,7 @@ async def load_dept(page, code, tries=6):
 
 
 async def main():
+    inicio_run = datetime.now(timezone.utc).isoformat()  # para depurar filas de corridas anteriores
     logger.info("=" * 60)
     logger.info("FACILITO SCRAPER (Playwright headless + reintentos reCAPTCHA)")
     logger.info(f"Destino: {DB_NAME}.precios_facilito")
@@ -348,12 +349,40 @@ async def main():
 
         await browser.close()
 
-    # Reemplazo atómico: solo se sobrescribe si el scrape trajo datos (evita vaciar por un fallo).
+    # Fusión, NO reemplazo: la colección también contiene el padrón completo con GPS que trae
+    # el sync del mapa de Facilito (fuente "facilito.gob.pe/mapa", ~4,900 grifos). Este scraper
+    # solo cubre ~1,500, así que borrar todo dejaba a miles de grifos "fuera del padrón".
+    #   - si la estación ya existe (mismo nombre + departamento + combustible), se actualiza el precio;
+    #   - si no existe, se inserta;
+    #   - las filas propias de este scraper que ya no aparecen se eliminan.
     if all_results:
-        await db.precios_facilito.delete_many({})
-        # insertar en lotes
-        for i in range(0, len(all_results), 1000):
-            await db.precios_facilito.insert_many(all_results[i:i + 1000])
+        import re as _re
+        import unicodedata as _ud
+
+        def _n(x):
+            t = _ud.normalize("NFKD", (x or "").upper()).encode("ascii", "ignore").decode()
+            return _re.sub(r"[^A-Z0-9]+", " ", t).strip()
+
+        existentes = {}
+        async for d in db.precios_facilito.find({}, {"_id": 1, "establecimiento": 1, "departamento": 1, "combustible": 1}):
+            existentes.setdefault((_n(d.get("establecimiento")), _n(d.get("departamento")), _n(d.get("combustible"))), d["_id"])
+        actualizados, insertados, nuevos = 0, 0, []
+        for r in all_results:
+            k = (_n(r["establecimiento"]), _n(r["departamento"]), _n(r["combustible"]))
+            _id = existentes.get(k)
+            if _id is not None:
+                await db.precios_facilito.update_one({"_id": _id}, {"$set": {
+                    "precio_venta": r["precio_venta"], "precio_pizarra": r["precio_pizarra"],
+                    "scraped_at": r["scraped_at"], "telefono": r.get("telefono") or None}})
+                actualizados += 1
+            else:
+                nuevos.append(r)
+        for i in range(0, len(nuevos), 1000):
+            await db.precios_facilito.insert_many(nuevos[i:i + 1000])
+            insertados += len(nuevos[i:i + 1000])
+        # filas de este scraper que no se volvieron a ver (estaciones que ya no están en Facilito)
+        borradas = await db.precios_facilito.delete_many({"fuente": "facilito.gob.pe", "scraped_at": {"$lt": inicio_run}})
+        logger.info(f"Fusión: {actualizados} precios actualizados, {insertados} nuevos, {borradas.deleted_count} obsoletos borrados")
     total_db = await db.precios_facilito.count_documents({})
     logger.info(f"\n{'='*60}")
     logger.info(f"✅ COMPLETO: {total_db} precios guardados en {DB_NAME}.precios_facilito")

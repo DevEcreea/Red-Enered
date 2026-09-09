@@ -787,6 +787,9 @@ DOCUMENT_LABELS = {
 }
 
 EMPRESA_CATEGORIES = ["ficha_ruc", "resolucion_autorizacion", "dni_representante"]
+# Documentos de empresa que NO bloquean la declaración jurada (Flor, 09/09/2026): la resolución /
+# permiso de transportista se verifica en línea contra el MTC y muchas empresas no tienen el PDF.
+EMPRESA_OPCIONALES = {"resolucion_autorizacion"}
 FLOTA_CATEGORIES = ["tarjeta_habilitacion", "tarjeta_propiedad"]
 COMBUSTIBLE_CATEGORIES = ["comprobante_jun_2026", "comprobante_jul_2026"]
 # La evidencia del CCI acompaña a la cuenta bancaria (no es un doc de empresa/flota/combustible).
@@ -1379,8 +1382,9 @@ async def subsidio_dashboard(user: dict = Depends(_require_subsidio)):
             ok = bool(aut_mtc and aut_mtc.get("habilitado"))
             checklist["empresa"].append({
                 "categoria": cat, "label": DOCUMENT_LABELS[cat],
-                "uploaded": bool(f), "files": f,   # el adjunto es obligatorio
-                "requiere_archivo": True,
+                "uploaded": bool(f), "files": f,
+                "requiere_archivo": False,          # opcional: no bloquea la declaración jurada
+                "opcional": True,
                 "auto_validado": True,
                 "validado": ok,
                 "autorizacion": aut_mtc,
@@ -1563,6 +1567,8 @@ async def aceptar_declaracion(
     # un apoyo para el cliente, pero no reemplaza el archivo en el expediente.
     missing = []
     for cat in EMPRESA_CATEGORIES:
+        if cat in EMPRESA_OPCIONALES:
+            continue  # la autorización del MTC se verifica en línea; el archivo no es obligatorio
         if (cat, None) not in docs_set:
             missing.append(DOCUMENT_LABELS[cat])
     if len(vehicles) == 0:
@@ -1877,7 +1883,10 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
                             detail="No pudimos consultar el MTC en este momento. Intenta de nuevo en un minuto.")
 
     # Un RUC puede tener varias autorizaciones con la MISMA placa repetida → dedup.
-    encontradas, vistas = [], set()
+    # Solo entran las categorías que califican al subsidio (M2, M3, N1, N2, N3 y sus
+    # variantes N2C2, M2C3…); remolques (O1…O4) y M1 se omiten para no confundir al cliente.
+    from services.validador_facturas import clase_base_categoria as _clase_base
+    encontradas, vistas, omitidas = [], set(), []
     for a in (m.get("autorizaciones") or []):
         for v in (a.get("vehiculos") or []):
             placa = (v.get("placa") or "").upper().strip()
@@ -1885,7 +1894,12 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
             if not pn or pn in vistas:
                 continue
             vistas.add(pn)
-            encontradas.append({"placa": placa, "categoria": (v.get("categoria") or "").upper()})
+            cat_raw = (v.get("categoria") or "").upper()
+            cat = _clase_base(cat_raw)
+            if cat not in ("M2", "M3", "N1", "N2", "N3"):
+                omitidas.append({"placa": placa, "categoria": cat_raw or "—"})
+                continue
+            encontradas.append({"placa": placa, "categoria": cat})
 
     uids = await _get_company_uids(user)
     existentes = {
@@ -1915,6 +1929,11 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
         "importadas": len(nuevos),
         "ya_registradas": len(encontradas) - len(nuevos),
         "placas": [n["placa"] for n in nuevos],
+        "omitidas": len(omitidas),
+        "omitidas_detalle": omitidas[:50],
+        "nota": (f"{len(omitidas)} unidad(es) no aplican al subsidio (remolques o M1) y no se importaron: "
+                 + ", ".join(f"{o['placa']} ({o['categoria']})" for o in omitidas[:8]) + ("…" if len(omitidas) > 8 else "")
+                 if omitidas else ""),
     }
 
 
@@ -1959,6 +1978,8 @@ async def finalize(user: dict = Depends(_require_subsidio)):
     docs_set = {(d["categoria"], d.get("placa")) for d in docs}
     # Todos los documentos deben adjuntarse (la verificación en línea es solo apoyo).
     for cat in EMPRESA_CATEGORIES:
+        if cat in EMPRESA_OPCIONALES:
+            continue  # la autorización del MTC se verifica en línea; el archivo no es obligatorio
         if (cat, None) not in docs_set:
             missing.append(DOCUMENT_LABELS[cat])
     if not vehicles:

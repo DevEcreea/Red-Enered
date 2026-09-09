@@ -400,7 +400,8 @@ export default function SubsidioDocumentos() {
 function calcTotals(data) {
   if (!data) return { pct: 0, done: 0, total: 1, byEtapa: {} };
   const c = data.checklist || { empresa: [], flota: [], combustible: [] };
-  const empresaDone = c.empresa.filter((x) => x.uploaded).length + (data.bank_account ? 1 : 0);
+  // Los documentos opcionales (p. ej. autorización del MTC) cuentan como listos aunque no se adjunten.
+  const empresaDone = c.empresa.filter((x) => x.uploaded || x.opcional).length + (data.bank_account ? 1 : 0);
   const empresaTot = c.empresa.length + 1;
   const flotaDone = c.flota.filter((x) => x.uploaded).length;
   const flotaTot = Math.max(c.flota.length, 1);
@@ -618,13 +619,14 @@ function FlotaEtapa({ items, vehicles, onChange }) {
     setImportando(true); setError(null); setAviso(null);
     try {
       const { data } = await api.post("/subsidio/vehicles/importar-diagnostico", {}, { timeout: 60000 });
-      setAviso(
-        data.importadas > 0
-          ? `Se agregaron ${data.importadas} unidad${data.importadas === 1 ? "" : "es"} de tu diagnóstico.`
-          : data.encontradas > 0
-            ? "Tus unidades del diagnóstico ya estaban registradas."
-            : "No encontramos unidades en el MTC para tu RUC. Agrégalas manualmente."
-      );
+      const base = data.importadas > 0
+        ? `Se agregaron ${data.importadas} unidad${data.importadas === 1 ? "" : "es"} de tu diagnóstico.`
+        : data.encontradas > 0
+          ? "Tus unidades del diagnóstico ya estaban registradas."
+          : data.omitidas > 0
+            ? "Las unidades de tu RUC en el MTC son remolques o M1, que no aplican al subsidio."
+            : "No encontramos unidades en el MTC para tu RUC. Agrégalas manualmente.";
+      setAviso(data.nota ? `${base} ${data.nota}.` : base);
       onChange();
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudieron traer las unidades");
@@ -1064,14 +1066,17 @@ function DocItem({ item, onChange, hint, accept, acceptLabel }) {
     return (
       <div className={`border rounded-xl p-4 ${subido ? "bg-neutral-50 border-neutral-200" : "bg-white border-neutral-200"}`}>
         <div className="flex items-start gap-3">
-          <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${subido ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+          <span className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${subido ? "bg-emerald-100 text-emerald-700" : item.opcional ? "bg-neutral-100 text-neutral-500" : "bg-red-100 text-red-600"}`}>
             {subido ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
           </span>
           <div className="flex-1 min-w-0">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
               <div className="min-w-0">
-                <div className="font-bold text-neutral-900 text-sm">{item.placa ? item.label.split(" — ")[0] : item.label}</div>
-                <div className="text-xs text-neutral-500 mt-0.5 line-clamp-1">{item.detalle}</div>
+                <div className="font-bold text-neutral-900 text-sm flex items-center gap-2 flex-wrap">
+                  {item.placa ? item.label.split(" — ")[0] : item.label}
+                  {item.opcional && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 uppercase tracking-wider">Opcional</span>}
+                </div>
+                <div className="text-xs text-neutral-500 mt-0.5 line-clamp-1">{item.detalle}{item.opcional && !subido ? " No es obligatorio adjuntarla para firmar la declaración." : ""}</div>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className={`text-[10px] font-black px-2 py-1 rounded-full whitespace-nowrap ${ok ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>
