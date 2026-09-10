@@ -242,6 +242,24 @@ async def _get_company_uids(user) -> list[str]:
     return uids or [user.get("id")]
 
 
+def _usuario_en_empresa(u: dict, empresa: Optional[str]) -> dict:
+    """Vista del usuario `u` como una de SUS empresas (base o asignada). El admin
+    la usa para abrir el expediente de cada empresa de un cliente multi-empresa
+    (?empresa=...). Si no se pide empresa o coincide con la base, devuelve `u`."""
+    emp = (empresa or "").strip()
+    if not emp or emp == u.get("empresa"):
+        return u
+    for a in (u.get("empresas_asignadas") or []):
+        if (a or {}).get("empresa") == emp:
+            eff = dict(u)
+            eff["empresa"] = emp
+            eff["ruc"] = a.get("ruc") or u.get("ruc")
+            eff["_empresa_activa"] = emp
+            eff["empresa_base"] = u.get("empresa")
+            return eff
+    raise HTTPException(status_code=400, detail=f"La empresa '{emp}' no pertenece a este usuario")
+
+
 def _own_q(user, uids) -> dict:
     """Filtro de propiedad del expediente con soporte multi-empresa: el mismo
     usuario puede pertenecer a varias empresas, así que manda el campo `empresa`
@@ -3366,6 +3384,7 @@ async def admin_list_expedientes(
     role_or = [{"role": "cliente_subsidio"}]
     if empresas_subsidio:
         role_or.append({"empresa": {"$in": empresas_subsidio}, "role": {"$ne": "admin_enered"}})
+        role_or.append({"empresas_asignadas.empresa": {"$in": empresas_subsidio}, "role": {"$ne": "admin_enered"}})
     filt = {"$or": role_or} if len(role_or) > 1 else role_or[0]
 
     if q:
@@ -3375,6 +3394,8 @@ async def admin_list_expedientes(
                 {"empresa": {"$regex": q, "$options": "i"}},
                 {"ruc": {"$regex": q}},
                 {"email": {"$regex": q, "$options": "i"}},
+                {"empresas_asignadas.empresa": {"$regex": q, "$options": "i"}},
+                {"empresas_asignadas.ruc": {"$regex": q}},
             ]}
         ]}
     if estado:
@@ -3391,81 +3412,120 @@ async def admin_list_expedientes(
     calcs = await db.calculations.find({"id": {"$in": calc_ids}}, {"_id": 0}).to_list(10000)
     calcs_map = {c["id"]: c for c in calcs}
 
+    # Un cliente multi-empresa (empresas_asignadas) genera UNA FILA POR EMPRESA: cada
+    # expediente se cuenta y se abre por separado (antes se sumaba todo en la empresa
+    # base y las otras empresas no aparecían en el panel).
+    filas = []  # (user, empresa, ruc)
+    for u in users:
+        asignadas = [a for a in (u.get("empresas_asignadas") or []) if (a or {}).get("empresa")]
+        if len(asignadas) >= 2:
+            vistas = set()
+            if u.get("empresa"):
+                vistas.add(u["empresa"])
+                filas.append((u, u["empresa"], u.get("ruc")))
+            for a in asignadas:
+                if a["empresa"] not in vistas:
+                    vistas.add(a["empresa"])
+                    filas.append((u, a["empresa"], a.get("ruc") or ""))
+        else:
+            filas.append((u, u.get("empresa"), u.get("ruc")))
+
+    # Conteos por (user_id, empresa). Los registros antiguos sin empresa se atribuyen a
+    # la empresa base del usuario (mismo criterio que _own_q).
+    def _emp_key(uid: str, emp, base_de: dict):
+        return (uid, emp if emp else base_de.get(uid))
+    base_de = {u.get("id"): u.get("empresa") for u in users}
+
     docs_agg = await db.subsidio_documents.aggregate([
         {"$match": {"user_id": {"$in": uids}}},
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+        {"$group": {"_id": {"u": "$user_id", "e": "$empresa"}, "count": {"$sum": 1}}}
     ]).to_list(10000)
-    docs_map = {d["_id"]: d["count"] for d in docs_agg}
+    docs_map = {}
+    for d in docs_agg:
+        k = _emp_key(d["_id"]["u"], d["_id"].get("e"), base_de)
+        docs_map[k] = docs_map.get(k, 0) + d["count"]
 
     veh_agg = await db.subsidio_vehicles.aggregate([
         {"$match": {"user_id": {"$in": uids}}},
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}}
+        {"$group": {"_id": {"u": "$user_id", "e": "$empresa"}, "count": {"$sum": 1}}}
     ]).to_list(10000)
-    veh_map = {d["_id"]: d["count"] for d in veh_agg}
+    veh_map = {}
+    for d in veh_agg:
+        k = _emp_key(d["_id"]["u"], d["_id"].get("e"), base_de)
+        veh_map[k] = veh_map.get(k, 0) + d["count"]
 
     inv_agg = await db.consumos_subsidio.aggregate([
         {"$match": {"user_id": {"$in": uids}}},
         {"$group": {
-            "_id": {"user_id": "$user_id", "status": "$status"},
+            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status"},
             "count": {"$sum": 1},
             "gal": {"$sum": "$galones"},
             "imp": {"$sum": "$importe_total"}
         }}
     ]).to_list(10000)
-    
+
     inv_map = {}
     for r in inv_agg:
-        uid = r["_id"]["user_id"]
+        k = _emp_key(r["_id"]["u"], r["_id"].get("e"), base_de)
         status = r["_id"]["status"]
-        if uid not in inv_map:
-            inv_map[uid] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
+        if k not in inv_map:
+            inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
         if status == "draft":
-            inv_map[uid]["draft"] += r["count"]
+            inv_map[k]["draft"] += r["count"]
         elif status == "confirmed":
-            inv_map[uid]["conf"] += r["count"]
-            inv_map[uid]["gal"] += r.get("gal", 0) or 0
-            inv_map[uid]["imp"] += r.get("imp", 0) or 0
-            
-    # Traer facturas de Red-Enered
-    empresas_list = [u.get("empresa") for u in users if u.get("empresa")]
+            inv_map[k]["conf"] += r["count"]
+            inv_map[k]["gal"] += r.get("gal", 0) or 0
+            inv_map[k]["imp"] += r.get("imp", 0) or 0
+
+    # Facturas de Red-Enered (db.invoices) por empresa, SIN contar el espejo de las que
+    # ya están en consumos_subsidio (mismo id): antes se sumaban dos veces y la lista
+    # decía "40 facturas" donde había 20.
+    empresas_list = sorted({e for (_, e, _) in filas if e})
     if empresas_list:
+        ids_consumos = [c.get("id") async for c in db.consumos_subsidio.find(
+            {"user_id": {"$in": uids}}, {"_id": 0, "id": 1}) if c.get("id")]
         enered_inv_agg = await db.invoices.aggregate([
-            {"$match": {"empresa": {"$in": empresas_list}}},
+            {"$match": {"empresa": {"$in": empresas_list}, "id": {"$nin": ids_consumos}}},
             {"$group": {
                 "_id": "$empresa",
                 "count": {"$sum": 1},
                 "imp": {"$sum": "$monto_total"}
             }}
         ]).to_list(10000)
-        
         enered_map = {r["_id"]: r for r in enered_inv_agg}
-        # Associate to correct users
-        for u in users:
+        for (u, emp, _r) in filas:
             uid = u.get("id")
-            emp = u.get("empresa")
             if emp and emp in enered_map:
-                if uid not in inv_map:
-                    inv_map[uid] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
-                inv_map[uid]["conf"] += enered_map[emp]["count"]
-                inv_map[uid]["imp"] += enered_map[emp].get("imp", 0) or 0
+                k = (uid, emp)
+                if k not in inv_map:
+                    inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
+                inv_map[k]["conf"] += enered_map[emp]["count"]
+                inv_map[k]["imp"] += enered_map[emp].get("imp", 0) or 0
 
     decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
-    decl_map = {d.get("user_id"): d for d in decl_list if d.get("user_id")}
+    decl_map = {}
+    for d in decl_list:
+        if d.get("user_id"):
+            decl_map[_emp_key(d["user_id"], d.get("empresa"), base_de)] = d
 
     out = []
-    for u in users:
+    for (u, emp, ruc) in filas:
         uid = u.get("id")
+        k = (uid, emp)
         calc = calcs_map.get(u.get("calc_id"), {})
-        docs_count = docs_map.get(uid, 0)
-        vehicles_count = veh_map.get(uid, 0)
-        
-        inv = inv_map.get(uid, {"draft": 0, "conf": 0, "gal": 0, "imp": 0})
-        decl = decl_map.get(uid)
+        docs_count = docs_map.get(k, 0)
+        vehicles_count = veh_map.get(k, 0)
+
+        inv = inv_map.get(k, {"draft": 0, "conf": 0, "gal": 0, "imp": 0})
+        decl = decl_map.get(k)
+        multi = len([a for a in (u.get("empresas_asignadas") or []) if (a or {}).get("empresa")]) >= 2
 
         out.append({
             "user_id": uid,
-            "empresa": u.get("empresa"),
-            "ruc": u.get("ruc"),
+            "empresa": emp,
+            "ruc": ruc,
+            "multiempresa": multi,
+            "empresa_base": u.get("empresa") if multi else None,
             "email": u.get("email"),
             "contacto": u.get("contacto"),
             "telefono": u.get("telefono"),
@@ -3492,12 +3552,15 @@ async def admin_list_expedientes(
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
-async def admin_get_expediente(user_id: str, _: dict = Depends(_require_admin_enered)):
-    """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración."""
+async def admin_get_expediente(user_id: str, empresa: Optional[str] = None,
+                               _: dict = Depends(_require_admin_enered)):
+    """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración.
+    `empresa`: para clientes multi-empresa, cuál de sus empresas abrir (por defecto la base)."""
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
-    
+    u = _usuario_en_empresa(u, empresa)
+
     uids = await _get_company_uids(u)
     
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
@@ -3675,7 +3738,7 @@ async def _buscar_key_archivo(inv: dict, keys_cache: Optional[list] = None) -> O
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
 async def admin_zip_invoices(
     user_id: str,
-    placa: str = "", desde: str = "", hasta: str = "", q: str = "",
+    placa: str = "", desde: str = "", hasta: str = "", q: str = "", empresa: str = "",
     _: dict = Depends(_require_admin_enered),
 ):
     """Descarga en UN ZIP los archivos de las facturas del expediente (respetando los
@@ -3686,7 +3749,9 @@ async def admin_zip_invoices(
     from fastapi.responses import StreamingResponse
 
     # Todas las cuentas de la MISMA empresa (las facturas pueden estar repartidas entre ellas).
-    t_user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "empresa": 1}) or {"id": user_id}
+    t_user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "empresa": 1, "ruc": 1,
+                                                       "empresas_asignadas": 1}) or {"id": user_id}
+    t_user = _usuario_en_empresa(t_user, empresa)
     uids = await _get_company_uids(t_user)
     filtro = _own_q(t_user, uids)
     if placa:
@@ -4321,6 +4386,21 @@ async def admin_reordenar_multiempresa(user_id: str, dry: int = 0, _: dict = Dep
                                     "archivo": d.get("filename", "")})
                 if not dry:
                     await db[c].update_one({"id": d["id"]}, {"$set": {"empresa": destino}})
+                    if c == "consumos_subsidio":
+                        # Espejo en facturación (mismo id): debe seguir a la misma empresa.
+                        await db.invoices.update_one({"id": d["id"]}, {"$set": {"empresa": destino}})
+
+    # 1b) Sincronizar el espejo db.invoices con consumos_subsidio (mismo id): si un
+    # movimiento anterior solo cambió el consumo, el espejo se quedó en la empresa vieja
+    # y el expediente lo mostraba como factura "extra" de esa empresa.
+    async for cs in db.consumos_subsidio.find({"user_id": user_id, "empresa": {"$nin": [None, ""]}},
+                                              {"_id": 0, "id": 1, "empresa": 1, "placa": 1}):
+        esp = await db.invoices.find_one({"id": cs["id"]}, {"_id": 0, "empresa": 1})
+        if esp and esp.get("empresa") != cs["empresa"]:
+            movimientos.append({"col": "invoices(espejo)", "id": cs["id"], "placa": cs.get("placa"),
+                                "de": esp.get("empresa"), "a": cs["empresa"], "archivo": ""})
+            if not dry:
+                await db.invoices.update_one({"id": cs["id"]}, {"$set": {"empresa": cs["empresa"]}})
 
     # 2) Docs de empresa sin placa: mover si el nombre del archivo menciona a OTRA empresa.
     genericas = {"TRANSPORTES", "TRANSPORTE", "TRANSP", "IMPORTACIONES", "LOGISTICOS", "LOGISTICA",
@@ -4376,11 +4456,13 @@ async def admin_backfill_empresa(_: dict = Depends(_require_admin_enered)):
 async def admin_add_vehicle(
     user_id: str,
     payload: VehicleAdminIn,
+    empresa: Optional[str] = None,
     _: dict = Depends(_require_admin_enered),
 ):
     u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    u = _usuario_en_empresa(u, empresa)
     placa = payload.placa.upper().strip()
     if await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa}):
         raise HTTPException(status_code=409, detail="La placa ya está registrada")
@@ -4472,11 +4554,13 @@ async def admin_delete_vehicle(
 async def admin_add_invoice(
     user_id: str,
     payload: InvoiceAdminCreateIn,
+    empresa: Optional[str] = None,
     _: dict = Depends(_require_admin_enered),
 ):
     u = await db.users.find_one({"id": user_id})
     if not u:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    u = _usuario_en_empresa(u, empresa)
     
     placa = payload.placa.upper().strip()
     own = await db.subsidio_vehicles.find_one({"user_id": user_id, "placa": placa})

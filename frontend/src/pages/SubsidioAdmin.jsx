@@ -41,9 +41,12 @@ export default function SubsidioAdmin() {
   // Expediente abierto persistido en la URL (?u=<userId>) para no perder el lugar al recargar.
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("u") || null;
-  const setSelectedId = (id) => {
+  const selectedEmpresa = searchParams.get("empresa") || "";
+  // Cliente multi-empresa: cada empresa es un expediente aparte (?empresa=...).
+  const setSelectedId = (id, empresa) => {
     const p = new URLSearchParams(searchParams);
-    if (id) { p.set("u", id); } else { p.delete("u"); p.delete("tab"); }
+    if (id) { p.set("u", id); if (empresa) p.set("empresa", empresa); else p.delete("empresa"); }
+    else { p.delete("u"); p.delete("tab"); p.delete("empresa"); }
     setSearchParams(p);
   };
 
@@ -90,7 +93,7 @@ export default function SubsidioAdmin() {
   };
 
   if (selectedId) {
-    return <ExpedienteDetalle userId={selectedId} onBack={() => { setSelectedId(null); load(); }} />;
+    return <ExpedienteDetalle userId={selectedId} empresa={selectedEmpresa} onBack={() => { setSelectedId(null); load(); }} />;
   }
 
   return (
@@ -169,10 +172,17 @@ export default function SubsidioAdmin() {
               {items.map((it) => {
                 const badge = ESTADO_BADGE[it.expediente_status] || ESTADO_BADGE.uploading;
                 return (
-                  <tr key={it.user_id} className="hover:bg-neutral-50 cursor-pointer" onClick={() => setSelectedId(it.user_id)} data-testid={`exp-row-${it.user_id}`}>
+                  <tr key={`${it.user_id}|${it.empresa || ""}`} className="hover:bg-neutral-50 cursor-pointer" onClick={() => setSelectedId(it.user_id, it.multiempresa ? it.empresa : "")} data-testid={`exp-row-${it.user_id}`}>
                     <td className="px-4 py-3">
                       <div className="font-bold text-neutral-900">{it.empresa || "—"}</div>
-                      <div className="text-xs text-neutral-500">{it.email}</div>
+                      <div className="text-xs text-neutral-500">
+                        {it.email}
+                        {it.multiempresa && (
+                          <span className="ml-1.5 px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-200 text-[10px] font-bold" title="Cuenta con varias empresas: cada empresa tiene su propio expediente">
+                            Multiempresa
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{it.ruc || "—"}</td>
                     <td className="px-4 py-3">
@@ -219,7 +229,9 @@ export default function SubsidioAdmin() {
 /* ============================================================ */
 /* DETALLE DEL EXPEDIENTE                                        */
 /* ============================================================ */
-function ExpedienteDetalle({ userId, onBack }) {
+function ExpedienteDetalle({ userId, empresa, onBack }) {
+  // Sufijo para abrir la empresa correcta de un cliente multi-empresa.
+  const qEmp = empresa ? `?empresa=${encodeURIComponent(empresa)}` : "";
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   // Pestaña activa persistida en la URL (?tab=) para no perder el lugar al recargar.
@@ -235,11 +247,11 @@ function ExpedienteDetalle({ userId, onBack }) {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+        const { data } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
         setData(data);
       } finally { setLoading(false); }
     })();
-  }, [userId]);
+  }, [userId, empresa]);
 
   const companyDocs = useMemo(() => {
     const docs = data?.documents || [];
@@ -273,7 +285,7 @@ function ExpedienteDetalle({ userId, onBack }) {
     try {
       await api.delete(`/admin/subsidio/documents/${docId}`);
       // Refresh the page data
-      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
       setData(res);
     } catch (err) {
       alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
@@ -285,7 +297,7 @@ function ExpedienteDetalle({ userId, onBack }) {
     try {
       await api.delete(`/admin/subsidio/invoices/${invoiceId}`);
       // Refresh the page data
-      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
       setData(res);
     } catch (err) {
       alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
@@ -375,7 +387,7 @@ function ExpedienteDetalle({ userId, onBack }) {
         {tab === "banco" && <TabBanco bank={bank_account} documents={documents} />}
         {tab === "documentos" && <TabDocumentos docs={companyDocs} onDelete={deleteDoc} />}
         {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
-        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} />}
+        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} empresa={empresa} />}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
         {tab === "editar" && (
           <TabEditar
@@ -384,7 +396,7 @@ function ExpedienteDetalle({ userId, onBack }) {
             invoices={invoices}
             documents={documents}
             onRefresh={async () => {
-              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}`);
+              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
               setData(res);
             }}
           />
@@ -626,7 +638,7 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
   );
 }
 
-function TabFacturas({ invoices, onDelete, userId }) {
+function TabFacturas({ invoices, onDelete, userId, empresa }) {
   const dlToken = useDownloadToken();
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
   const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${dlToken}`;
@@ -666,6 +678,7 @@ function TabFacturas({ invoices, onDelete, userId }) {
 
   const zipHref = () => {
     const p = new URLSearchParams({ t: dlToken });
+    if (empresa) p.set("empresa", empresa);
     if (fPlaca) p.set("placa", fPlaca);
     if (fMes) { p.set("desde", `${fMes}-01`); p.set("hasta", `${fMes}-31`); }
     if (fDoc) p.set("q", fDoc);
@@ -940,6 +953,8 @@ const fmtDate = (s, withTime) => {
 /* TAB EDITAR (EDICIÓN MANUAL)                                   */
 /* ============================================================ */
 function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
+  // Multi-empresa: las altas se registran en la empresa del expediente abierto.
+  const qEmp = user?.empresa ? `?empresa=${encodeURIComponent(user.empresa)}` : "";
   // Archivos ORIGINALES que subió el cliente, en cualquier formato y por cualquier vía:
   // (a) documentos "comprobante_*" del expediente, y (b) facturas subidas con archivo real
   // (fotos/PDFs individuales). Sirven para cotejar una factura digitada a mano.
@@ -1094,7 +1109,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
       if (editingVehicle) {
         await api.put(`/admin/subsidio/expedientes/${user.id}/vehicles/${editingVehicle.id}`, payload);
       } else {
-        await api.post(`/admin/subsidio/expedientes/${user.id}/vehicles`, payload);
+        await api.post(`/admin/subsidio/expedientes/${user.id}/vehicles${qEmp}`, payload);
       }
       alert("Vehículo guardado correctamente.");
       setShowVehicleForm(false);
@@ -1203,7 +1218,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
       if (editingInvoice) {
         await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${editingInvoice.id}`, payload);
       } else {
-        const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices`, payload);
+        const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices${qEmp}`, payload);
         const nuevoId = res?.data?.invoice?.id;
         if (nuevoId && invArchivoSel) {
           // Asocia el documento elegido al consumo recién creado. La selección se
