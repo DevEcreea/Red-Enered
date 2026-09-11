@@ -226,12 +226,17 @@ function Expediente({ data, loading, ruc }) {
   const of = data.oficial;
   const reclamo = of ? of.subsidio_total : (data.subsidio_estimado_topado ?? data.subsidio_estimado);
   const pctFondo = data.fondo_du004 ? (reclamo / data.fondo_du004) * 100 : null;
-  const dj = data.dj;
-  async function abrirCargo() {
+  const djm = data.dj_manual;
+  async function registrarDj() {
+    const exp = window.prompt("N.° de expediente que la ATU le mostró al transportista (ej. 0035-2026-02-0012503):", djm?.numero_expediente || "");
+    if (exp === null) return;
+    const tk = window.prompt("N.° de ticket (orden de prelación, ej. 0010514):", djm?.numero_ticket || "");
+    if (tk === null) return;
     try {
-      const r = await api.get("/atu/cargo-dj", { params: { ruc, entidad_uuid: data.entidad_uuid }, responseType: "blob" });
-      const url = window.URL.createObjectURL(r.data); window.open(url, "_blank"); setTimeout(() => window.URL.revokeObjectURL(url), 60000);
-    } catch (e) { toast.error("No se pudo descargar el cargo de la DJ"); }
+      const { data: r } = await api.put(`/atu/padron/${ruc}/dj`, { numero_expediente: exp, numero_ticket: tk, fecha: new Date().toISOString().slice(0, 10) });
+      data.dj_manual = r.dj_manual; toast.success(r.dj_manual ? "DJ registrada en ENERED" : "Registro de DJ borrado");
+      setVerComp((v) => v); // re-render
+    } catch (e) { toast.error(e?.response?.data?.detail || "No se pudo registrar"); }
   }
   const sinComp = !detalle.length && !(c.total > 0);
   const kpi = (label, value, sub, color = "#111827") => (
@@ -259,16 +264,12 @@ function Expediente({ data, loading, ruc }) {
         <FileText style={{ width: 16, height: 16, color: "#1D4ED8" }} /> Expediente en la ATU
         <span style={{ fontWeight: 500, color: "#6b7280", fontSize: 12.5 }}>· {e.razon_social || ruc} · todo lo que la ATU registra de este RUC</span>
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
-          {dj == null
-            ? <Badge color="#475569" bg="#F1F5F9" icon={<Clock style={bi} />}>Estado de la DJ no disponible</Badge>
-            : dj.enviada
-              ? <>
-                  <Badge color="#065F46" bg="#ECFDF5" icon={<Send style={bi} />}>
-                    DJ enviada{dj.numero_expediente ? ` · Exp. ${dj.numero_expediente}` : ""}{dj.numero_ticket ? ` · Ticket ${dj.numero_ticket}` : ""}{dj.fecha ? ` · ${dj.fecha}` : ""}
-                  </Badge>
-                  <button onClick={abrirCargo} style={{ ...linkBtn, fontSize: 12.5 }}>Ver cargo</button>
-                </>
-              : <Badge color="#92400E" bg="#FFFBEB" icon={<Clock style={bi} />}>DJ aún no enviada (sin cargo en la ATU)</Badge>}
+          {djm
+            ? <Badge color="#065F46" bg="#ECFDF5" icon={<Send style={bi} />}>
+                DJ presentada · Exp. {djm.numero_expediente || "—"}{djm.numero_ticket ? ` · Ticket ${djm.numero_ticket}` : ""}{djm.fecha ? ` · ${djm.fecha}` : ""}
+              </Badge>
+            : <Badge color="#475569" bg="#F1F5F9" icon={<Clock style={bi} />} >Envío de DJ: la ATU no lo expone por RUC</Badge>}
+          <button onClick={registrarDj} style={{ ...linkBtn, fontSize: 12.5 }} title="Anota el N.° de expediente y ticket que la ATU le dio al transportista">{djm ? "Editar" : "Registrar N.° de expediente"}</button>
         </span>
       </div>
 

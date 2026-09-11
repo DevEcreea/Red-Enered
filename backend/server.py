@@ -7589,6 +7589,8 @@ async def atu_expediente(ruc: str, debug: int = 0, user: dict = Depends(require_
     if debug:
         exp["_raw"] = raw
     exp["conectado"] = True
+    fila = await db.atu_padron.find_one({"ruc": ruc}, {"_id": 0, "dj_manual": 1})
+    exp["dj_manual"] = (fila or {}).get("dj_manual")
     exp["fondo_du004"] = 33_800_000  # S/ 33.8 millones asignados por el DU 004-2026 (MTC)
     return exp
 
@@ -7722,7 +7724,6 @@ async def _rucs_subsidio() -> list[dict]:
 def _padron_fila(ruc: str, razon: str, exp: dict) -> dict:
     """Compacta un expediente ATU en una fila del padrón macro."""
     of = exp.get("oficial") or {}
-    dj = exp.get("dj") or {}
     return {
         "ruc": ruc,
         "razon_social": (exp.get("empresa") or {}).get("razon_social") or razon,
@@ -7736,10 +7737,6 @@ def _padron_fila(ruc: str, razon: str, exp: dict) -> dict:
         "subsidio_estimado": exp.get("subsidio_estimado"),            # S/4 × gal cargado (si no hay oficial)
         "galones_reconocidos": of.get("galones_reconocidos"),
         "galones_no_reconocidos": of.get("galones_no_reconocidos"),
-        "dj_enviada": dj.get("enviada"),
-        "dj_expediente": dj.get("numero_expediente"),
-        "dj_ticket": dj.get("numero_ticket"),
-        "dj_fecha": dj.get("fecha"),
         "entidad_uuid": exp.get("entidad_uuid"),
     }
 
@@ -7829,6 +7826,32 @@ async def atu_padron_agregar(body: AtuPadronRucsIn, user: dict = Depends(require
     return {"ok": True, "procesados": len(rucs), **resultados}
 
 
+class AtuDjManualIn(BaseModel):
+    numero_expediente: Optional[str] = None
+    numero_ticket: Optional[str] = None
+    fecha: Optional[str] = None
+    nota: Optional[str] = None
+
+
+@api.put("/atu/padron/{ruc}/dj")
+async def atu_padron_dj(ruc: str, body: AtuDjManualIn, user: dict = Depends(require_roles("admin_enered"))):
+    """Registra a mano el envío de la DJ de un RUC (N.° de expediente y ticket que la ATU
+    muestra al transportista). La ATU no lo expone por RUC, así que es nuestra propia info."""
+    ruc = (ruc or "").strip()
+    if not re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="RUC inválido")
+    exp = (body.numero_expediente or "").strip() or None
+    tk = re.sub(r"\D", "", body.numero_ticket or "") or None
+    if not exp and not tk:
+        await db.atu_padron.update_one({"ruc": ruc}, {"$unset": {"dj_manual": ""}})
+        return {"ok": True, "dj_manual": None}
+    dj = {"numero_expediente": exp, "numero_ticket": tk, "fecha": (body.fecha or "").strip() or None,
+          "nota": (body.nota or "").strip() or None, "registrado_por": user.get("email"),
+          "registrado_at": datetime.now(timezone.utc).isoformat()}
+    await db.atu_padron.update_one({"ruc": ruc}, {"$set": {"ruc": ruc, "dj_manual": dj}}, upsert=True)
+    return {"ok": True, "dj_manual": dj}
+
+
 @api.delete("/atu/padron")
 async def atu_padron_limpiar(solo_manual: int = 0, user: dict = Depends(require_roles("admin_enered"))):
     """Vacía el padrón (o solo las filas agregadas a mano con ?solo_manual=1)."""
@@ -7846,10 +7869,15 @@ async def atu_padron(user: dict = Depends(require_roles("admin_enered"))):
     def _n(x, k):
         return float(x.get(k) or 0)
     total_reclamado = sum(_n(f, "subsidio_reconocido") or _n(f, "subsidio_estimado") for f in filas)
+    tickets = [int(f["dj_manual"]["numero_ticket"]) for f in filas
+               if (f.get("dj_manual") or {}).get("numero_ticket", "").isdigit()]
     return {
         "items": filas,
         "total_empresas": len(filas),
-        "con_dj": sum(1 for f in filas if f.get("dj_enviada")),
+        "con_dj": sum(1 for f in filas if f.get("dj_manual")),
+        # El ticket de la ATU es el orden de prelación nacional: el mayor que tengamos
+        # registrado ≈ cuántas solicitudes se han presentado en todo el país.
+        "ticket_maximo": max(tickets) if tickets else None,
         "inscritas_atu": sum(1 for f in filas if f.get("inscrito_atu")),
         "sin_cuenta_atu": sum(1 for f in filas if f.get("inscrito_atu") is False),
         "total_reclamado": round(total_reclamado, 2),

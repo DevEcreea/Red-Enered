@@ -294,17 +294,13 @@ async def consultar_expediente(token: str, ruc: str) -> dict:
         # devuelve su CÁLCULO OFICIAL del subsidio y el cargo de la DJ (si ya la envió).
         entidad_uuid = datos.get("uuid") if isinstance(datos, dict) else None
         calculo = None
-        cargo_pdf = None
-        cargo_status = None
         if entidad_uuid:
-            (st_cal, calculo), cargo = await _aio.gather(
-                _call(client, "GET", DJ_CALCULO, {"entidadUuid": entidad_uuid}),
-                client.get(DJ_CARGO, params={"entidadUuid": entidad_uuid}),
-            )
+            st_cal, calculo = await _call(client, "GET", DJ_CALCULO, {"entidadUuid": entidad_uuid})
             raw["calculo"] = (st_cal, calculo)
-            cargo_status = cargo.status_code
-            if cargo.status_code == 200 and "pdf" in (cargo.headers.get("content-type") or ""):
-                cargo_pdf = cargo.content
+        # OJO (verificado 11/09/2026 con SOLUCIONES AMBIENTALES, que SÍ envió su DJ):
+        # /declaracion-jurada/estado y /declaracion-jurada/cargo-pdf responden SIEMPRE por la
+        # cuenta que inició sesión aunque se pase entidadUuid/ruc → NO sirven para saber si
+        # otro RUC envió su DJ. El N.° de expediente/ticket se registra a mano en ENERED.
 
     # ---- Empresa ----
     emp = (perfil or {}).get("datosEmpresa") if isinstance(perfil, dict) else None
@@ -426,12 +422,7 @@ async def consultar_expediente(token: str, ruc: str) -> dict:
         cpx["galones_reconocidos"] = rc["galones"] if rc else 0.0
         cpx["placas_reconocidas"] = rc["placas"] if rc else []
 
-    # ---- DJ: el cargo existe solo si la DJ fue enviada ----
-    dj = None
-    if cargo_status is not None:
-        dj = {"enviada": cargo_pdf is not None, "cargo_disponible": cargo_pdf is not None}
-        if cargo_pdf:
-            dj.update(_leer_cargo_dj(cargo_pdf))
+    dj = None  # no consultable por RUC (ver nota arriba); se completa desde db.atu_padron.dj_manual
 
     tiene_datos = bool(emp) or bool(datos) or bool(flota) or bool(comprobantes)
     return {

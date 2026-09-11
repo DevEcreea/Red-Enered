@@ -15,6 +15,17 @@ export default function PadronATU() {
   const [pegar, setPegar] = useState("");
   const [agregando, setAgregando] = useState(false);
 
+  const registrarDj = async (r) => {
+    const exp = window.prompt(`N.° de expediente ATU de ${r.razon_social || r.ruc}:`, r.dj_manual?.numero_expediente || "");
+    if (exp === null) return;
+    const tk = window.prompt("N.° de ticket (orden de prelación):", r.dj_manual?.numero_ticket || "");
+    if (tk === null) return;
+    try {
+      await api.put(`/atu/padron/${r.ruc}/dj`, { numero_expediente: exp, numero_ticket: tk, fecha: new Date().toISOString().slice(0, 10) });
+      toast.success("DJ registrada"); cargar();
+    } catch (e) { toast.error(e?.response?.data?.detail || "No se pudo registrar"); }
+  };
+
   const cargar = useCallback(async () => {
     try {
       const { data: d } = await api.get("/atu/padron");
@@ -65,14 +76,17 @@ export default function PadronATU() {
   const filas = useMemo(() => {
     let f = data?.items || [];
     if (q) { const s = q.toLowerCase(); f = f.filter((x) => (x.razon_social || "").toLowerCase().includes(s) || (x.ruc || "").includes(s)); }
-    if (soloDj) f = f.filter((x) => x.dj_enviada);
+    if (soloDj) f = f.filter((x) => x.dj_manual);
     return f;
   }, [data, q, soloDj]);
 
   const exportarCsv = () => {
-    const cols = ["ruc", "razon_social", "inscrito_atu", "flota_reconocida", "subsidio_maximo", "volumen_galones", "comprobantes", "subsidio_reconocido", "galones_no_reconocidos", "dj_enviada", "dj_expediente", "dj_fecha"];
+    const cols = ["ruc", "razon_social", "inscrito_atu", "flota_reconocida", "subsidio_maximo", "volumen_galones", "comprobantes", "subsidio_reconocido", "galones_no_reconocidos", "dj_expediente", "dj_ticket", "dj_fecha"];
     const head = cols.join(",");
-    const body = (data?.items || []).map((r) => cols.map((c) => `"${String(r[c] ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const body = (data?.items || []).map((r) => {
+      const row = { ...r, dj_expediente: r.dj_manual?.numero_expediente, dj_ticket: r.dj_manual?.numero_ticket, dj_fecha: r.dj_manual?.fecha };
+      return cols.map((c) => `"${String(row[c] ?? "").replace(/"/g, '""')}"`).join(",");
+    }).join("\n");
     const blob = new Blob(["﻿" + head + "\n" + body], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob); const a = document.createElement("a");
     a.href = url; a.download = "padron_atu_enered.csv"; a.click(); URL.revokeObjectURL(url);
@@ -116,7 +130,8 @@ export default function PadronATU() {
       {/* KPIs macro */}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
         {kpi("Empresas en el padrón", s.total_empresas, "#111827", `${s.inscritas_atu || 0} con cuenta ATU · ${s.sin_cuenta_atu || 0} sin cuenta`)}
-        {kpi("Con DJ enviada", s.con_dj, "#059669", "declaración jurada presentada")}
+        {kpi("Con DJ presentada", s.con_dj, "#059669", "registradas en ENERED (la ATU no lo expone por RUC)")}
+        {kpi("Solicitudes a nivel nacional ≈", s.ticket_maximo ? s.ticket_maximo.toLocaleString("es-PE") : "—", "#B45309", "ticket ATU más alto registrado (orden de prelación)")}
         {kpi("Total reclamado (reconocido ATU)", soles(s.total_reclamado), "#1D4ED8", `de un tope de ${soles(s.total_maximo)}`)}
         {kpi("Peso en el fondo DU 004", s.fondo_du004 ? `${((s.total_reclamado / s.fondo_du004) * 100).toFixed(2)} %` : "—", "#7C3AED", `Fondo: ${soles(s.fondo_du004)}`)}
       </div>
@@ -171,11 +186,10 @@ export default function PadronATU() {
                     {r.galones_no_reconocidos > 0 && <div style={{ fontSize: 11, color: "#B45309", fontWeight: 500 }}>{num(r.galones_no_reconocidos)} gal no reconocidos</div>}
                   </td>
                   <td style={td}>
-                    {r.dj_enviada
-                      ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#065F46", fontWeight: 700 }} title={[r.dj_expediente && `Exp. ${r.dj_expediente}`, r.dj_ticket && `Ticket ${r.dj_ticket}`, r.dj_fecha].filter(Boolean).join(" · ")}><Send style={bi} /> Enviada{r.dj_expediente ? ` · ${r.dj_expediente}` : ""}</span>
-                      : r.dj_enviada === false
-                        ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#92400E" }}><Clock style={bi} /> No enviada</span>
-                        : "—"}
+                    {r.dj_manual
+                      ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#065F46", fontWeight: 700 }} title={`Ticket ${r.dj_manual.numero_ticket || "—"} · ${r.dj_manual.fecha || ""}`}><Send style={bi} /> {r.dj_manual.numero_expediente || "Presentada"}{r.dj_manual.numero_ticket ? <span style={{ color: "#6b7280", fontWeight: 500 }}> · #{r.dj_manual.numero_ticket}</span> : null}</span>
+                      : <span style={{ color: "#9CA3AF" }}>sin registro</span>}
+                    <button onClick={() => registrarDj(r)} style={{ background: "none", border: "none", color: "#1D4ED8", cursor: "pointer", fontSize: 11.5, fontWeight: 700, padding: "0 0 0 8px" }}>{r.dj_manual ? "editar" : "registrar"}</button>
                   </td>
                 </tr>
               ))}
@@ -186,7 +200,8 @@ export default function PadronATU() {
       </div>
       <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 8 }}>
         * Estimado (S/ 4 × galón) cuando la ATU aún no devuelve el cálculo oficial. El resto es el cálculo oficial de la ATU por RUC.
-        Este padrón cubre las empresas de ENERED y las que agregues, no el total nacional (la ATU no expone esa lista a cuentas de transportista).
+        La ATU no expone por RUC si la DJ fue enviada: el N.° de expediente y ticket se registran a mano (lo que la ATU le muestra al transportista).
+        Este padrón cubre las empresas de ENERED y las que agregues, no el total nacional.
       </div>
     </div>
   );
