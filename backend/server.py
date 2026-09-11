@@ -7561,6 +7561,172 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
     }
 
 
+@api.get("/atu/expediente")
+async def atu_expediente(ruc: str, debug: int = 0, user: dict = Depends(require_roles("admin_enered"))):
+    """Expediente del RUC en la ATU usando la cuenta maestra: comprobantes cargados,
+    volumen (gal), monto de compras, subsidio referencial y estado de la DJ (cuando la
+    ATU lo expone por RUC). Solo admin ENERED. ?debug=1 incluye las respuestas crudas."""
+    ruc = (ruc or "").strip()
+    if not re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
+    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+    if not doc:
+        return {"ruc": ruc, "conectado": False, "sin_maestra": True}
+    session = _atu_unpack(doc)
+    try:
+        exp, actualizada = await _atu.expediente_con_sesion(session, ruc)
+    except _atu.AtuError as e:
+        return {"ruc": ruc, "conectado": True, "maestra_vencida": True, "error": str(e)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Error consultando ATU: {str(e)}")
+    if actualizada.get("access_token") != session.get("access_token"):
+        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
+    raw = exp.pop("_raw", None)
+    if debug:
+        exp["_raw"] = raw
+    exp["conectado"] = True
+    exp["fondo_du004"] = 33_800_000  # S/ 33.8 millones asignados por el DU 004-2026 (MTC)
+    return exp
+
+
+async def _atu_sesion_maestra():
+    """Sesión maestra ATU desde la BD (o None si no está conectada)."""
+    doc = await db.atu_sessions.find_one({"ruc": _ATU_MASTER_KEY})
+    return _atu_unpack(doc) if doc else None
+
+
+async def _atu_con_refresh(fn, *args):
+    """Ejecuta fn(access_token, *args) con la sesión maestra; si el token venció, refresca y reintenta."""
+    session = await _atu_sesion_maestra()
+    if not session:
+        raise HTTPException(status_code=409, detail="No hay cuenta ATU maestra conectada")
+    try:
+        return await fn(session["access_token"], *args)
+    except _atu.AtuError as e:
+        msg = str(e).lower()
+        if ("rechaz" not in msg and "expir" not in msg) or not session.get("refresh_token"):
+            raise HTTPException(status_code=502, detail=str(e))
+        nuevos = await _atu.refresh_session(session["refresh_token"])
+        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack({**session, **nuevos})})
+        return await fn(nuevos["access_token"], *args)
+
+
+def _atu_precheck(cp: dict, det: dict, flota_by: dict, periodo: dict | None, grifo_ok) -> dict:
+    """Pre-chequeo ENERED de un comprobante cargado en la ATU: anticipa observaciones
+    antes de que la ATU lo valide (fechas del plazo, combustible, azufre, tipo SUNAT,
+    placa reconocida, tope por unidad, grifo en OSINERGMIN, archivo, nota de crédito)."""
+    avisos = []
+    ini = (periodo or {}).get("fechaInicio") or "2026-05-29"
+    fin = (periodo or {}).get("fechaFin") or "2026-07-29"
+    f = cp.get("fecha") or ""
+    if f and not (ini <= f <= fin):
+        avisos.append(f"Fecha {f} fuera del plazo de compra ({ini} a {fin})")
+    combs = det.get("combustibles") or []
+    for c in combs:
+        if (c.get("codigo") or "").upper() not in ("B5", "B20"):
+            avisos.append(f"Combustible {c.get('nombre') or c.get('codigo')} no subsidiable (solo diésel B5/B20)")
+    az = det.get("azufre_ppm")
+    if az is not None and float(az) > 50:
+        avisos.append(f"Azufre {az} ppm (máximo 50 ppm)")
+    if (det.get("tipo_sunat") or cp.get("tipo_sunat")) not in (None, "", "01"):
+        avisos.append("No es factura electrónica (tipo SUNAT 01)")
+    if not (det.get("archivos") or cp.get("tiene_archivo")):
+        avisos.append("Sin PDF adjunto")
+    placas = det.get("placas") or []
+    if cp.get("forma") == "FORMA_A" and not placas:
+        avisos.append("Sin placa asignada")
+    for pl in placas:
+        pn = (pl.get("placa") or "").replace("-", "").upper()
+        v = flota_by.get(pn)
+        if not v:
+            avisos.append(f"Placa {pl.get('placa')} no está en la flota reconocida por la ATU")
+        else:
+            if not v.get("tuc_vigente") or not v.get("autorizacion_vigente"):
+                avisos.append(f"Placa {pl.get('placa')} sin TUC/autorización vigente")
+            tope = float(v.get("tope_galones") or 0)
+            if tope and float(pl.get("galones") or 0) > tope:
+                avisos.append(f"Placa {pl.get('placa')}: {pl.get('galones')} gal supera su tope de {tope} gal")
+    if grifo_ok is False:
+        avisos.append("Grifo/distribuidor no figura en el padrón OSINERGMIN")
+    if det.get("valida_sunat") is False and det.get("fecha_validacion_sunat"):
+        avisos.append("SUNAT no validó el comprobante" + (f": {det.get('detalle_validacion_sunat')}" if det.get("detalle_validacion_sunat") else ""))
+    if det.get("observacion"):
+        avisos.append(f"Observación ATU: {det['observacion']}")
+    est = det.get("estado") or cp.get("estado")
+    if est == "CONFORME":
+        veredicto = "aceptado"
+    elif est in ("OBSERVADO", "INHABILITADO"):
+        veredicto = "rechazado"
+    elif avisos:
+        veredicto = "riesgo"
+    else:
+        veredicto = "ok"
+    return {"veredicto": veredicto, "avisos": avisos}
+
+
+@api.get("/atu/expediente/comprobantes")
+async def atu_expediente_comprobantes(ruc: str, user: dict = Depends(require_roles("admin_enered"))):
+    """Comprobantes del RUC en la ATU con detalle (placas, azufre, validaciones, PDF)
+    y pre-chequeo ENERED de si serán aceptados. Solo admin ENERED."""
+    ruc = (ruc or "").strip()
+    if not re.fullmatch(r"\d{11}", ruc):
+        raise HTTPException(status_code=400, detail="El RUC debe tener 11 dígitos")
+    exp = await _atu_con_refresh(_atu.consultar_expediente, ruc)
+    lista = exp.get("comprobantes_detalle") or []
+    dets = await _atu_con_refresh(_atu.detalle_comprobantes, ruc, [c["uuid"] for c in lista])
+    flota_by = {(v.get("placa") or "").replace("-", "").upper(): v for v in (exp.get("flota") or [])}
+    # Grifos: una consulta por RUC distribuidor distinto
+    from services.padron_grifos import buscar_por_ruc as _grifo
+    grifos: dict = {}
+    for c in lista:
+        rd = c.get("ruc_distribuidor")
+        if rd and rd not in grifos:
+            try:
+                g = await _grifo(db, rd, c.get("distribuidor"))
+                grifos[rd] = bool(g and g.get("inscrito", True))
+            except Exception:
+                grifos[rd] = None
+    # Acumulado por placa en TODO el expediente vs. tope de la unidad: la ATU paga solo
+    # hasta el tope (así aparecen los "galones no reconocidos" del cálculo oficial).
+    acum_placa: dict = {}
+    for c in lista:
+        for pl in (dets.get(c["uuid"]) or {}).get("placas") or []:
+            pn = (pl.get("placa") or "").replace("-", "").upper()
+            acum_placa[pn] = acum_placa.get(pn, 0.0) + float(pl.get("galones") or 0)
+    out = []
+    resumen = {"aceptado": 0, "rechazado": 0, "riesgo": 0, "ok": 0}
+    for c in lista:
+        d = dets.get(c["uuid"]) or {}
+        pre = _atu_precheck(c, d, flota_by, exp.get("periodo"), grifos.get(c.get("ruc_distribuidor")))
+        for pl in d.get("placas") or []:
+            pn = (pl.get("placa") or "").replace("-", "").upper()
+            tope = float((flota_by.get(pn) or {}).get("tope_galones") or 0)
+            tot = acum_placa.get(pn, 0.0)
+            if tope and tot > tope + 0.01:
+                pre["avisos"].append(f"Placa {pl.get('placa')} acumula {tot:,.2f} gal en el expediente; tope {tope:,.2f} gal → {tot - tope:,.2f} gal no se pagarán")
+                if pre["veredicto"] == "ok":
+                    pre["veredicto"] = "riesgo"
+        resumen[pre["veredicto"]] += 1
+        out.append({**c, **{k: v for k, v in d.items() if k != "uuid"}, "grifo_osinergmin": grifos.get(c.get("ruc_distribuidor")), "precheck": pre})
+    return {"ruc": ruc, "total": len(out), "resumen_precheck": resumen, "periodo": exp.get("periodo"), "comprobantes": out}
+
+
+@api.get("/atu/cargo-dj")
+async def atu_cargo_dj(ruc: str, entidad_uuid: str, user: dict = Depends(require_roles("admin_enered"))):
+    """PDF del cargo de la DJ enviada por el transportista (si existe). Solo admin ENERED."""
+    from fastapi.responses import Response as _Resp
+    contenido, nombre, ct = await _atu_con_refresh(_atu.descargar_cargo_dj, ruc, entidad_uuid)
+    return _Resp(content=contenido, media_type=ct, headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
+@api.get("/atu/archivo/{archivo_uuid}")
+async def atu_archivo(archivo_uuid: str, ruc: str, user: dict = Depends(require_roles("admin_enered"))):
+    """Entrega el PDF de un comprobante cargado en la ATU (archivoUuid). Solo admin ENERED."""
+    from fastapi.responses import Response as _Resp
+    contenido, nombre, ct = await _atu_con_refresh(_atu.descargar_archivo, ruc, archivo_uuid)
+    return _Resp(content=contenido, media_type=ct, headers={"Content-Disposition": f'inline; filename="{nombre}"'})
+
+
 # Tope de galones máximos a reclamar por categoría de unidad (DU 004). × factor = monto.
 _TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
 from services.validador_facturas import clase_base_categoria, periodo_du007, PERIODO_INICIO, PERIODO_FIN

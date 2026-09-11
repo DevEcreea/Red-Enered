@@ -152,6 +152,252 @@ function Resultado({ data }) {
   );
 }
 
+// ---------- Expediente en la ATU: empresa, flota, comprobantes y lo que reclama ----------
+const soles = (n) => `S/ ${Number(n || 0).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const gal = (n) => `${Number(n || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 })} gal`;
+const EST_COLOR = { CONFORME: ["#065F46", "#ECFDF5"], OBSERVADO: ["#991B1B", "#FEF2F2"], INHABILITADO: ["#7F1D1D", "#FEE2E2"], PENDIENTE: ["#92400E", "#FFFBEB"], SIN_VALIDACION: ["#92400E", "#FFFBEB"], VALIDANDO_SUNAT: ["#1E40AF", "#EFF6FF"], VALIDANDO_OSINERGMIN: ["#1E40AF", "#EFF6FF"] };
+
+const PRE_BADGE = {
+  aceptado: ["#065F46", "#ECFDF5", "Aceptado por la ATU"],
+  ok: ["#065F46", "#ECFDF5", "Sin observaciones"],
+  riesgo: ["#92400E", "#FFFBEB", "Riesgo"],
+  rechazado: ["#991B1B", "#FEF2F2", "Observado / inhabilitado"],
+};
+
+function Expediente({ data, loading, ruc }) {
+  const [verComp, setVerComp] = useState(false);
+  const [comp, setComp] = useState(null);        // detalle + pre-chequeo ENERED
+  const [compLoading, setCompLoading] = useState(false);
+  const [pdfAbriendo, setPdfAbriendo] = useState("");
+
+  async function cargarDetalle() {
+    if (comp || compLoading) { setVerComp((v) => !v); return; }
+    setVerComp(true); setCompLoading(true);
+    try {
+      const { data: d } = await api.get("/atu/expediente/comprobantes", { params: { ruc } });
+      setComp(d);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "No se pudo traer el detalle de comprobantes");
+      setVerComp(false);
+    } finally { setCompLoading(false); }
+  }
+  async function abrirPdf(k) {
+    const a = (k.archivos || []).find((x) => x.tipo === "COMPROBANTE") || (k.archivos || [])[0];
+    if (!a?.archivo_uuid) { toast.error("Este comprobante no tiene PDF en la ATU"); return; }
+    setPdfAbriendo(k.uuid);
+    try {
+      const r = await api.get(`/atu/archivo/${a.archivo_uuid}`, { params: { ruc }, responseType: "blob" });
+      const url = window.URL.createObjectURL(r.data);
+      window.open(url, "_blank");
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      toast.error("No se pudo descargar el PDF desde la ATU");
+    } finally { setPdfAbriendo(""); }
+  }
+  if (loading) {
+    return (
+      <div style={{ marginTop: 16, background: "#fff", borderRadius: 12, padding: 22, color: "#6b7280", display: "flex", alignItems: "center", gap: 10 }}>
+        <Loader2 style={{ ...sp, color: "#1D4ED8" }} /> Consultando el expediente de {ruc} en la ATU…
+      </div>
+    );
+  }
+  if (!data) return null;
+  if (data.error) return <Banner tone="error"><AlertTriangle style={{ width: 18, height: 18 }} /> Expediente ATU: {data.error}</Banner>;
+  if (data.sin_maestra || data.maestra_vencida) return null; // ya lo avisa el diagnóstico
+  if (!data.inscrito) {
+    return <Banner tone="info"><FileText style={{ width: 18, height: 18 }} /> El RUC {ruc} <b>no tiene cuenta en la ATU</b> para el subsidio (no figura en su padrón).</Banner>;
+  }
+  const e = data.empresa || {};
+  const c = data.comprobantes || {};
+  const detalle = comp?.comprobantes || data.comprobantes_detalle || [];
+  const rp = comp?.resumen_precheck;
+  const flota = data.flota || [];
+  const of = data.oficial;
+  const reclamo = of ? of.subsidio_total : (data.subsidio_estimado_topado ?? data.subsidio_estimado);
+  const pctFondo = data.fondo_du004 ? (reclamo / data.fondo_du004) * 100 : null;
+  const dj = data.dj;
+  async function abrirCargo() {
+    try {
+      const r = await api.get("/atu/cargo-dj", { params: { ruc, entidad_uuid: data.entidad_uuid }, responseType: "blob" });
+      const url = window.URL.createObjectURL(r.data); window.open(url, "_blank"); setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch (e) { toast.error("No se pudo descargar el cargo de la DJ"); }
+  }
+  const sinComp = !detalle.length && !(c.total > 0);
+  const kpi = (label, value, sub, color = "#111827") => (
+    <div style={{ background: "#F8FAFC", border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", minWidth: 150, flex: 1 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 800, color: "#6b7280", textTransform: "uppercase", letterSpacing: ".05em" }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color, marginTop: 2 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+  const si = (v) => v === true ? "Sí" : v === false ? "No" : "—";
+  const cumpleBadge = (st) => st === "CUMPLE"
+    ? <Badge color="#065F46" bg="#ECFDF5" icon={<ShieldCheck style={bi} />}>Cumple</Badge>
+    : st === "CONSIDERACIONES"
+      ? <Badge color="#92400E" bg="#FFFBEB" icon={<AlertTriangle style={bi} />}>Con observaciones</Badge>
+      : <Badge color="#991B1B" bg="#FEF2F2" icon={<XCircle style={bi} />}>No cumple</Badge>;
+  const secTitle = (icon, txt, extra) => (
+    <div style={{ padding: "12px 18px", borderTop: "1px solid #F3F4F6", borderBottom: "1px solid #F3F4F6", background: "#FAFAFA", fontWeight: 800, color: "#111827", fontSize: 13.5, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {icon}{txt}{extra}
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop: 16, background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,.05)", overflow: "hidden" }} data-testid="atu-expediente">
+      <div style={{ padding: "12px 18px", fontWeight: 800, color: "#111827", fontSize: 14, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <FileText style={{ width: 16, height: 16, color: "#1D4ED8" }} /> Expediente en la ATU
+        <span style={{ fontWeight: 500, color: "#6b7280", fontSize: 12.5 }}>· {e.razon_social || ruc} · todo lo que la ATU registra de este RUC</span>
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          {dj == null
+            ? <Badge color="#475569" bg="#F1F5F9" icon={<Clock style={bi} />}>Estado de la DJ no disponible</Badge>
+            : dj.enviada
+              ? <>
+                  <Badge color="#065F46" bg="#ECFDF5" icon={<Send style={bi} />}>
+                    DJ enviada{dj.numero_expediente ? ` · Exp. ${dj.numero_expediente}` : ""}{dj.numero_ticket ? ` · Ticket ${dj.numero_ticket}` : ""}{dj.fecha ? ` · ${dj.fecha}` : ""}
+                  </Badge>
+                  <button onClick={abrirCargo} style={{ ...linkBtn, fontSize: 12.5 }}>Ver cargo</button>
+                </>
+              : <Badge color="#92400E" bg="#FFFBEB" icon={<Clock style={bi} />}>DJ aún no enviada (sin cargo en la ATU)</Badge>}
+        </span>
+      </div>
+
+      {/* KPIs */}
+      <div style={{ padding: "4px 16px 16px", display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {kpi("Comprobantes cargados", c.total || detalle.length || 0, `${c.conformes || 0} conformes · ${c.observados || 0} observados · ${c.pendientes || 0} pendientes${c.inhabilitados ? ` · ${c.inhabilitados} inhabilitados` : ""}`)}
+        {kpi("Volumen cargado", gal(data.volumen_galones), data.periodo ? `Compras válidas del ${data.periodo.fechaInicio} al ${data.periodo.fechaFin}` : null)}
+        {of
+          ? kpi("Subsidio reconocido (cálculo oficial ATU)", soles(of.subsidio_total), `${of.galones_reconocidos.toLocaleString("es-PE")} gal reconocidos · ${of.galones_no_reconocidos.toLocaleString("es-PE")} gal NO reconocidos · ${of.vehiculos_subsidiables}/${of.vehiculos_procesados} unidades subsidiables`, "#059669")
+          : kpi("Subsidio que reclama (estimado)", soles(reclamo), `S/ 4 × galón, topado a la flota reconocida (máx. ${soles(data.subsidio_maximo_flota)})`, "#059669")}
+        {pctFondo != null && kpi("Peso en el fondo DU 004", `${pctFondo < 0.01 ? "<0.01" : pctFondo.toFixed(2)} %`, `Fondo total: ${soles(data.fondo_du004)}`, "#7C3AED")}
+      </div>
+
+      {of && (of.mensaje_forma_a || of.mensaje_forma_b) && (
+        <div style={{ margin: "0 16px 14px", padding: "10px 14px", background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 12.5, color: "#166534" }}>
+          <b>Motor de cálculo de la ATU:</b> {of.mensaje_forma_a}{of.mensaje_forma_b ? ` · Granel: ${of.mensaje_forma_b}` : ""}
+          {of.galones_no_reconocidos > 0 && <span style={{ color: "#B45309" }}> · Ojo: {of.galones_no_reconocidos.toLocaleString("es-PE")} gal no serán pagados (exceden tope o placa no subsidiable).</span>}
+        </div>
+      )}
+
+      {/* Empresa + cumplimiento */}
+      {secTitle(<Building2 style={{ width: 15, height: 15, color: "#1D4ED8" }} />, "Empresa en la ATU")}
+      <div style={{ padding: "12px 18px", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, fontSize: 13 }}>
+        {[["Razón social", e.razon_social || "—"], ["Estado en la ATU", e.estado_atu || "—"], ["En padrón del subsidio", si(e.registrado_en_padron)],
+          ["SUNAT activo / habido", `${si(e.activo_sunat)} / ${si(e.habido_sunat)}`], ["Validado SUNAT", si(e.validado_sunat)], ["Autorizaciones", e.total_autorizaciones ?? "—"],
+          ["Contacto registrado", e.contacto || "—"], ["Actualizaciones restantes", e.actualizaciones_restantes ?? "—"]].map(([k, v]) => (
+          <div key={k}><div style={{ fontSize: 10.5, fontWeight: 800, color: "#9CA3AF", textTransform: "uppercase" }}>{k}</div><div style={{ fontWeight: 700, color: "#111827" }}>{v}</div></div>
+        ))}
+      </div>
+      {data.cumplimiento?.length > 0 && (
+        <div style={{ padding: "0 18px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {data.cumplimiento.map((k) => (
+            <div key={k.codigo} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, flexWrap: "wrap" }}>
+              {cumpleBadge(k.estado)}<b style={{ color: "#111827" }}>{k.nombre}</b><span style={{ color: "#6b7280" }}>{k.descripcion}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Flota reconocida */}
+      {secTitle(<Truck style={{ width: 15, height: 15, color: "#1D4ED8" }} />, `Flota reconocida por la ATU (${flota.length})`,
+        <span style={{ fontWeight: 500, color: "#6b7280", fontSize: 12 }}>· tope total {gal(data.tope_flota_galones)} = máx. {soles(data.subsidio_maximo_flota)}</span>)}
+      {flota.length === 0 ? <div style={{ padding: "12px 18px", color: "#6b7280", fontSize: 13 }}>La ATU no registra vehículos para este RUC.</div> : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["Placa", "Cat.", "TUC", "Autorización", "Estado", "Tope (gal)", "Acumulado", "% tope", "Registrada"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {flota.map((v, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #F3F4F6", background: v.tuc_vigente && v.autorizacion_vigente ? "#fff" : "#FFFBEB" }}>
+                  <td style={{ ...td, fontWeight: 800, color: "#1D4ED8" }}>{v.placa}</td>
+                  <td style={td}>{v.categoria || "—"}</td>
+                  <td style={{ ...td, color: v.tuc ? "#111827" : "#DC2626", fontWeight: 700 }}>{v.tuc || "SIN TUC"}</td>
+                  <td style={td}>{v.autorizacion || "—"}{v.autorizacion_vigente === false && <span style={{ color: "#DC2626" }}> (vencida)</span>}</td>
+                  <td style={td}>{v.estado || "—"}</td>
+                  <td style={td}>{Number(v.tope_galones || 0).toLocaleString("es-PE")}</td>
+                  <td style={td}>{gal(v.acumulado_galones)}</td>
+                  <td style={td}>{v.porcentaje_tope != null ? `${v.porcentaje_tope}%` : "—"}{v.alerta ? ` · ${v.alerta}` : ""}</td>
+                  <td style={td}>{v.fecha_registro ? v.fecha_registro.slice(0, 10) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Resumen por mes */}
+      {data.por_mes?.length > 0 && (<>
+        {secTitle(<FileText style={{ width: 15, height: 15, color: "#1D4ED8" }} />, "Carga por mes y forma")}
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["Forma", "Mes", "Comprobantes", "Conformes", "Observados", "Pendientes", "Galones", "S/ 4 × gal"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {data.por_mes.map((m, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                  <td style={td}>{m.forma === "FORMA_B" ? "B · Granel" : "A · Surtido"}</td>
+                  <td style={td}>{[m.mes, m.anio].filter(Boolean).join("/") || "—"}</td>
+                  <td style={td}>{m.comprobantes}</td><td style={td}>{m.conformes}</td><td style={td}>{m.observados}</td><td style={td}>{m.pendientes}</td>
+                  <td style={td}>{gal(m.galones)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: "#059669" }}>{soles(m.galones * 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </>)}
+
+      {/* Comprobantes uno a uno */}
+      {secTitle(<FileText style={{ width: 15, height: 15, color: "#1D4ED8" }} />, `Comprobantes en la ATU (${detalle.length})`,
+        <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 10 }}>
+          {rp && <span style={{ fontWeight: 600, fontSize: 12, color: "#6b7280" }}>
+            Pre-chequeo ENERED: <b style={{ color: "#059669" }}>{rp.aceptado + rp.ok} sin observaciones</b>
+            {rp.riesgo > 0 && <> · <b style={{ color: "#B45309" }}>{rp.riesgo} con riesgo</b></>}
+            {rp.rechazado > 0 && <> · <b style={{ color: "#DC2626" }}>{rp.rechazado} observados</b></>}
+          </span>}
+          {detalle.length > 0 && <button onClick={cargarDetalle} style={{ ...linkBtn, fontSize: 13 }}>{compLoading ? "Cargando…" : verComp ? "Ocultar" : "Ver detalle y pre-chequeo"}</button>}
+        </span>)}
+      {sinComp && <div style={{ padding: "12px 18px", color: "#6b7280", fontSize: 13 }}>Todavía no ha cargado comprobantes: <b>no ha armado su expediente</b>.</div>}
+      {compLoading && <div style={{ padding: "14px 18px", color: "#6b7280", fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}><Loader2 style={{ ...sp, color: "#1D4ED8" }} /> Trayendo el detalle de {detalle.length} comprobantes desde la ATU y pre-chequeándolos…</div>}
+      {verComp && !compLoading && detalle.length > 0 && (
+        <div style={{ overflowX: "auto", maxHeight: 520, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead><tr>{["Fecha", "Forma", "Serie-N°", "Grifo / distribuidor", "Placa(s)", "Galones", "Estado ATU", "SUNAT", "Pre-chequeo ENERED", "PDF"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {detalle.map((k) => {
+                const [fg, bg] = EST_COLOR[k.estado] || ["#374151", "#F3F4F6"];
+                const pre = k.precheck; const pb = pre ? PRE_BADGE[pre.veredicto] : null;
+                const placas = (k.placas && Array.isArray(k.placas)) ? k.placas.map((p) => p.placa).join(", ") : (k.placa || (k.placas ? `${k.placas} placa${k.placas > 1 ? "s" : ""}` : "—"));
+                return (
+                  <tr key={k.uuid} style={{ borderBottom: "1px solid #F3F4F6", background: pre?.veredicto === "riesgo" ? "#FFFBEB" : pre?.veredicto === "rechazado" ? "#FEF2F2" : "#fff" }}>
+                    <td style={td}>{k.fecha || "—"}</td>
+                    <td style={td}>{k.forma === "FORMA_B" ? "B" : "A"}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>{k.serie}-{k.numero}{k.nota_credito ? " (NC)" : ""}</td>
+                    <td style={{ ...td, whiteSpace: "normal", maxWidth: 240 }}>{k.distribuidor || k.ruc_distribuidor || "—"}{k.grifo_osinergmin === false && <span style={{ color: "#DC2626" }}> · no en OSINERGMIN</span>}<div style={{ color: "#9CA3AF", fontSize: 11 }}>{k.departamento || ""}</div></td>
+                    <td style={td}>{placas}</td>
+                    <td style={td}>{gal(k.galones)}
+                      {of && <div style={{ fontSize: 11, color: k.reconocido_atu ? (k.galones_reconocidos < k.galones ? "#B45309" : "#059669") : "#DC2626" }}>
+                        {k.reconocido_atu ? `ATU reconoce ${Number(k.galones_reconocidos).toLocaleString("es-PE")}` : "ATU no lo considera"}</div>}
+                      {k.azufre_ppm != null && <div style={{ color: "#9CA3AF", fontSize: 11 }}>{k.azufre_ppm} ppm</div>}</td>
+                    <td style={td}><Badge color={fg} bg={bg}>{k.estado_nombre || k.estado}</Badge></td>
+                    <td style={td}>{k.valida_sunat === true ? "✓" : (k.valida_sunat === false && k.fecha_validacion_sunat) ? "✗" : "pend."}</td>
+                    <td style={{ ...td, whiteSpace: "normal", maxWidth: 320 }}>
+                      {pb ? <Badge color={pb[0]} bg={pb[1]}>{pb[2]}</Badge> : "—"}
+                      {pre?.avisos?.length > 0 && <ul style={{ margin: "4px 0 0", paddingLeft: 16, color: "#B45309", fontSize: 11.5 }}>{pre.avisos.map((a, i) => <li key={i}>{a}</li>)}</ul>}
+                    </td>
+                    <td style={td}>
+                      {(k.archivos?.length || k.tiene_archivo)
+                        ? <button onClick={() => abrirPdf(k)} disabled={pdfAbriendo === k.uuid} style={{ ...linkBtn, fontSize: 12.5 }}>{pdfAbriendo === k.uuid ? "Abriendo…" : "Ver PDF"}</button>
+                        : <span style={{ color: "#DC2626" }}>Sin PDF</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Badge({ color, bg, icon, children }) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: bg, color, padding: "3px 10px", borderRadius: 999, fontWeight: 700, fontSize: 12 }}>{icon}{children}</span>;
 }
