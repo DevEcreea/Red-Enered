@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
-import CONSTANCIA_V2 from "../data/constanciaV2";
+import ConstanciaApartado from "../components/ConstanciaApartado";
 
 // --- Factura subida: muestra lo que ENERED leyó del comprobante y su validación ---
 const ESTADO_FACTURA = {
@@ -84,7 +84,7 @@ const ETAPAS = [
   { id: "empresa",      n: 1, label: "Verificación empresa",     icon: Building2,  short: "Verificación empresa", hint: "Solo PDF" },
   { id: "flota",        n: 2, label: "Verificación flota",       icon: Truck,      short: "Verificación flota",   hint: "PDF, PNG o JPG" },
   { id: "combustible",  n: 3, label: "Facturas de combustible",  icon: Fuel,       short: "Combustible",  hint: "Solo PDF" },
-  { id: "declaracion",  n: 4, label: "Declaración jurada",       icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
+  { id: "declaracion",  n: 4, label: "Declaración jurada y términos", icon: ShieldCheck,short: "Declaración",  hint: "Firma electrónica" },
 ];
 
 const PRODUCTOS = ["DIESEL B5", "DIESEL B20", "DIESEL B5 S50"];
@@ -914,29 +914,9 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const [error, setError] = useState(null);
   const already = data.declaracion;
 
-  // Paso previo obligatorio: aceptar la Constancia de Información antes de firmar la DJ.
-  const [cst, setCst] = useState(null);            // {version, aceptada, cliente}
-  const [cstAcc, setCstAcc] = useState(false);     // checkbox de la constancia
-  const [cstBusy, setCstBusy] = useState(false);
-  const [cstVer, setCstVer] = useState(false);     // ver documento completo
-  const [cstErr, setCstErr] = useState(null);
-  useEffect(() => {
-    let vivo = true;
-    api.get("/constancia").then(({ data: d }) => { if (vivo) setCst(d); }).catch(() => {});
-    return () => { vivo = false; };
-  }, []);
-  const constanciaOk = !!(cst && cst.aceptada && cst.aceptada.version === cst.version);
-  const aceptarConstancia = async () => {
-    if (!cstAcc || cstBusy) return;
-    setCstBusy(true); setCstErr(null);
-    try {
-      const { data: r } = await api.post("/constancia/aceptar", { no_volver_a_mostrar: false }, { timeout: 15000 });
-      setCst((c) => ({ ...(c || {}), aceptada: r.aceptada }));
-    } catch (e) {
-      setCstErr(e?.response?.data?.detail || "No se pudo registrar la aceptación. Intenta de nuevo.");
-    } finally { setCstBusy(false); }
-  };
-  const partirTit = (t) => { const i = t.indexOf(". "); return (i > 0 && i < 90) ? [t.slice(0, i + 1), t.slice(i + 2)] : ["", t]; };
+  // Términos del servicio: la Constancia se acepta en su apartado (ConstanciaApartado);
+  // aquí solo guardamos si ya está aceptada para condicionar el firmado de la DJ.
+  const [constanciaOk, setConstanciaOk] = useState(false);
 
   const empresa = data.user?.empresa || "[RAZÓN SOCIAL]";
   // Representante legal: primero el registrado en SUNAT (ficha de la empresa), luego el contacto
@@ -952,7 +932,7 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
     !empresaOk && `Etapa 1 · Empresa (${totals.byEtapa.empresa.done}/${totals.byEtapa.empresa.total})`,
     !flotaOk && `Etapa 2 · Flota (${totals.byEtapa.flota.done}/${totals.byEtapa.flota.total})`,
     !combOk && `Etapa 3 · al menos 1 factura confirmada`,
-    !constanciaOk && `Aceptar la Constancia de Información (arriba)`,
+    !constanciaOk && `Aceptar la constancia de términos del servicio (arriba)`,
   ].filter(Boolean);
 
   const submit = async () => {
@@ -969,7 +949,8 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   if (already) {
     return (
       <div>
-        <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada" subtitle="Firmada electrónicamente ✓" />
+        <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada y términos del servicio" subtitle="Firmada electrónicamente ✓" />
+        <ConstanciaApartado onEstado={setConstanciaOk} />
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-sm">
           <div className="flex items-center gap-2 mb-2"><CheckCircle2 className="w-5 h-5 text-emerald-700" /><strong className="font-cabinet text-base">Declaración firmada</strong></div>
           <ul className="space-y-1 text-emerald-900">
@@ -984,50 +965,9 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
 
   return (
     <div>
-      <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada" subtitle="Antes de presentar tu solicitud a la ATU, necesitamos que confirmes que tu información es veraz" />
+      <EtapaHeader n={4} icon={ShieldCheck} title="Declaración jurada y términos del servicio" subtitle="Acepta los términos del servicio y confirma que tu información es veraz antes de presentar tu solicitud a la ATU" />
 
-      {/* Paso previo: Constancia de Información y Condiciones del Servicio */}
-      {constanciaOk ? (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm mb-4" data-testid="constancia-ok">
-          <div className="flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-700" /><strong className="font-cabinet">Constancia de Información aceptada</strong></div>
-          {cst?.aceptada?.at && <p className="text-emerald-900 mt-1">Registrada el {new Date(cst.aceptada.at).toLocaleString("es-PE")}.</p>}
-        </div>
-      ) : (
-        <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 mb-4" data-testid="constancia-paso">
-          <div className="flex items-center gap-2 mb-1"><ShieldCheck className="w-5 h-5 text-violet-700" /><strong className="font-cabinet text-base">Paso previo: Constancia de Información y Condiciones del Servicio</strong></div>
-          <p className="text-sm text-neutral-700 mb-3">Antes de firmar tu declaración jurada, lee y acepta la constancia del servicio. Deja registro de que fuiste informado de que ENERED gestiona tu expediente pero no garantiza el subsidio.</p>
-          <button type="button" onClick={() => setCstVer((v) => !v)} className="text-violet-700 font-bold text-sm mb-2">
-            {cstVer ? "Ocultar el documento completo" : "Leer el documento completo"}
-          </button>
-          {cstVer && (
-            <div className="bg-white border border-violet-100 rounded-lg p-3 max-h-80 overflow-y-auto text-[12.5px] text-neutral-700 mb-3">
-              {cst?.cliente && (
-                <p className="font-semibold text-neutral-900 mb-1">Empresa (EL CLIENTE): {cst.cliente.razon_social || "—"}{cst.cliente.ruc ? ` · RUC: ${cst.cliente.ruc}` : ""}<br/>Prestador (ENERED): ENERGIX PERÚ E.I.R.L. · RUC 20609304082</p>
-              )}
-              <p className="italic text-neutral-600 mb-2">{(() => { let t = CONSTANCIA_V2.preamble; const c = cst?.cliente; if (c) { if (c.representante) t = t.replace("[Nombre del representante legal]", c.representante); if (c.dni) t = t.replace("[DNI]", c.dni); if (c.cargo) t = t.replace("[cargo]", c.cargo);} return t; })()}</p>
-              {CONSTANCIA_V2.secciones.map((sec, si) => (
-                <div key={si} className="mt-2">
-                  <div className="font-bold text-violet-900">{sec.titulo}</div>
-                  {sec.clausulas.map((c) => { const [tit, resto] = partirTit(c.texto); return (
-                    <p key={c.n} className="mt-1"><span className="font-bold text-violet-700">{c.n}.</span> {tit && <strong className="text-neutral-900">{tit}</strong>} {resto}</p>
-                  ); })}
-                </div>
-              ))}
-              {CONSTANCIA_V2.declaracion && (<div className="mt-2"><div className="font-bold text-violet-900">DECLARACIÓN FINAL</div><p className="mt-1">{CONSTANCIA_V2.declaracion}</p></div>)}
-            </div>
-          )}
-          <label className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer border ${cstAcc ? "bg-violet-100 border-violet-400" : "bg-white border-neutral-300"}`}>
-            <input type="checkbox" checked={cstAcc} onChange={(e) => setCstAcc(e.target.checked)} className="mt-1 w-5 h-5 accent-violet-600" data-testid="constancia-check-etapa" />
-            <span className="text-sm text-neutral-800">Declaro que he leído y acepto de forma libre e íntegra esta Constancia de Información y Condiciones del Servicio. Entiendo que ENERED es una empresa privada que gestiona y presenta mi expediente, que <strong>no garantiza la aprobación ni el pago del subsidio</strong>, y que la decisión, el monto y la fecha del abono dependen exclusivamente de la ATU.</span>
-          </label>
-          {cstErr && <div className="mt-2 bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 text-sm">{cstErr}</div>}
-          <div className="mt-3 flex justify-end">
-            <button onClick={aceptarConstancia} disabled={!cstAcc || cstBusy} className="px-4 py-2 bg-violet-700 hover:bg-violet-800 text-white font-bold rounded-lg flex items-center gap-2 disabled:opacity-50" data-testid="constancia-aceptar-etapa">
-              {cstBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />} Aceptar la constancia
-            </button>
-          </div>
-        </div>
-      )}
+      <ConstanciaApartado onEstado={setConstanciaOk} />
 
       {!canSign && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-900 flex gap-2 mb-4" data-testid="declaracion-missing">

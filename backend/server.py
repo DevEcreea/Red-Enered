@@ -204,17 +204,28 @@ async def _es_cliente_subsidio(u: dict) -> bool:
     return False
 
 
+async def _tiene_dj_firmada(u: dict) -> bool:
+    """¿El cliente ya firmó su declaración jurada del subsidio en la plataforma?"""
+    q = {"$or": [{"user_id": u.get("id")}]}
+    if u.get("empresa"):
+        q["$or"].append({"empresa": u["empresa"]})
+    return bool(await db.subsidio_declaraciones.find_one(q, {"_id": 1}))
+
+
 async def _constancia_pendiente(u: dict) -> bool:
-    """True si hay que MOSTRAR el comunicado al cliente de subsidio. Se muestra en CADA inicio
-    de sesión, salvo que el usuario haya marcado "no volver a mostrar" para la versión vigente.
-    No aplica a invitados, a admin_enered, ni a un admin que impersona."""
+    """True si hay que mostrar el COMUNICADO EMERGENTE al iniciar sesión. Es obligatorio y solo
+    para clientes de subsidio que YA firmaron su declaración jurada (muchos ya no vuelven a la
+    plataforma). Los que aún NO la firmaron ven la constancia como apartado dentro de la Etapa 4,
+    no como emergente. No aplica a invitados, admin_enered ni a un admin que impersona."""
     if u.get("es_guest") or u.get("_impersonando") or u.get("_admin_id"):
         return False
     if u.get("role") == "admin_enered":
         return False
     if not await _es_cliente_subsidio(u):
         return False
-    return (u.get("constancia_no_mostrar") or {}).get("version") != CONSTANCIA_VERSION
+    if (u.get("constancia_aceptada") or {}).get("version") == CONSTANCIA_VERSION:
+        return False  # ya la aceptó
+    return await _tiene_dj_firmada(u)
 
 
 async def user_public_with_servicios(u: dict) -> dict:
@@ -1715,6 +1726,31 @@ async def constancia_aceptar(request: Request, body: ConstanciaAceptarIn = Const
         {"user_id": uid, "version": CONSTANCIA_VERSION, "at": now},
         {"$set": {**registro, "user_id": uid, "no_volver_a_mostrar": body.no_volver_a_mostrar}}, upsert=True)
     return {"ok": True, "aceptada": registro, "no_volver_a_mostrar": body.no_volver_a_mostrar}
+
+
+class ConstanciaResetIn(BaseModel):
+    email: Optional[str] = None
+    ruc: Optional[str] = None
+    todos: bool = False
+
+
+@api.post("/admin/constancia/reset")
+async def constancia_reset(body: ConstanciaResetIn, user: dict = Depends(require_roles("admin_enered"))):
+    """Borra la aceptación de la constancia de un cliente (por email o RUC) o de todos,
+    para que vuelva a pedirse. La bitácora de auditoría se conserva. Solo admin ENERED."""
+    unset = {"$unset": {"constancia_aceptada": "", "constancia_no_mostrar": ""}}
+    if body.todos:
+        r = await db.users.update_many({"constancia_aceptada": {"$exists": True}}, unset)
+        return {"ok": True, "reseteados": r.modified_count, "alcance": "todos"}
+    q = {}
+    if body.email:
+        q["email"] = body.email.strip().lower()
+    elif body.ruc:
+        q["$or"] = [{"ruc": body.ruc.strip()}, {"empresas_asignadas.ruc": body.ruc.strip()}]
+    else:
+        raise HTTPException(status_code=400, detail="Indica email, ruc o todos")
+    r = await db.users.update_many(q, unset)
+    return {"ok": True, "reseteados": r.modified_count}
 
 
 @api.get("/auth/download-token")
@@ -5226,7 +5262,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.11-constancia-etapa4",
+        "version": "1.9.12-constancia-apartado",
     }
 
 # ============================================================

@@ -20,7 +20,6 @@ export default function ConstanciaModal() {
   const [aceptado, setAceptado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState("");
-  const [noMostrar, setNoMostrar] = useState(false);
   const [cliente, setCliente] = useState(null);
   const loc = useLocation();
 
@@ -58,7 +57,7 @@ export default function ConstanciaModal() {
     if (!aceptado || enviando) return;
     setEnviando(true); setError("");
     try {
-      const { data } = await api.post("/constancia/aceptar", { no_volver_a_mostrar: noMostrar }, { timeout: 15000 });
+      const { data } = await api.post("/constancia/aceptar", { no_volver_a_mostrar: false }, { timeout: 15000 });
       setUser({ ...user, constancia_pendiente: false, constancia_aceptada_at: data?.aceptada?.at });
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudo registrar tu aceptación. Revisa tu conexión e intenta de nuevo.");
@@ -126,11 +125,6 @@ export default function ConstanciaModal() {
             <span style={{ fontSize: 13.5, color: "#111827", fontWeight: 600 }}>
               Declaro que he leído y acepto de forma libre e íntegra esta Constancia de Información y Condiciones del Servicio. Entiendo que ENERED es una empresa privada que <b>gestiona y presenta mi expediente</b>, que <b>no garantiza la aprobación ni el pago del subsidio</b>, y que la decisión, el monto y la fecha del abono dependen exclusivamente de la ATU.
             </span>
-          </label>
-          <label style={{ ...check, marginTop: 10, alignItems: "center" }}>
-            <input type="checkbox" checked={noMostrar} onChange={(e) => setNoMostrar(e.target.checked)} data-testid="constancia-nomostrar"
-              style={{ width: 16, height: 16, accentColor: "#6D28D9", flex: "none" }} />
-            <span style={{ fontSize: 12.8, color: "#6b7280" }}>No volver a mostrarme este comunicado al iniciar sesión.</span>
           </label>
           {error && <div style={{ color: "#DC2626", fontSize: 12.5, marginTop: 8, fontWeight: 600 }}>{error}</div>}
           <button onClick={aceptar} disabled={!aceptado || enviando} data-testid="constancia-aceptar"
