@@ -35,6 +35,7 @@ import AnalyticsChecklist from "./pages/analytics/Checklist";
 import Monitoreo from "./pages/Monitoreo";
 import ConsultaMTC from "./pages/ConsultaMTC";
 import DiagnosticoATU from "./pages/DiagnosticoATU";
+import PadronATU from "./pages/PadronATU";
 import AdminConexionATU from "./pages/AdminConexionATU";
 import SubsidioPublico from "./pages/SubsidioPublico";
 import PreciosPublico from "./pages/PreciosPublico";
@@ -181,6 +182,7 @@ function App() {
           <Route path="/admin/subsidio-du007" element={<Shell roles={["admin_enered"]}><SubsidioAdmin programa="du007" /></Shell>} />
           <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
           <Route path="/admin/atu" element={<Shell roles={["admin_enered"]}><AdminConexionATU /></Shell>} />
+          <Route path="/admin/atu-padron" element={<Shell roles={["admin_enered"]}><PadronATU /></Shell>} />
           <Route path="/admin/sire" element={<Shell roles={["admin_enered"]}><AdminSire /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
           <Route path="/captura/:token" element={<CapturaMovil />} />

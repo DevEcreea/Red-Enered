@@ -65,6 +65,7 @@ const ADMIN_ITEMS = [
     submenu: [
       { to: "/mtc", label: "Consulta MTC", testid: "nav-mtc", mkey: "mtc" },
       { to: "/atu", label: "Diagnóstico ATU", testid: "nav-atu", mkey: "atu" },
+      { to: "/admin/atu-padron", label: "Padrón ATU (macro)", testid: "nav-atu-padron", mkey: "atu" },
       { to: "/admin/atu", label: "Conexión ATU", testid: "nav-admin-atu", mkey: "atu_conexion" },
       { to: "/admin/sire", label: "Compras SUNAT", testid: "nav-admin-sire", mkey: "sire" },
       { to: "/testing", label: "Testing", testid: "nav-testing", mkey: "atu" },
@@ -95,6 +96,7 @@ const ROUTE_TITLES = {
   "/admin/subsidio-du007": "Subsidio DU 007 · Expedientes",
   "/admin/bitacora": "Bitácora",
   "/admin/atu": "Conexión ATU · Cuenta maestra",
+  "/admin/atu-padron": "Padrón ATU · Todas las empresas vs. el subsidio",
   "/admin/upload": "Datos",
   "/admin/qr": "QR",
 };

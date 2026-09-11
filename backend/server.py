@@ -7689,6 +7689,177 @@ def _atu_precheck(cp: dict, det: dict, flota_by: dict, periodo: dict | None, gri
     return {"veredicto": veredicto, "avisos": avisos}
 
 
+# ---------------------------------------------------------------------------
+# Padrón macro: TODAS las empresas de subsidio de NUESTRA base vs. la ATU
+# (cuánto puede reclamar cada una, cuánto le reconoce la ATU, si envió su DJ).
+# La lista NACIONAL (las ~10,500 del país) NO es accesible con cuenta de
+# transportista; esto cubre solo las empresas cargadas en ENERED.
+# ---------------------------------------------------------------------------
+async def _rucs_subsidio() -> list[dict]:
+    """[{ruc, razon_social, user_id}] de todas las empresas con subsidio en la base."""
+    empresas = [c.get("empresa") for c in await db.empresas_config.find(
+        {"servicios.subsidio": True}, {"_id": 0, "empresa": 1}).to_list(10000) if c.get("empresa")]
+    q = {"$or": [{"role": "cliente_subsidio"}]}
+    if empresas:
+        q["$or"].append({"empresa": {"$in": empresas}, "role": {"$ne": "admin_enered"}})
+        q["$or"].append({"empresas_asignadas.empresa": {"$in": empresas}})
+    vistos, out = set(), []
+    async for u in db.users.find(q, {"_id": 0, "id": 1, "empresa": 1, "ruc": 1, "empresas_asignadas": 1}):
+        pares = []
+        if u.get("ruc"):
+            pares.append((u["ruc"], u.get("empresa")))
+        for a in (u.get("empresas_asignadas") or []):
+            if a.get("ruc"):
+                pares.append((a["ruc"], a.get("empresa")))
+        for ruc, emp in pares:
+            ruc = (ruc or "").strip()
+            if re.fullmatch(r"\d{11}", ruc) and ruc not in vistos:
+                vistos.add(ruc)
+                out.append({"ruc": ruc, "razon_social": emp, "user_id": u.get("id")})
+    return out
+
+
+def _padron_fila(ruc: str, razon: str, exp: dict) -> dict:
+    """Compacta un expediente ATU en una fila del padrón macro."""
+    of = exp.get("oficial") or {}
+    dj = exp.get("dj") or {}
+    return {
+        "ruc": ruc,
+        "razon_social": (exp.get("empresa") or {}).get("razon_social") or razon,
+        "inscrito_atu": bool(exp.get("inscrito")),
+        "en_padron": (exp.get("empresa") or {}).get("registrado_en_padron"),
+        "flota_reconocida": len(exp.get("flota") or []),
+        "subsidio_maximo": exp.get("subsidio_maximo_flota"),          # tope flota × 4
+        "volumen_galones": exp.get("volumen_galones"),
+        "comprobantes": (exp.get("comprobantes") or {}).get("total", 0),
+        "subsidio_reconocido": of.get("subsidio_total"),              # cálculo oficial ATU
+        "subsidio_estimado": exp.get("subsidio_estimado"),            # S/4 × gal cargado (si no hay oficial)
+        "galones_reconocidos": of.get("galones_reconocidos"),
+        "galones_no_reconocidos": of.get("galones_no_reconocidos"),
+        "dj_enviada": dj.get("enviada"),
+        "dj_expediente": dj.get("numero_expediente"),
+        "dj_ticket": dj.get("numero_ticket"),
+        "dj_fecha": dj.get("fecha"),
+        "entidad_uuid": exp.get("entidad_uuid"),
+    }
+
+
+_ATU_PADRON_SYNC = {"corriendo": False, "hechos": 0, "total": 0, "iniciado": None, "error": None}
+
+
+async def _atu_padron_sync_run():
+    """Recorre nuestras empresas de subsidio y cachea su expediente ATU en db.atu_padron."""
+    import asyncio as _aio
+    _ATU_PADRON_SYNC.update(corriendo=True, hechos=0, error=None,
+                            iniciado=datetime.now(timezone.utc).isoformat())
+    try:
+        empresas = await _rucs_subsidio()
+        _ATU_PADRON_SYNC["total"] = len(empresas)
+        sem = _aio.Semaphore(5)
+
+        async def _uno(e):
+            async with sem:
+                try:
+                    exp = await _atu_con_refresh(_atu.consultar_expediente, e["ruc"])
+                    fila = _padron_fila(e["ruc"], e.get("razon_social"), exp)
+                    fila["error"] = None
+                except HTTPException as ex:
+                    fila = {"ruc": e["ruc"], "razon_social": e.get("razon_social"), "error": str(ex.detail)[:160]}
+                except Exception as ex:
+                    fila = {"ruc": e["ruc"], "razon_social": e.get("razon_social"), "error": str(ex)[:160]}
+                fila["updated_at"] = datetime.now(timezone.utc).isoformat()
+                await db.atu_padron.update_one({"ruc": e["ruc"]}, {"$set": fila}, upsert=True)
+                _ATU_PADRON_SYNC["hechos"] += 1
+
+        await _aio.gather(*[_uno(e) for e in empresas])
+    except Exception as ex:
+        _ATU_PADRON_SYNC["error"] = str(ex)[:200]
+    finally:
+        _ATU_PADRON_SYNC["corriendo"] = False
+
+
+@api.post("/atu/padron/sync")
+async def atu_padron_sync(user: dict = Depends(require_roles("admin_enered"))):
+    """Dispara la actualización del padrón macro en segundo plano. Solo admin ENERED."""
+    if _ATU_PADRON_SYNC["corriendo"]:
+        return {"ok": True, "ya_corriendo": True, **_ATU_PADRON_SYNC}
+    if not await _atu_sesion_maestra():
+        raise HTTPException(status_code=409, detail="No hay cuenta ATU maestra conectada")
+    asyncio.create_task(_atu_padron_sync_run())
+    return {"ok": True, "iniciado": True}
+
+
+class AtuPadronRucsIn(BaseModel):
+    rucs: List[str]
+
+
+@api.post("/atu/padron/agregar")
+async def atu_padron_agregar(body: AtuPadronRucsIn, user: dict = Depends(require_roles("admin_enered"))):
+    """Agrega al padrón un universo ARBITRARIO de RUCs (los que la dueña quiera comparar:
+    su gremio, un padrón MTC, la competencia) y calcula su expediente ATU. Solo admin ENERED."""
+    import asyncio as _aio
+    rucs = []
+    for r in (body.rucs or []):
+        r = re.sub(r"\D", "", str(r or ""))
+        if re.fullmatch(r"\d{11}", r) and r not in rucs:
+            rucs.append(r)
+    if not rucs:
+        raise HTTPException(status_code=400, detail="No hay RUCs válidos (11 dígitos) en la lista")
+    if not await _atu_sesion_maestra():
+        raise HTTPException(status_code=409, detail="No hay cuenta ATU maestra conectada")
+    sem = _aio.Semaphore(5)
+    resultados = {"ok": 0, "sin_cuenta": 0, "error": 0}
+
+    async def _uno(ruc):
+        async with sem:
+            try:
+                exp = await _atu_con_refresh(_atu.consultar_expediente, ruc)
+                fila = _padron_fila(ruc, None, exp); fila["error"] = None
+                resultados["ok"] += 1
+                if exp.get("inscrito") is False:
+                    resultados["sin_cuenta"] += 1
+            except Exception as ex:
+                fila = {"ruc": ruc, "razon_social": None, "error": str(getattr(ex, "detail", ex))[:160]}
+                resultados["error"] += 1
+            fila["updated_at"] = datetime.now(timezone.utc).isoformat()
+            fila["origen"] = "manual"
+            await db.atu_padron.update_one({"ruc": ruc}, {"$set": fila}, upsert=True)
+
+    await _aio.gather(*[_uno(r) for r in rucs])
+    return {"ok": True, "procesados": len(rucs), **resultados}
+
+
+@api.delete("/atu/padron")
+async def atu_padron_limpiar(solo_manual: int = 0, user: dict = Depends(require_roles("admin_enered"))):
+    """Vacía el padrón (o solo las filas agregadas a mano con ?solo_manual=1)."""
+    q = {"origen": "manual"} if solo_manual else {}
+    r = await db.atu_padron.delete_many(q)
+    return {"ok": True, "borradas": r.deleted_count}
+
+
+@api.get("/atu/padron")
+async def atu_padron(user: dict = Depends(require_roles("admin_enered"))):
+    """Padrón macro: todas las empresas de subsidio de ENERED con lo que la ATU les
+    reconoce y su estado de DJ (desde el caché; usa POST /atu/padron/sync para refrescar)."""
+    filas = await db.atu_padron.find({}, {"_id": 0}).to_list(10000)
+    filas.sort(key=lambda x: (x.get("subsidio_reconocido") or x.get("subsidio_estimado") or 0), reverse=True)
+    def _n(x, k):
+        return float(x.get(k) or 0)
+    total_reclamado = sum(_n(f, "subsidio_reconocido") or _n(f, "subsidio_estimado") for f in filas)
+    return {
+        "items": filas,
+        "total_empresas": len(filas),
+        "con_dj": sum(1 for f in filas if f.get("dj_enviada")),
+        "inscritas_atu": sum(1 for f in filas if f.get("inscrito_atu")),
+        "sin_cuenta_atu": sum(1 for f in filas if f.get("inscrito_atu") is False),
+        "total_reclamado": round(total_reclamado, 2),
+        "total_maximo": round(sum(_n(f, "subsidio_maximo") for f in filas), 2),
+        "fondo_du004": 33_800_000,
+        "sync": _ATU_PADRON_SYNC,
+        "actualizado": max((f.get("updated_at") for f in filas if f.get("updated_at")), default=None),
+    }
+
+
 @api.get("/atu/expediente/comprobantes")
 async def atu_expediente_comprobantes(ruc: str, user: dict = Depends(require_roles("admin_enered"))):
     """Comprobantes del RUC en la ATU con detalle (placas, azufre, validaciones, PDF)
