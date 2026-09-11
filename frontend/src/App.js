@@ -61,6 +61,7 @@ import SubsidioAdmin from "./pages/SubsidioAdmin";
 import Bitacora from "./pages/Bitacora";
 import Privacidad from "./pages/Privacidad";
 import { useAuth } from "./context/AuthContext";
+import ConstanciaModal from "./components/ConstanciaModal";
 
 function Shell({ children, roles }) {
   return (
@@ -118,6 +119,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Toaster richColors position="top-right" />
+        <ConstanciaModal />
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />

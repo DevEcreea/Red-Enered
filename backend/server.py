@@ -187,6 +187,36 @@ def user_public(u: dict) -> dict:
     }
 
 
+CONSTANCIA_VERSION = "2.0"  # Constancia de Información y Términos del Servicio (subir versión = re-aceptación)
+
+
+async def _es_cliente_subsidio(u: dict) -> bool:
+    """True si la cuenta es un cliente del servicio de subsidio: rol cliente_subsidio, o un
+    administrador/representante cuya empresa tiene el servicio de subsidio activo (muchos
+    clientes que ya firmaron su DJ tienen rol 'administrador', no 'cliente_subsidio')."""
+    role = u.get("role")
+    if role == "cliente_subsidio":
+        return True
+    if role in ("administrador", "logistica", "contabilidad") and u.get("empresa"):
+        cfg = await db.empresas_config.find_one(
+            {"empresa": u["empresa"], "servicios.subsidio": True}, {"_id": 1})
+        return bool(cfg)
+    return False
+
+
+async def _constancia_pendiente(u: dict) -> bool:
+    """True si hay que MOSTRAR el comunicado al cliente de subsidio. Se muestra en CADA inicio
+    de sesión, salvo que el usuario haya marcado "no volver a mostrar" para la versión vigente.
+    No aplica a invitados, a admin_enered, ni a un admin que impersona."""
+    if u.get("es_guest") or u.get("_impersonando") or u.get("_admin_id"):
+        return False
+    if u.get("role") == "admin_enered":
+        return False
+    if not await _es_cliente_subsidio(u):
+        return False
+    return (u.get("constancia_no_mostrar") or {}).get("version") != CONSTANCIA_VERSION
+
+
 async def user_public_with_servicios(u: dict) -> dict:
     """Igual que user_public pero enriquecido con servicios de la empresa."""
     base = user_public(u)
@@ -195,12 +225,16 @@ async def user_public_with_servicios(u: dict) -> dict:
         base["servicios"] = {"plataforma": False, "combustible": False, "gps": False, "subsidio": True}
         base["tipo_cliente"] = "subsidio"
         base["wialon_configurado"] = False
+        base["constancia_version"] = CONSTANCIA_VERSION
+        base["constancia_pendiente"] = False
         return base
     # admin_enered no está atado a una empresa; tiene todos los servicios habilitados por default
     if u.get("role") == "admin_enered":
         base["servicios"] = {"plataforma": True, "combustible": True, "gps": True, "subsidio": True}
         base["tipo_cliente"] = "enered"
         base["wialon_configurado"] = False
+        base["constancia_version"] = CONSTANCIA_VERSION
+        base["constancia_pendiente"] = False
         return base
     empresa = u.get("empresa")
     info = await _svc.get_empresa_servicios(db, empresa)
@@ -218,6 +252,11 @@ async def user_public_with_servicios(u: dict) -> dict:
             ruc_emp = (hermano or {}).get("ruc") or ""
         if ruc_emp:
             base["ruc"] = ruc_emp
+    base["constancia_version"] = CONSTANCIA_VERSION
+    base["constancia_pendiente"] = await _constancia_pendiente(u)
+    ca = u.get("constancia_aceptada")
+    base["constancia_aceptada_at"] = (ca or {}).get("at") if ca else None
+    base["constancia_ok"] = bool(ca and ca.get("version") == CONSTANCIA_VERSION)
     return base
 
 
@@ -1598,6 +1637,84 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return await user_public_with_servicios(user)
+
+
+@api.get("/constancia")
+async def constancia_estado(user: dict = Depends(get_current_user)):
+    """Versión vigente de la constancia y si el usuario ya la aceptó."""
+    return {
+        "version": CONSTANCIA_VERSION,
+        "pendiente": await _constancia_pendiente(user),
+        "aceptada": user.get("constancia_aceptada"),
+        "no_mostrar": user.get("constancia_no_mostrar"),
+        "cliente": await _constancia_datos_cliente(user),
+    }
+
+
+async def _constancia_datos_cliente(user: dict) -> dict:
+    """Datos del cliente para rellenar el preámbulo de la constancia: razón social, RUC,
+    representante legal, DNI y cargo. Se toman de la declaración jurada del cliente (donde el
+    propio cliente los declaró), o del representante legal en SUNAT, o de los datos del usuario."""
+    empresa = user.get("empresa")
+    ruc = user.get("ruc")
+    representante = dni = cargo = None
+    # 1) Lo que el cliente declaró en su DJ (lo más fiable, es su propia declaración)
+    dj = await db.subsidio_declaraciones.find_one(
+        {"$or": [{"user_id": user.get("id")}, {"empresa": empresa}], "representante": {"$nin": [None, ""]}},
+        {"_id": 0, "representante": 1, "representante_dni": 1},
+        sort=[("accepted_at", -1)])
+    if dj:
+        representante = (dj.get("representante") or "").strip() or None
+        dni = (dj.get("representante_dni") or "").strip() or None
+    # 2) Representante legal en SUNAT (por RUC)
+    if (not representante or not dni) and ruc:
+        cache = await db.representantes_ruc.find_one({"ruc": ruc}, {"_id": 0, "representantes": 1})
+        reps = (cache or {}).get("representantes") or []
+        if reps:
+            principal = next((r for r in reps if any(k in (r.get("cargo") or "").upper()
+                             for k in ("GERENTE", "TITULAR", "REPRESENTANTE"))), reps[0])
+            representante = representante or (principal.get("nombre") or "").strip() or None
+            dni = dni or (principal.get("numero_documento") or "").strip() or None
+            cargo = cargo or (principal.get("cargo") or "").strip().title() or None
+    # 3) Fallbacks a los datos del usuario
+    representante = representante or user.get("contacto") or user.get("name")
+    cargo = cargo or "Representante legal"
+    return {"razon_social": empresa, "ruc": ruc, "representante": representante, "dni": dni, "cargo": cargo}
+
+
+class ConstanciaAceptarIn(BaseModel):
+    no_volver_a_mostrar: bool = False
+
+
+@api.post("/constancia/aceptar")
+async def constancia_aceptar(request: Request, body: ConstanciaAceptarIn = ConstanciaAceptarIn(),
+                             user: dict = Depends(get_current_user)):
+    """Registra la aceptación de la constancia (prueba del consentimiento). Si el cliente marca
+    'no volver a mostrar', deja de aparecer en próximos inicios de sesión (para esta versión)."""
+    if user.get("es_guest") or user.get("_impersonando") or user.get("_admin_id"):
+        raise HTTPException(status_code=403, detail="Solo el propio cliente puede aceptar la constancia")
+    uid = user.get("id")
+    now = datetime.now(timezone.utc).isoformat()
+    registro = {
+        "version": CONSTANCIA_VERSION,
+        "at": now,
+        "ip": (request.client.host if request.client else None),
+        "user_agent": request.headers.get("user-agent", "")[:300],
+        "empresa": user.get("empresa"),
+        "ruc": user.get("ruc"),
+        "email": user.get("email"),
+        "medio": "plataforma_web",
+    }
+    setter = {"constancia_aceptada": registro}
+    if body.no_volver_a_mostrar:
+        setter["constancia_no_mostrar"] = {"version": CONSTANCIA_VERSION, "at": now}
+    await db.users.update_one({"id": uid}, {"$set": setter})
+    # Bitácora de auditoría: guarda TODAS las aceptaciones (cada inicio de sesión que la acepta),
+    # con una entrada por usuario/versión/fecha-hora, para probar el consentimiento reiterado.
+    await db.constancia_aceptaciones.update_one(
+        {"user_id": uid, "version": CONSTANCIA_VERSION, "at": now},
+        {"$set": {**registro, "user_id": uid, "no_volver_a_mostrar": body.no_volver_a_mostrar}}, upsert=True)
+    return {"ok": True, "aceptada": registro, "no_volver_a_mostrar": body.no_volver_a_mostrar}
 
 
 @api.get("/auth/download-token")
@@ -5109,7 +5226,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.4-multiempresa-admin",
+        "version": "1.9.11-constancia-etapa4",
     }
 
 # ============================================================
