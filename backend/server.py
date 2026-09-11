@@ -7473,14 +7473,18 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
         return {"ruc": ruc, "conectado": False, "sin_maestra": True}
     session = _atu_unpack(doc)
     try:
-        diag, actualizada = await _atu.diagnosticar_con_sesion(session, ruc)
+        try:
+            diag = await _atu.consultar_habilitaciones(session["access_token"], ruc)
+        except _atu.AtuError as e:
+            msg = str(e).lower()
+            if "rechaz" not in msg and "expir" not in msg:
+                raise
+            session = await _atu_refrescar_maestra(session)
+            diag = await _atu.consultar_habilitaciones(session["access_token"], ruc)
     except _atu.AtuError as e:
         return {"ruc": ruc, "conectado": True, "maestra_vencida": True, "error": str(e)}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Error consultando ATU: {str(e)}")
-    # guardar la sesión renovada si cambió (auto-refresh)
-    if actualizada.get("access_token") != session.get("access_token"):
-        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(actualizada)})
     # ---- Vista unificada por placa: TODA la flota (MTC) + si la ATU la acepta o no + motivo ----
     import datetime as _dt
 
@@ -7595,6 +7599,25 @@ async def _atu_sesion_maestra():
     return _atu_unpack(doc) if doc else None
 
 
+_ATU_REFRESH_LOCK = asyncio.Lock()
+
+
+async def _atu_refrescar_maestra(session_vieja: dict) -> dict:
+    """Refresca la sesión maestra UNA sola vez aunque lleguen varias peticiones a la vez:
+    bajo lock relee la BD; si otra petición ya la renovó, devuelve esa (el refresh_token
+    de la ATU es de un solo uso: refrescar dos veces en paralelo tumbaba la sesión)."""
+    async with _ATU_REFRESH_LOCK:
+        actual = await _atu_sesion_maestra()
+        if actual and actual.get("access_token") != session_vieja.get("access_token"):
+            return actual
+        if not session_vieja.get("refresh_token"):
+            raise _atu.AtuError("La sesión ATU expiró y no hay refresh; vuelve a conectar la cuenta.")
+        nuevos = await _atu.refresh_session(session_vieja["refresh_token"])
+        nueva = {**session_vieja, **nuevos}
+        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack(nueva)})
+        return nueva
+
+
 async def _atu_con_refresh(fn, *args):
     """Ejecuta fn(access_token, *args) con la sesión maestra; si el token venció, refresca y reintenta."""
     session = await _atu_sesion_maestra()
@@ -7604,11 +7627,13 @@ async def _atu_con_refresh(fn, *args):
         return await fn(session["access_token"], *args)
     except _atu.AtuError as e:
         msg = str(e).lower()
-        if ("rechaz" not in msg and "expir" not in msg) or not session.get("refresh_token"):
+        if "rechaz" not in msg and "expir" not in msg:
             raise HTTPException(status_code=502, detail=str(e))
-        nuevos = await _atu.refresh_session(session["refresh_token"])
-        await db.atu_sessions.update_one({"ruc": _ATU_MASTER_KEY}, {"$set": _atu_pack({**session, **nuevos})})
-        return await fn(nuevos["access_token"], *args)
+        try:
+            nueva = await _atu_refrescar_maestra(session)
+        except _atu.AtuError as e2:
+            raise HTTPException(status_code=502, detail=str(e2))
+        return await fn(nueva["access_token"], *args)
 
 
 def _atu_precheck(cp: dict, det: dict, flota_by: dict, periodo: dict | None, grifo_ok) -> dict:

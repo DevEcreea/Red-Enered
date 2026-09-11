@@ -20,13 +20,24 @@ export default function DiagnosticoATU() {
   async function analizar(rucArg) {
     const r = (rucArg || ruc).trim();
     if (!/^\d{11}$/.test(r)) { setError("El RUC debe tener 11 dígitos"); return; }
-    setLoading(true); setError(""); setRes(null); setRucActivo(r);
+    setLoading(true); setError(""); setRes(null); setExp(null); setRucActivo(r);
     try {
       const { data } = await api.get("/atu/analisis", { params: { ruc: r } });
       setRes(data);
     } catch (e) {
       setError(e?.response?.data?.detail || "No se pudo analizar el RUC");
     } finally { setLoading(false); }
+    // El expediente va DESPUÉS del análisis (no en paralelo): ambos pueden renovar la
+    // sesión ATU y el refresh_token es de un solo uso.
+    if (esAdmin) {
+      setExpLoading(true);
+      try {
+        const { data } = await api.get("/atu/expediente", { params: { ruc: r } });
+        setExp(data);
+      } catch (e) {
+        setExp({ error: e?.response?.data?.detail || "No se pudo consultar el expediente" });
+      } finally { setExpLoading(false); }
+    }
   }
 
   return (
