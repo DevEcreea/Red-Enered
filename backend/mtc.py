@@ -115,22 +115,9 @@ def _parse_detalle(html_text: str) -> dict:
     }
 
 
-async def consultar(tipo: str, valor: str) -> dict:
-    """
-    Consulta la DGTT del MTC. tipo ∈ {ruc, placa, partida, constancia}.
-    Devuelve las autorizaciones encontradas con su detalle (estado, vigencia, placas).
-    """
-    tipo = (tipo or "").strip().lower()
-    valor = (valor or "").strip().upper()
-    if tipo not in OPCIONES:
-        raise MtcError("Tipo de búsqueda inválido (use ruc, placa, partida o constancia)")
-    if not valor:
-        raise MtcError("Ingrese el valor a buscar")
-    _validar(tipo, valor)
-    opc = OPCIONES[tipo]
-
+async def _consultar_via(proxy: Optional[str], tipo: str, valor: str, opc: str) -> dict:
     async with httpx.AsyncClient(timeout=_MTC_TIMEOUT, verify=False, follow_redirects=True,
-                                 headers={"User-Agent": UA}, proxy=_MTC_PROXY) as client:
+                                 headers={"User-Agent": UA}, proxy=proxy) as client:
         # 1) tokens del formulario
         r0 = await client.get(FORM)
         payload = {
@@ -177,3 +164,30 @@ async def consultar(tipo: str, valor: str) -> dict:
         "total_autorizaciones": len(autorizaciones),
         "autorizaciones": autorizaciones,
     }
+
+
+async def consultar(tipo: str, valor: str) -> dict:
+    """
+    Consulta la DGTT del MTC. tipo ∈ {ruc, placa, partida, constancia}.
+    Devuelve las autorizaciones encontradas con su detalle (estado, vigencia, placas).
+
+    Intenta primero la conexión directa; si el MTC bloquea la IP (o el proxy configurado
+    está caído), reintenta a través de MTC_PROXY cuando exista. Antes se usaba el proxy de
+    forma exclusiva y ciega: si ese proxy fallaba, TODA consulta al MTC fallaba en silencio
+    aunque la conexión directa funcionara.
+    """
+    tipo = (tipo or "").strip().lower()
+    valor = (valor or "").strip().upper()
+    if tipo not in OPCIONES:
+        raise MtcError("Tipo de búsqueda inválido (use ruc, placa, partida o constancia)")
+    if not valor:
+        raise MtcError("Ingrese el valor a buscar")
+    _validar(tipo, valor)
+    opc = OPCIONES[tipo]
+
+    try:
+        return await _consultar_via(None, tipo, valor, opc)
+    except httpx.RequestError:
+        if not _MTC_PROXY:
+            raise
+        return await _consultar_via(_MTC_PROXY, tipo, valor, opc)
