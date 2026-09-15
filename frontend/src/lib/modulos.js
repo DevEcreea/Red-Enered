@@ -22,6 +22,7 @@ export const MODULOS = [
   { key: "tesoreria",     label: "Tesorería",            grupo: "admin" },
   { key: "datos",         label: "Datos / Carga",        grupo: "admin" },
   { key: "subsidio",      label: "Subsidio DU 004",      grupo: "admin" },
+  { key: "subsidio_du007", label: "Subsidio DU 007",     grupo: "admin" },
   { key: "bitacora",      label: "Bitácora",             grupo: "admin" },
 ];
 

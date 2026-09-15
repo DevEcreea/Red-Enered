@@ -174,6 +174,7 @@ function App() {
           <Route path="/admin/tesoreria" element={<Shell roles={["admin_enered", "contabilidad", "administrador"]}><AdminTesoreria /></Shell>} />
           <Route path="/admin/empresas" element={<Shell roles={["admin_enered"]}><AdminEmpresas /></Shell>} />
           <Route path="/admin/subsidio" element={<Shell roles={["admin_enered"]}><SubsidioAdmin /></Shell>} />
+          <Route path="/admin/subsidio-du007" element={<Shell roles={["admin_enered"]}><SubsidioAdmin programa="du007" /></Shell>} />
           <Route path="/admin/bitacora" element={<Shell roles={["admin_enered"]}><Bitacora /></Shell>} />
           <Route path="/admin/atu" element={<Shell roles={["admin_enered"]}><AdminConexionATU /></Shell>} />
           <Route path="/admin/sire" element={<Shell roles={["admin_enered"]}><AdminSire /></Shell>} />

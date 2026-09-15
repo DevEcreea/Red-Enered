@@ -33,11 +33,13 @@ const STAGES = [
 ];
 const STAGE_LABEL = Object.fromEntries(STAGES.map(s => [s.key, s.label]));
 
-export default function SubsidioAdmin() {
+export default function SubsidioAdmin({ programa = "du004" }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("");
+  const decreto = programa === "du007" ? "DU 007-2026" : "DU 004-2026";
+  const decretoCorto = programa === "du007" ? "DU 007" : "DU 004";
   // Expediente abierto persistido en la URL (?u=<userId>) para no perder el lugar al recargar.
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("u") || null;
@@ -56,11 +58,12 @@ export default function SubsidioAdmin() {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       if (estado) params.set("estado", estado);
+      params.set("programa", programa);
       const { data } = await api.get(`/admin/subsidio/expedientes?${params.toString()}`);
       setItems(data.items || []);
     } finally { setLoading(false); }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, programa]);
 
   const stats = useMemo(() => {
     const total = items.length;
@@ -93,7 +96,7 @@ export default function SubsidioAdmin() {
   };
 
   if (selectedId) {
-    return <ExpedienteDetalle userId={selectedId} empresa={selectedEmpresa} onBack={() => { setSelectedId(null); load(); }} />;
+    return <ExpedienteDetalle userId={selectedId} empresa={selectedEmpresa} programa={programa} onBack={() => { setSelectedId(null); load(); }} />;
   }
 
   return (
@@ -102,9 +105,9 @@ export default function SubsidioAdmin() {
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
           <div>
-            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Admin · DU 004-2026</span>
-            <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Subsidio · Expedientes</h2>
-            <p className="text-neutral-500 text-sm mt-1">Vista de todos los clientes del subsidio y su avance.</p>
+            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Admin · {decreto}</span>
+            <h2 className="font-cabinet text-2xl font-bold tracking-tight mt-1">Subsidio {decretoCorto} · Expedientes</h2>
+            <p className="text-neutral-500 text-sm mt-1">Vista de todos los clientes del subsidio {decretoCorto} y su avance.</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Kpi label="Empresas" value={stats.total} />
@@ -157,7 +160,7 @@ export default function SubsidioAdmin() {
                 <th className="text-left px-4 py-3">Empresa</th>
                 <th className="text-left px-4 py-3">RUC</th>
                 <th className="text-left px-4 py-3">Estado</th>
-                <th className="text-left px-4 py-3">Etapa DU 004</th>
+                <th className="text-left px-4 py-3">Etapa {decretoCorto}</th>
                 <th className="text-right px-4 py-3">Docs</th>
                 <th className="text-right px-4 py-3">Flota</th>
                 <th className="text-right px-4 py-3">Facturas</th>
@@ -210,9 +213,11 @@ export default function SubsidioAdmin() {
                       {it.declaracion_firmada ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <Clock className="w-4 h-4 text-neutral-300 inline" />}
                     </td>
                     <td className="px-2 py-3 text-right whitespace-nowrap">
-                      <button onClick={(e) => deleteExpediente(e, it.user_id, it.empresa || it.ruc)} className="text-red-500 hover:text-red-700 p-1 mr-2 transition-colors" title="Eliminar expediente">
-                        <Trash2 className="w-4 h-4 inline" />
-                      </button>
+                      {programa !== "du007" && (
+                        <button onClick={(e) => deleteExpediente(e, it.user_id, it.empresa || it.ruc)} className="text-red-500 hover:text-red-700 p-1 mr-2 transition-colors" title="Eliminar expediente (borra también sus datos del DU 007)">
+                          <Trash2 className="w-4 h-4 inline" />
+                        </button>
+                      )}
                       <span className="text-brand text-xs font-bold">Ver →</span>
                     </td>
                   </tr>
@@ -229,9 +234,18 @@ export default function SubsidioAdmin() {
 /* ============================================================ */
 /* DETALLE DEL EXPEDIENTE                                        */
 /* ============================================================ */
-function ExpedienteDetalle({ userId, empresa, onBack }) {
+function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
+  const decreto = programa === "du007" ? "DU 007-2026" : "DU 004-2026";
   // Sufijo para abrir la empresa correcta de un cliente multi-empresa.
   const qEmp = empresa ? `?empresa=${encodeURIComponent(empresa)}` : "";
+  // Igual, pero además filtra el expediente por programa (du004/du007) — usado en las
+  // recargas de datos del expediente (GET), donde importa qué facturas se muestran.
+  const qDetalle = (() => {
+    const p = new URLSearchParams();
+    if (empresa) p.set("empresa", empresa);
+    p.set("programa", programa);
+    return `?${p.toString()}`;
+  })();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   // Pestaña activa persistida en la URL (?tab=) para no perder el lugar al recargar.
@@ -247,11 +261,12 @@ function ExpedienteDetalle({ userId, empresa, onBack }) {
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
+        const { data } = await api.get(`/admin/subsidio/expedientes/${userId}${qDetalle}`);
         setData(data);
       } finally { setLoading(false); }
     })();
-  }, [userId, empresa]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, empresa, programa]);
 
   const companyDocs = useMemo(() => {
     const docs = data?.documents || [];
@@ -285,7 +300,7 @@ function ExpedienteDetalle({ userId, empresa, onBack }) {
     try {
       await api.delete(`/admin/subsidio/documents/${docId}`);
       // Refresh the page data
-      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qDetalle}`);
       setData(res);
     } catch (err) {
       alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
@@ -297,7 +312,7 @@ function ExpedienteDetalle({ userId, empresa, onBack }) {
     try {
       await api.delete(`/admin/subsidio/invoices/${invoiceId}`);
       // Refresh the page data
-      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
+      const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qDetalle}`);
       setData(res);
     } catch (err) {
       alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`);
@@ -335,7 +350,7 @@ function ExpedienteDetalle({ userId, empresa, onBack }) {
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Expediente DU 004-2026</span>
+            <span className="text-[10px] uppercase tracking-widest font-bold text-brand">Expediente {decreto}</span>
             <h2 className="font-cabinet text-2xl font-bold mt-1">{user.empresa || "—"}</h2>
             <p className="text-sm text-neutral-500 mt-1">RUC <span className="font-mono">{user.ruc}</span> · {user.email}</p>
           </div>
@@ -395,8 +410,9 @@ function ExpedienteDetalle({ userId, empresa, onBack }) {
             vehicles={vehicles}
             invoices={invoices}
             documents={documents}
+            programa={programa}
             onRefresh={async () => {
-              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qEmp}`);
+              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qDetalle}`);
               setData(res);
             }}
           />
@@ -952,7 +968,7 @@ const fmtDate = (s, withTime) => {
 /* ============================================================ */
 /* TAB EDITAR (EDICIÓN MANUAL)                                   */
 /* ============================================================ */
-function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
+function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004", onRefresh }) {
   // Multi-empresa: las altas se registran en la empresa del expediente abierto.
   const qEmp = user?.empresa ? `?empresa=${encodeURIComponent(user.empresa)}` : "";
   // Archivos ORIGINALES que subió el cliente, en cualquier formato y por cualquier vía:
@@ -1212,6 +1228,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], onRefresh }) {
         invalida: invInvalida,
         motivos_invalidez: invInvalida ? invMotivos : [],
         motivo_invalidez_otros: invInvalida && invMotivos.includes("otros") ? invMotivoOtros.trim() : "",
+        programa,
       };
 
       let vinculadoA = "";

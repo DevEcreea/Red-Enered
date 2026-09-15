@@ -51,6 +51,7 @@ const ADMIN_ITEMS = [
   { to: "/admin/tesoreria", label: "Tesorería", icon: FolderCheck, testid: "nav-tesoreria", mkey: "tesoreria" },
   { to: "/admin/upload", label: "Datos", icon: Database, testid: "nav-upload", mkey: "datos" },
   { to: "/admin/subsidio", label: "Subsidio DU 004", icon: FolderCheck, testid: "nav-subsidio-admin", mkey: "subsidio" },
+  { to: "/admin/subsidio-du007", label: "Subsidio DU 007", icon: FolderCheck, testid: "nav-subsidio-admin-du007", mkey: "subsidio_du007" },
   { to: "/admin/bitacora", label: "Bitácora", icon: FileText, testid: "nav-bitacora", mkey: "bitacora" },
   {
     label: "En desarrollo (GIU)", icon: ShieldCheck, testid: "nav-en-desarrollo",
@@ -83,7 +84,8 @@ const ROUTE_TITLES = {
   "/soporte": "Soporte",
   "/admin/users": "Usuarios",
   "/admin/empresas": "Empresas & Servicios",
-  "/admin/subsidio": "Subsidio · Expedientes",
+  "/admin/subsidio": "Subsidio DU 004 · Expedientes",
+  "/admin/subsidio-du007": "Subsidio DU 007 · Expedientes",
   "/admin/bitacora": "Bitácora",
   "/admin/atu": "Conexión ATU · Cuenta maestra",
   "/admin/upload": "Datos",

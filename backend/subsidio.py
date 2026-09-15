@@ -378,6 +378,7 @@ class InvoiceAdminCreateIn(BaseModel):
     precio_unitario: float
     importe_total: float
     producto: Optional[str] = "DIESEL B5"
+    programa: Optional[str] = "du004"
 
 
 class RepresentanteUpdateIn(BaseModel):
@@ -2209,6 +2210,7 @@ class InvoiceUpdateIn(BaseModel):
     importe_total: Optional[float] = None
     numero_documento: Optional[str] = None
     ruc_emisor: Optional[str] = None
+    programa: Optional[str] = None
     # Campos del formulario de la ATU (editables por el cliente)
     serie: Optional[str] = None
     numero: Optional[str] = None
@@ -3373,8 +3375,11 @@ async def admin_list_expedientes(
     q: Optional[str] = None,
     estado: Optional[str] = None,
     limit: int = 200,
+    programa: Optional[str] = None,
 ):
-    """Lista todos los clientes de subsidio con resumen del expediente."""
+    """Lista todos los clientes de subsidio con resumen del expediente.
+    `programa`: du004 (default, incluye facturas sin programa — registros previos al DU 007)
+    o du007 (solo facturas de ese programa)."""
     # Include both cliente_subsidio users AND users whose empresa has servicios.subsidio enabled
     empresas_subsidio = []
     async for cfg in db.empresas_config.find({"servicios.subsidio": True}, {"_id": 0, "empresa": 1}):
@@ -3454,8 +3459,12 @@ async def admin_list_expedientes(
         k = _emp_key(d["_id"]["u"], d["_id"].get("e"), base_de)
         veh_map[k] = veh_map.get(k, 0) + d["count"]
 
+    # du007: solo facturas marcadas con ese programa. du004 (default): todo lo que NO sea
+    # du007 — incluye las facturas previas al DU 007, que no llevan el campo `programa`.
+    prog_match = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
+
     inv_agg = await db.consumos_subsidio.aggregate([
-        {"$match": {"user_id": {"$in": uids}}},
+        {"$match": {"user_id": {"$in": uids}, **prog_match}},
         {"$group": {
             "_id": {"u": "$user_id", "e": "$empresa", "status": "$status"},
             "count": {"$sum": 1},
@@ -3479,8 +3488,9 @@ async def admin_list_expedientes(
 
     # Facturas de Red-Enered (db.invoices) por empresa, SIN contar el espejo de las que
     # ya están en consumos_subsidio (mismo id): antes se sumaban dos veces y la lista
-    # decía "40 facturas" donde había 20.
-    empresas_list = sorted({e for (_, e, _) in filas if e})
+    # decía "40 facturas" donde había 20. Este espejo no distingue programa, así que
+    # solo se suma al panel del DU 004 (el DU 007 solo cuenta lo marcado programa=du007).
+    empresas_list = sorted({e for (_, e, _) in filas if e}) if programa != "du007" else []
     if empresas_list:
         ids_consumos = [c.get("id") async for c in db.consumos_subsidio.find(
             {"user_id": {"$in": uids}}, {"_id": 0, "id": 1}) if c.get("id")]
@@ -3552,10 +3562,11 @@ async def admin_list_expedientes(
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
-async def admin_get_expediente(user_id: str, empresa: Optional[str] = None,
+async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, programa: Optional[str] = None,
                                _: dict = Depends(_require_admin_enered)):
     """Detalle completo de un expediente: cálculo, banco, docs, flota, facturas, declaración.
-    `empresa`: para clientes multi-empresa, cuál de sus empresas abrir (por defecto la base)."""
+    `empresa`: para clientes multi-empresa, cuál de sus empresas abrir (por defecto la base).
+    `programa`: du004 (default, incluye facturas sin programa) o du007 (solo ese programa)."""
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
@@ -3596,11 +3607,14 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None,
         vehicles_dict[placa] = sv
         
     vehicles = list(vehicles_dict.values())
+    # du007: solo facturas marcadas con ese programa. du004 (default): todo lo que NO sea
+    # du007 — incluye las facturas previas al DU 007, que no llevan el campo `programa`.
+    prog_match = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
     sub_invs = await db.consumos_subsidio.find(
-        _own_q(u, uids),
+        {**_own_q(u, uids), **prog_match},
         {"_id": 0, "raw_ocr_response": 0, "factura_storage_key": 0},
     ).sort("fecha", -1).to_list(2000)
-    
+
     invoices = list(sub_invs)
 
     # Evitar duplicados: una factura confirmada desde Subsidio existe tanto en
@@ -3613,7 +3627,9 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None,
     }
     seen_ndocs.discard("")
 
-    if u.get("empresa"):
+    # El espejo db.invoices no distingue programa, así que solo se agrega al expediente del
+    # DU 004 (el DU 007 solo muestra lo que el cliente subió explícitamente para ese programa).
+    if u.get("empresa") and programa != "du007":
         enered_invs = await db.invoices.find(
             {"empresa": u.get("empresa")},
             {"_id": 0}
@@ -4595,6 +4611,7 @@ async def admin_add_invoice(
         "importe_total": payload.importe_total,
         "numero_documento": payload.numero_documento,
         "confianza": 1.0,
+        "programa": payload.programa or "du004",
     }
     await db.consumos_subsidio.insert_one(doc)
     doc.pop("_id", None)
