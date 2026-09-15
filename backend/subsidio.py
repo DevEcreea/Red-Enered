@@ -2719,7 +2719,7 @@ async def du007_declaracion(payload: dict, request: Request, user: dict = Depend
         "ip": (request.client.host if request.client else None),
         "user_agent": request.headers.get("user-agent", ""),
         "texto": ("Declaro bajo juramento que los consumos de combustible presentados para el "
-                  f"periodo {periodo} del DU 007-2026 son exactos y corresponden a unidades N1/N2/N3 "
+                  f"periodo {periodo} del DU 007-2026 son exactos y corresponden a unidades M2/M3/N1/N2/N3 "
                   "con habilitación vigente."),
     }
     await db.declaraciones_du007.insert_one(rec)

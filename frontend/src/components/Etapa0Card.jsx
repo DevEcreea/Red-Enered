@@ -20,7 +20,7 @@ const DU007_PERIODOS = [
   { n: 2, ci: new Date(2026, 8, 16), cf: new Date(2026, 9, 15, 23, 59, 59), ai: new Date(2026, 9, 16), af: new Date(2026, 10, 15, 23, 59, 59), consumo: "16 set–15 oct", presenta: "16 oct–15 nov" },
   { n: 3, ci: new Date(2026, 9, 16), cf: new Date(2026, 10, 15, 23, 59, 59), ai: new Date(2026, 10, 16), af: new Date(2026, 11, 15, 23, 59, 59), consumo: "16 oct–15 nov", presenta: "16 nov–15 dic" },
 ];
-const DU007_CATS = ["N1", "N2", "N3"]; // el 007 solo cubre N1, N2 y N3
+const DU007_CATS = ["M2", "M3", "N1", "N2", "N3"]; // mismas categorías que el DU 004
 const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SET", "OCT", "NOV", "DIC"];
 
 const descuenta = (ms) => {
@@ -68,7 +68,7 @@ function Chk({ ok, pend, children }) {
 
 /**
  * MÓDULO 0 (Etapa 0): diagnóstico integrado de los DOS subsidios abiertos —
- * DU 004 (presentación única) y DU 007 (3 periodos, solo N1/N2/N3, mismo S/ por galón).
+ * DU 004 (presentación única) y DU 007 (3 periodos, mismas categorías que el DU 004, mismo S/ por galón).
  */
 export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
   const { user } = useAuth();
@@ -194,9 +194,9 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
   const montoRegularizables = monto(regularizables);
   const recuperables = aceptadas.length + regularizables.length;
 
-  // DU 007: SOLO N1, N2 y N3 — mismos topes de galones y mismo S/ por galón, por periodo.
+  // DU 007: mismas categorías que el DU 004 — mismos topes de galones y mismo S/ por galón, por periodo.
   const unidades007 = unidades.filter((u) => DU007_CATS.includes(u.categoria));
-  // Desglose de placas del 007 (SOLO N1/N2/N3; el resto —M2, M3, O4…— no aplica a este decreto)
+  // Desglose de placas del 007 (mismas categorías que el DU 004; el resto —O4…— no aplica a este decreto)
   const aceptadas007 = unidades007.filter((u) => u.cumple);
   const regularizables007 = unidades007.filter((u) => !u.cumple);
   const noAplican007 = unidades.filter((u) => !DU007_CATS.includes(u.categoria));
@@ -340,7 +340,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
               <div className="sub">
                 {monto007 > 0
                   ? <>{fmtNum(galones007)} galones · {unidades007.length} unidad{unidades007.length === 1 ? "" : "es"} subsidiable{unidades007.length === 1 ? "" : "s"} de {unidades.length}</>
-                  : <>El DU 007 solo cubre N1, N2 y N3{catsExcluidas007.length ? ` — tus ${catsExcluidas007.join("/")} no aplican` : ""}</>}
+                  : <>El DU 007 solo cubre M2, M3, N1, N2 y N3{catsExcluidas007.length ? ` — tus ${catsExcluidas007.join("/")} no aplican` : ""}</>}
               </div>
             </div>
             <Reloj target={target7} label={label7} fecha={fecha7} soft={soft7} />
@@ -368,10 +368,10 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
           </div>
         </div>
 
-        {/* Placas que entran al DU 007 — SOLO N1, N2 y N3 */}
+        {/* Placas que entran al DU 007 — mismas categorías que el DU 004 */}
         <div className="e0k-box">
           <div className="bh"><h4>De tus {unidades.length} placa{unidades.length === 1 ? "" : "s"}, <b className="g">{unidades007.length} entra{unidades007.length === 1 ? "" : "n"} al DU 007</b></h4>
-            <em>solo N1, N2 y N3</em></div>
+            <em>M2, M3, N1, N2 y N3</em></div>
           <div className="bars">
             {aceptadas007.length > 0 && <i style={{ flex: aceptadas007.length, background: "#0EA46B" }} />}
             {regularizables007.length > 0 && <i style={{ flex: regularizables007.length, background: "#D97706" }} />}
@@ -393,7 +393,7 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
             {noAplican007.length > 0 && (
               <div className="li"><span className="dot" style={{ background: "#D9D5E8" }} />
                 <div><span className="k">{noAplican007.length} no aplica{noAplican007.length === 1 ? "" : "n"} al 007</span>
-                  <span className="d">Categoría {[...new Set(noAplican007.map((u) => u.categoria || "sin categoría"))].join(", ")} · el DU 007 solo cubre N1, N2 y N3</span></div>
+                  <span className="d">Categoría {[...new Set(noAplican007.map((u) => u.categoria || "sin categoría"))].join(", ")} · el DU 007 solo cubre M2, M3, N1, N2 y N3</span></div>
                 <span className="v mute">S/ 0.00</span></div>
             )}
           </div>

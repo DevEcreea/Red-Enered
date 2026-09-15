@@ -22,13 +22,13 @@ PERIODO_FIN = date(2026, 7, 29)
 TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
 
 # DU 007-2026: tres periodos de consumo, cada uno se presenta por separado.
-# Mismo S/ por galón y mismos topes, pero SOLO categorías N1, N2 y N3.
+# Mismo S/ por galón y mismos topes, y las mismas categorías que el DU 004 (M2, M3, N1, N2, N3).
 DU007_PERIODOS = [
     (1, date(2026, 8, 16), date(2026, 9, 15)),
     (2, date(2026, 9, 16), date(2026, 10, 15)),
     (3, date(2026, 10, 16), date(2026, 11, 15)),
 ]
-TOPES_DU007 = {k: v for k, v in TOPES_GALONES.items() if k in ("N1", "N2", "N3")}
+TOPES_DU007 = dict(TOPES_GALONES)
 
 
 def periodo_du007(f: date) -> Optional[int]:
@@ -150,9 +150,9 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
             bloqueante=True,
         ))
 
-    # 4) Categoría subsidiable + tope de galones (DU 007 solo cubre N1, N2 y N3)
+    # 4) Categoría subsidiable + tope de galones (mismas categorías en DU 004 y DU 007)
     topes = TOPES_DU007 if programa == "du007" else TOPES_GALONES
-    cats_txt = "N1, N2 y N3" if programa == "du007" else "M2, M3, N1, N2, N3"
+    cats_txt = "M2, M3, N1, N2, N3"
     # La categoría llega del MTC con sufijo de carrocería (N2C2, M2C3…); se reduce a su
     # clase base para decidir el tope: 'M2C3' → 'M2'. Así no se rechazan variantes válidas.
     cat = clase_base_categoria(categoria_por_placa.get(placa)) or None

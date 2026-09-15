@@ -77,7 +77,7 @@ export default function SubsidioDU007() {
   const firmar = async (periodo) => {
     if (!window.confirm(
       `Vas a firmar la declaración jurada del PERIODO ${periodo} del DU 007.\n\n` +
-      "Declaras que los consumos presentados son exactos y corresponden a unidades N1/N2/N3 " +
+      "Declaras que los consumos presentados son exactos y corresponden a unidades M2/M3/N1/N2/N3 " +
       "con habilitación vigente. ¿Confirmas?"
     )) return;
     try {
@@ -151,7 +151,7 @@ export default function SubsidioDU007() {
                 <p className="text-xs text-neutral-500 mt-1">
                   Solo PDF. Cada factura se valida contra los 3 periodos del decreto
                   (P1: {PERIODOS_INFO[1].consumo} · P2: {PERIODOS_INFO[2].consumo} · P3: {PERIODOS_INFO[3].consumo})
-                  y se asigna sola a su periodo. Solo unidades N1, N2 y N3.
+                  y se asigna sola a su periodo. Unidades M2, M3, N1, N2 y N3.
                 </p>
               </div>
               <input ref={fileRef} type="file" hidden multiple accept="application/pdf,.pdf"
