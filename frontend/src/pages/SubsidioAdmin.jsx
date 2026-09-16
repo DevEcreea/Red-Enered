@@ -402,7 +402,13 @@ function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
         {tab === "banco" && <TabBanco bank={bank_account} documents={documents} />}
         {tab === "documentos" && <TabDocumentos docs={companyDocs} onDelete={deleteDoc} />}
         {tab === "flota" && <TabFlota vehicles={vehicles} docs={documents} onDelete={deleteDoc} />}
-        {tab === "facturas" && <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} empresa={empresa} />}
+        {tab === "facturas" && (
+          <TabFacturas invoices={invoices} onDelete={deleteInvoice} userId={userId} empresa={empresa} programa={programa}
+            onRefresh={async () => {
+              const { data: res } = await api.get(`/admin/subsidio/expedientes/${userId}${qDetalle}`);
+              setData(res);
+            }} />
+        )}
         {tab === "declaracion" && <TabDeclaracion declaracion={declaracion} />}
         {tab === "editar" && (
           <TabEditar
@@ -654,10 +660,27 @@ function TabFlota({ vehicles, docs = [], onDelete }) {
   );
 }
 
-function TabFacturas({ invoices, onDelete, userId, empresa }) {
+function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", onRefresh }) {
   const dlToken = useDownloadToken();
   const API_BASE = process.env.REACT_APP_BACKEND_URL || "";
   const downloadHref = (id) => `${API_BASE}/api/admin/subsidio/invoices/${id}/download?t=${dlToken}`;
+  const [revalidando, setRevalidando] = useState(false);
+
+  const revalidar = async () => {
+    if (!window.confirm(`¿Revalidar las ${invoices.length} facturas de este expediente (${programa === "du007" ? "DU 007" : "DU 004"}) con las reglas y la flota actuales?`)) return;
+    setRevalidando(true);
+    try {
+      const p = new URLSearchParams({ programa });
+      if (empresa) p.set("empresa", empresa);
+      const { data } = await api.post(`/admin/subsidio/expedientes/${userId}/invoices/revalidar?${p.toString()}`);
+      alert(`Revisadas ${data.revisadas} · ${data.cambiaron} cambiaron de estado.\nConforme: ${data.por_estado?.CONFORME || 0} · Observada: ${data.por_estado?.OBSERVADA || 0} · Rechazada: ${data.por_estado?.RECHAZADA || 0}`);
+      await onRefresh?.();
+    } catch (e) {
+      alert(e?.response?.data?.detail || "No se pudo revalidar.");
+    } finally {
+      setRevalidando(false);
+    }
+  };
 
   // Filtros EN LAS CABECERAS (estilo Excel): cada columna filtra directo desde su encabezado.
   const [fPlaca, setFPlaca] = useState("");
@@ -715,6 +738,12 @@ function TabFacturas({ invoices, onDelete, userId, empresa }) {
           <button onClick={() => { setFPlaca(""); setFEstado(""); setFMes(""); setFProducto(""); setFRuc(""); setFEstacion(""); setFDoc(""); }}
             className="text-xs font-bold text-neutral-500 hover:text-neutral-700">✕ Limpiar filtros</button>
         )}
+        <button onClick={revalidar} disabled={revalidando}
+          className="h-9 px-4 bg-white border border-neutral-300 hover:border-brand text-neutral-700 font-bold rounded-lg text-xs flex items-center gap-1.5 disabled:opacity-60"
+          title="Vuelve a correr las reglas de validación (periodo, flota, tope, duplicados) sobre TODAS las facturas, sin tocar sus datos">
+          {revalidando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+          Revalidar todas
+        </button>
         <a href={zipHref()} className="h-9 px-4 bg-brand hover:bg-brand-hover text-white font-bold rounded-lg text-xs flex items-center gap-1.5"
           title="Descarga en un ZIP los archivos filtrados + resumen.xlsx con totales">
           <Download className="w-3.5 h-3.5" /> Descargar ZIP ({filtradas.length})

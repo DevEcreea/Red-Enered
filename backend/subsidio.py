@@ -273,6 +273,29 @@ def _own_q(user, uids) -> dict:
     return base
 
 
+async def _flota_categorias(user, uids: list[str]) -> tuple[set[str], dict[str, str]]:
+    """Placas (normalizadas) y su categoría, para el validador automático de facturas.
+    Junta la flota PRINCIPAL (db.vehiculos, por empresa) con subsidio_vehicles (que manda
+    si hay choque de placa) — el mismo criterio que ya usan el expediente admin y el
+    dashboard del cliente. Antes el validador solo miraba subsidio_vehicles: una placa
+    dada de alta únicamente en el módulo Vehículos (sin duplicarla en Subsidio) no se
+    reconocía, y la factura quedaba "no se pudo verificar la flota" → OBSERVADA aunque
+    la placa sí estuviera registrada."""
+    np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
+    cats: dict[str, str] = {}
+    emp = user.get("empresa") if isinstance(user, dict) else None
+    if emp:
+        async for mv in db.vehiculos.find({"empresa": emp}, {"_id": 0, "placa": 1, "categoria": 1}):
+            pn = np(mv.get("placa") or mv.get("veh"))
+            if pn:
+                cats[pn] = (mv.get("categoria") or "").upper()
+    async for sv in db.subsidio_vehicles.find(_own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}):
+        pn = np(sv.get("placa"))
+        if pn:
+            cats[pn] = (sv.get("categoria") or "").upper()
+    return set(cats.keys()), cats
+
+
 async def _require_subsidio(request: Request) -> dict:
     user = await _get_current_user(request)
     allowed = ["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]
@@ -1056,9 +1079,8 @@ async def subsidio_plantilla_masiva(programa: str = "du004", user: dict = Depend
     from services.carga_masiva import generar_plantilla
     programa = programa if programa in ("du004", "du007") else "du004"
     uids = await _get_company_uids(user)
-    vehiculos = await db.subsidio_vehicles.find(
-        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
-    ).to_list(500)
+    _, _cats_plantilla = await _flota_categorias(user, uids)
+    vehiculos = [{"placa": p, "categoria": c} for p, c in sorted(_cats_plantilla.items())]
     xlsx = generar_plantilla(empresa=user.get("empresa") or "", ruc=user.get("ruc") or "",
                              vehiculos=vehiculos, programa=programa)
     nombre = f"ENERED_carga_masiva_{programa}_{(user.get('ruc') or 'comprobantes')}.xlsx"
@@ -1092,12 +1114,8 @@ async def subsidio_previsualizar_masiva(file: UploadFile = File(...), programa: 
         raise HTTPException(status_code=400, detail="La plantilla no tiene filas con datos")
 
     uids = await _get_company_uids(user)
-    vehiculos = await db.subsidio_vehicles.find(
-        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
-    ).to_list(500)
     _np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
-    placas = {_np(v["placa"]) for v in vehiculos}
-    cats = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
+    placas, cats = await _flota_categorias(user, uids)
 
     previas = await db.consumos_subsidio.find(
         _own_q(user, uids), {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
@@ -2257,22 +2275,16 @@ async def invoices_upload(
         raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
     programa = programa if programa in ("du004", "du007") else "du004"
 
-    # Cargar placas del usuario para auto-match — igual que el resto del módulo (_own_q +
-    # uids de toda la empresa): antes solo miraba el user_id exacto de la sesión, así que en
-    # cuentas multiempresa/multiusuario una placa registrada por OTRO usuario de la misma
-    # empresa no se encontraba, y la factura quedaba OBSERVADA como "no se pudo verificar
-    # la flota" aunque la placa sí estuviera registrada.
+    # Cargar placas para auto-match — flota PRINCIPAL + subsidio_vehicles, de TODA la
+    # empresa (no solo el user_id exacto de la sesión). Antes solo miraba subsidio_vehicles
+    # del usuario que subía el archivo: una placa registrada en el módulo Vehículos (sin
+    # duplicarla en Subsidio) o dada de alta por OTRO usuario de la misma empresa no se
+    # encontraba, y la factura quedaba "no se pudo verificar la flota" → OBSERVADA aunque
+    # la placa sí estuviera registrada.
     uids = await _get_company_uids(user)
-    vehicles = await db.subsidio_vehicles.find(
-        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
-    ).to_list(200)
-    user_placas = {v["placa"] for v in vehicles}
-
-    # Contexto para la validación automática (reglas del DU 004-2026)
     from services.validador_facturas import validar_factura as _validar
     _np = lambda p: _re.sub(r"[^A-Z0-9]", "", (p or "").upper())
-    placas_norm = {_np(v["placa"]) for v in vehicles}
-    categoria_por_placa = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehicles}
+    placas_norm, categoria_por_placa = await _flota_categorias(user, uids)
     # Facturas ya cargadas → detectar duplicados
     _previas = await db.consumos_subsidio.find(
         _own_q(user, uids), {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
@@ -2363,7 +2375,7 @@ async def invoices_upload(
 
         # Auto-match con flota del usuario
         placa_match = None
-        if extracted.get("placa") and extracted["placa"] in user_placas:
+        if extracted.get("placa") and _np(extracted["placa"]) in placas_norm:
             placa_match = extracted["placa"]
 
         doc = {
@@ -2526,11 +2538,7 @@ async def invoices_update(
     try:
         from services.validador_facturas import validar_factura as _validar_upd
         futuro = {**inv, **patch}
-        vehiculos = await db.subsidio_vehicles.find(
-            _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}).to_list(500)
-        _npu = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
-        placas = {_npu(v["placa"]) for v in vehiculos}
-        cats = {_npu(v["placa"]): (v.get("categoria") or "").upper() for v in vehiculos}
+        placas, cats = await _flota_categorias(user, uids)
         otras = await db.consumos_subsidio.find(
             {**_own_q(user, uids), "id": {"$ne": invoice_id}},
             {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(3000)
@@ -3764,6 +3772,57 @@ async def _buscar_key_archivo(inv: dict, keys_cache: Optional[list] = None) -> O
                     if k and _existe(k):
                         return k
     return None
+
+
+@subsidio_router.post("/admin/subsidio/expedientes/{user_id}/invoices/revalidar")
+async def admin_revalidar_invoices(user_id: str, empresa: Optional[str] = None, programa: Optional[str] = None,
+                                   _: dict = Depends(_require_admin_enered)):
+    """Vuelve a correr el validador automático sobre TODAS las facturas del expediente
+    (sin tocar sus datos), con la flota y los duplicados actuales. Para corregir en bloque
+    facturas que quedaron OBSERVADA por un bug ya arreglado (p. ej. la flota no se
+    reconocía), sin que el cliente tenga que reabrir y reguardar cada una a mano."""
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Expediente no encontrado")
+    u = _usuario_en_empresa(u, empresa)
+    uids = await _get_company_uids(u)
+
+    prog_match = {"programa": "du007"} if programa == "du007" else (
+        {"programa": {"$ne": "du007"}} if programa == "du004" else {})
+    filas = await db.consumos_subsidio.find(
+        {**_own_q(u, uids), **prog_match}, {"_id": 0}
+    ).to_list(5000)
+    if not filas:
+        return {"revisadas": 0, "cambiaron": 0, "por_estado": {}}
+
+    from services.validador_facturas import validar_factura as _validar_re
+    placas, cats = await _flota_categorias(u, uids)
+    _npr = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
+    vistos = {
+        (str(f.get("ruc_emisor") or "").strip(), str(f.get("numero_documento") or "").strip().upper(),
+         _npr(f.get("placa")))
+        for f in filas if f.get("numero_documento")
+    }
+
+    cambiaron = 0
+    por_estado = {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}
+    for f in filas:
+        prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
+        clave = (str(f.get("ruc_emisor") or "").strip(), str(f.get("numero_documento") or "").strip().upper(),
+                 _npr(f.get("placa")))
+        numeros_sin_esta = vistos - {clave}
+        val = _validar_re(f, placas_flota=placas, categoria_por_placa=cats,
+                          numeros_existentes=numeros_sin_esta, programa=prog)
+        por_estado[val["estado"]] = por_estado.get(val["estado"], 0) + 1
+        if val["estado"] != f.get("validacion_estado"):
+            cambiaron += 1
+        patch = {"validacion": val, "validacion_estado": val["estado"],
+                 "requiere_revision": val["requiere_revision"]}
+        if prog == "du007":
+            patch["periodo_du007"] = val.get("periodo_du007")
+        await db.consumos_subsidio.update_one({"id": f["id"]}, {"$set": patch})
+
+    return {"revisadas": len(filas), "cambiaron": cambiaron, "por_estado": por_estado}
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
