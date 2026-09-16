@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
-import ComprobantesTabla from "../components/ComprobantesTabla";
+import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 import {
   Fuel, FileCheck2, Loader2, Upload, CheckCircle2, AlertTriangle,
   MessageCircle, Lock, ShieldCheck,
@@ -201,6 +201,12 @@ export default function SubsidioDU007() {
               </>
             )}
           </div>
+
+          {/* Carga masiva por plantilla (formato ENERED, compatible con la ATU) — propio bucket DU 007 */}
+          <CargaMasiva programa="du007" onDone={(r) => {
+            setAviso({ tipo: "ok", texto: `Se guardaron ${r.guardadas} comprobante(s) al DU 007${r.omitidas ? ` · ${r.omitidas} omitido(s) por errores` : ""}.` });
+            load();
+          }} />
 
           {items.length > 0 && <ComprobantesTabla items={items} vehicles={vehicles} onChange={load} />}
         </div>

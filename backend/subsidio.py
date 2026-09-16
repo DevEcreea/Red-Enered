@@ -1051,16 +1051,17 @@ async def subsidio_extraer_comprobante(file: UploadFile = File(...), user: dict 
 
 
 @subsidio_router.get("/subsidio/carga-masiva/plantilla")
-async def subsidio_plantilla_masiva(user: dict = Depends(_require_subsidio)):
+async def subsidio_plantilla_masiva(programa: str = "du004", user: dict = Depends(_require_subsidio)):
     """Descarga la plantilla ENERED de carga masiva, ya con la flota del transportista."""
     from services.carga_masiva import generar_plantilla
+    programa = programa if programa in ("du004", "du007") else "du004"
     uids = await _get_company_uids(user)
     vehiculos = await db.subsidio_vehicles.find(
         _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(500)
     xlsx = generar_plantilla(empresa=user.get("empresa") or "", ruc=user.get("ruc") or "",
-                             vehiculos=vehiculos)
-    nombre = f"ENERED_carga_masiva_{(user.get('ruc') or 'comprobantes')}.xlsx"
+                             vehiculos=vehiculos, programa=programa)
+    nombre = f"ENERED_carga_masiva_{programa}_{(user.get('ruc') or 'comprobantes')}.xlsx"
     return StreamingResponse(
         io.BytesIO(xlsx),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1069,7 +1070,8 @@ async def subsidio_plantilla_masiva(user: dict = Depends(_require_subsidio)):
 
 
 @subsidio_router.post("/subsidio/carga-masiva/previsualizar")
-async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict = Depends(_require_subsidio)):
+async def subsidio_previsualizar_masiva(file: UploadFile = File(...), programa: str = Form("du004"),
+                                        user: dict = Depends(_require_subsidio)):
     """
     Lee la plantilla llena y devuelve cada fila validada (sin guardar todavía),
     completando los datos del grifo desde OSINERGMIN.
@@ -1078,6 +1080,7 @@ async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict
     from services.validador_facturas import validar_factura
     from services.padron_grifos import buscar_por_ruc
 
+    programa = programa if programa in ("du004", "du007") else "du004"
     contenido = await file.read()
     if len(contenido) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Archivo mayor a 20MB")
@@ -1125,11 +1128,12 @@ async def subsidio_previsualizar_masiva(file: UploadFile = File(...), user: dict
         if pn in cats and cats[pn]:
             f["categoria"] = cats[pn]
 
-        val = validar_factura(f, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos)
+        val = validar_factura(f, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos,
+                              programa=programa)
         if f.get("numero_documento"):
             vistos.add((str(ruc_g or "").strip(), f["numero_documento"].strip().upper(), _np(f.get("placa"))))
         resumen[val["estado"]] = resumen.get(val["estado"], 0) + 1
-        resultado.append({**f, "validacion": val, "validacion_estado": val["estado"]})
+        resultado.append({**f, "validacion": val, "validacion_estado": val["estado"], "programa": programa})
 
     return {"filas": resultado, "total": len(resultado), "resumen": resumen,
             "listas_para_guardar": resumen.get("CONFORME", 0) + resumen.get("OBSERVADA", 0)}
@@ -1146,6 +1150,7 @@ async def subsidio_confirmar_masiva(payload: dict, user: dict = Depends(_require
     for f in filas:
         if (f.get("validacion_estado") or "").upper() == "RECHAZADA":
             continue
+        programa_fila = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         docs.append({
             "id": str(uuid.uuid4()),
             "user_id": user["id"], "empresa": user.get("empresa"), "empresa_id": user.get("empresa"),
@@ -1162,6 +1167,8 @@ async def subsidio_confirmar_masiva(payload: dict, user: dict = Depends(_require
             "validacion": f.get("validacion"), "validacion_estado": f.get("validacion_estado"),
             "requiere_revision": (f.get("validacion") or {}).get("requiere_revision", True),
             "status": "draft", "created_at": ahora, "confirmed_at": None,
+            "programa": programa_fila,
+            "periodo_du007": (f.get("validacion") or {}).get("periodo_du007") if programa_fila == "du007" else None,
         })
     if not docs:
         raise HTTPException(status_code=400, detail="Todas las filas fueron rechazadas; corrige la plantilla")
@@ -1292,6 +1299,7 @@ async def subsidio_confirmar_masiva_con_pdf(
     for f in lista:
         if (f.get("validacion_estado") or "").upper() == "RECHAZADA":
             continue
+        programa_fila = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         docs.append({
             "id": str(uuid.uuid4()),
             "user_id": user["id"], "empresa": user.get("empresa"), "empresa_id": user.get("empresa"),
@@ -1308,6 +1316,8 @@ async def subsidio_confirmar_masiva_con_pdf(
             "validacion": f.get("validacion"), "validacion_estado": f.get("validacion_estado"),
             "requiere_revision": (f.get("validacion") or {}).get("requiere_revision", True),
             "status": "draft", "created_at": ahora, "confirmed_at": None,
+            "programa": programa_fila,
+            "periodo_du007": (f.get("validacion") or {}).get("periodo_du007") if programa_fila == "du007" else None,
         })
     if not docs:
         raise HTTPException(status_code=400, detail="Todas las filas fueron rechazadas; corrige la plantilla")

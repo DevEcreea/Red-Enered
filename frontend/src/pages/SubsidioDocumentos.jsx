@@ -845,7 +845,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
       </div>
 
       {/* Carga masiva por plantilla (formato ENERED, compatible con la ATU) */}
-      <CargaMasiva onDone={(r) => { setSuccess(`Se guardaron ${r.guardadas} comprobante(s)${r.omitidas ? ` · ${r.omitidas} omitido(s) por errores` : ""}.`); load(); onAnyChange?.(); }} />
+      <CargaMasiva programa="du004" onDone={(r) => { setSuccess(`Se guardaron ${r.guardadas} comprobante(s)${r.omitidas ? ` · ${r.omitidas} omitido(s) por errores` : ""}.`); load(); onAnyChange?.(); }} />
 
       {items.length === 0 ? (
         confirmedCount > 0 ? (

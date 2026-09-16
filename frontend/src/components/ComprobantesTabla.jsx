@@ -557,7 +557,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
 }
 
 /** Carga masiva: descargar plantilla ENERED, subirla y previsualizar antes de guardar. */
-export function CargaMasiva({ onDone }) {
+export function CargaMasiva({ onDone, programa = "du004" }) {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -569,10 +569,10 @@ export function CargaMasiva({ onDone }) {
   const descargar = async () => {
     setBusy(true);
     try {
-      const r = await api.get("/subsidio/carga-masiva/plantilla", { responseType: "blob" });
+      const r = await api.get("/subsidio/carga-masiva/plantilla", { params: { programa }, responseType: "blob" });
       const url = URL.createObjectURL(new Blob([r.data]));
       const a = document.createElement("a");
-      a.href = url; a.download = "ENERED_carga_masiva.xlsx"; a.click();
+      a.href = url; a.download = `ENERED_carga_masiva_${programa}.xlsx`; a.click();
       URL.revokeObjectURL(url);
     } catch { setErr("No se pudo descargar la plantilla"); }
     finally { setBusy(false); }
@@ -585,6 +585,7 @@ export function CargaMasiva({ onDone }) {
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("programa", programa);
       const { data } = await api.post("/subsidio/carga-masiva/previsualizar", fd,
         { headers: { "Content-Type": "multipart/form-data" } });
       setPreview(data);

@@ -55,9 +55,16 @@ _MORADO_CLARO = "FFF3E8FF"
 def _fill(c): return PatternFill("solid", fgColor=c)
 
 
-def generar_plantilla(*, empresa: str = "", ruc: str = "", vehiculos: list[dict] | None = None) -> bytes:
-    """Crea la plantilla ENERED lista para llenar, con la flota del transportista precargada."""
+def generar_plantilla(*, empresa: str = "", ruc: str = "", vehiculos: list[dict] | None = None,
+                      programa: str = "du004") -> bytes:
+    """Crea la plantilla ENERED lista para llenar, con la flota del transportista precargada.
+    `programa`: du004 (ventana única) o du007 (3 periodos) — cambia el texto de instrucciones
+    y el pie de página para que la fecha de emisión pedida sea la del decreto correcto."""
     vehiculos = vehiculos or []
+    es_du007 = programa == "du007"
+    decreto = "DU 007-2026" if es_du007 else "DU 004-2026"
+    rango_fechas = ("16/08/2026 – 15/09/2026, 16/09/2026 – 15/10/2026 o 16/10/2026 – 15/11/2026"
+                    if es_du007 else "29/05/2026 y 29/07/2026")
     wb = Workbook()
 
     # ── Hoja Carga
@@ -66,7 +73,7 @@ def generar_plantilla(*, empresa: str = "", ruc: str = "", vehiculos: list[dict]
     ws.freeze_panes = "A4"
 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(COLUMNAS))
-    t = ws.cell(1, 1, f"Carga masiva de comprobantes · ENERED{f' — {empresa}' if empresa else ''}")
+    t = ws.cell(1, 1, f"Carga masiva de comprobantes · ENERED · {decreto}{f' — {empresa}' if empresa else ''}")
     t.font = Font(name="Calibri", size=14, bold=True, color="FFFFFFFF")
     t.fill = _fill(_MORADO)
     t.alignment = Alignment(horizontal="center", vertical="center")
@@ -129,7 +136,7 @@ def generar_plantilla(*, empresa: str = "", ruc: str = "", vehiculos: list[dict]
     filas = [
         ("Una fila por placa", "Si un mismo comprobante abastece varias placas, repite la Serie y el Número en cada fila y cambia solo la placa y los galones."),
         ("Serie y Número", "Tal como figuran en la factura (ej. Serie F001, Número 0001234)."),
-        ("Fecha de emisión", "Formato dd/mm/aaaa. Debe estar entre 29/05/2026 y 29/07/2026."),
+        ("Fecha de emisión", f"Formato dd/mm/aaaa. Debe estar {'dentro de uno de los 3 periodos' if es_du007 else 'entre'} {rango_fechas}."),
         ("RUC del grifo", "11 dígitos. ENERED verifica solo si está inscrito en OSINERGMIN y completa su ubicación."),
         ("Departamento / Provincia / Distrito / Dirección", "Puedes dejarlos en blanco: ENERED los completa con el RUC del grifo."),
         ("Placa", "Elige una placa de tu flota (lista desplegable). Debe estar registrada en ENERED."),
@@ -149,7 +156,7 @@ def generar_plantilla(*, empresa: str = "", ruc: str = "", vehiculos: list[dict]
     # ── Pie de marca en Carga
     pie = FILA_FIN + 2
     ws.merge_cells(start_row=pie, start_column=1, end_row=pie, end_column=len(COLUMNAS))
-    p = ws.cell(pie, 1, f"ENERED | Subsidio DU 004-2026{f' | RUC {ruc}' if ruc else ''} | Plantilla de carga masiva")
+    p = ws.cell(pie, 1, f"ENERED | Subsidio {decreto}{f' | RUC {ruc}' if ruc else ''} | Plantilla de carga masiva")
     p.font = Font(size=9, color="FF9CA3AF")
 
     buf = io.BytesIO()
