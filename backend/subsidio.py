@@ -2539,6 +2539,7 @@ async def invoices_update(
         from services.validador_facturas import validar_factura as _validar_upd
         futuro = {**inv, **patch}
         placas, cats = await _flota_categorias(user, uids)
+        _npu = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
         otras = await db.consumos_subsidio.find(
             {**_own_q(user, uids), "id": {"$ne": invoice_id}},
             {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(3000)
