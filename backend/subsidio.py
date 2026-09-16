@@ -2257,9 +2257,14 @@ async def invoices_upload(
         raise HTTPException(status_code=400, detail="Máximo 60 facturas por carga")
     programa = programa if programa in ("du004", "du007") else "du004"
 
-    # Cargar placas del usuario para auto-match
+    # Cargar placas del usuario para auto-match — igual que el resto del módulo (_own_q +
+    # uids de toda la empresa): antes solo miraba el user_id exacto de la sesión, así que en
+    # cuentas multiempresa/multiusuario una placa registrada por OTRO usuario de la misma
+    # empresa no se encontraba, y la factura quedaba OBSERVADA como "no se pudo verificar
+    # la flota" aunque la placa sí estuviera registrada.
+    uids = await _get_company_uids(user)
     vehicles = await db.subsidio_vehicles.find(
-        {"user_id": user["id"]}, {"_id": 0, "placa": 1, "categoria": 1}
+        _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
     user_placas = {v["placa"] for v in vehicles}
 
@@ -2270,7 +2275,7 @@ async def invoices_upload(
     categoria_por_placa = {_np(v["placa"]): (v.get("categoria") or "").upper() for v in vehicles}
     # Facturas ya cargadas → detectar duplicados
     _previas = await db.consumos_subsidio.find(
-        {"user_id": user["id"]}, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
+        _own_q(user, uids), {"_id": 0, "ruc_emisor": 1, "numero_documento": 1}
     ).to_list(2000)
     _npl = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
     numeros_existentes = {

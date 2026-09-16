@@ -382,7 +382,11 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
               <div><label className={lbl}>Número *</label><input className={inp} value={f.numero} onChange={set("numero")} placeholder="0001234" /></div>
               <div><label className={lbl}>Fecha de emisión *</label><input type="date" className={inp} value={f.fecha} onChange={set("fecha")} /></div>
             </div>
-            <p className="text-[11px] text-neutral-400 mt-1.5">Fechas permitidas: 29/05/2026 – 29/07/2026</p>
+            <p className="text-[11px] text-neutral-400 mt-1.5">
+              {item.programa === "du007"
+                ? "Fechas permitidas (DU 007, 3 periodos): 16/08–15/09, 16/09–15/10 o 16/10–15/11 de 2026"
+                : "Fechas permitidas (DU 004): 29/05/2026 – 29/07/2026"}
+            </p>
           </section>
 
           <section>
