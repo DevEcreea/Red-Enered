@@ -243,6 +243,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
     distrito: item.distrito || "", direccion_grifo: item.direccion_grifo || "",
     placa: item.placa || "", categoria: item.categoria || "",
     producto: item.producto || "", galones: item.galones ?? "",
+    importe_total: item.importe_total ?? "",
     tiene_nc: !!item.tiene_nc, serie_nc: item.serie_nc || "",
     numero_nc: item.numero_nc || "", alcance_nc: item.alcance_nc || "",
   });
@@ -352,6 +353,7 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
     try {
       await api.put(`/subsidio/invoices/${item.id}`, {
         ...f, galones: f.galones === "" ? null : Number(f.galones),
+        importe_total: f.importe_total === "" ? null : Number(f.importe_total),
         placa: (f.placa || "").toUpperCase() || null,
       });
       onSaved();
@@ -377,10 +379,12 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
         <div className="p-5 space-y-5">
           <section>
             <div className="text-[11px] font-bold text-brand uppercase tracking-wide mb-2">1 · Factura</div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div><label className={lbl}>Serie *</label><input className={inp} value={f.serie} onChange={set("serie")} placeholder="F001" /></div>
               <div><label className={lbl}>Número *</label><input className={inp} value={f.numero} onChange={set("numero")} placeholder="0001234" /></div>
               <div><label className={lbl}>Fecha de emisión *</label><input type="date" className={inp} value={f.fecha} onChange={set("fecha")} /></div>
+              <div><label className={lbl}>Importe total (S/) *</label>
+                <input type="number" step="0.01" className={inp} value={f.importe_total} onChange={set("importe_total")} placeholder="0.00" /></div>
             </div>
             <p className="text-[11px] text-neutral-400 mt-1.5">
               {item.programa === "du007"
