@@ -2449,10 +2449,13 @@ async def invoices_upload(
             "data": {k: v for k, v in doc.items() if k != "_id" and k != "raw_ocr_response"},
         })
 
-    # Mark expediente as verifying
+    # Mark expediente as verifying — en el campo del programa correspondiente, para no
+    # pisar el estado del otro decreto (antes subir una factura del DU 007 marcaba
+    # "verifying" el expediente del DU 004 del mismo cliente, y viceversa).
+    campo_status_up = "expediente_status_du007" if programa == "du007" else "expediente_status"
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"expediente_status": "verifying"}},
+        {"$set": {campo_status_up: "verifying"}},
     )
     return {"uploaded": len(results), "items": results}
 
@@ -3427,8 +3430,9 @@ async def admin_list_expedientes(
                 {"empresas_asignadas.ruc": {"$regex": q}},
             ]}
         ]}
+    campo_status = "expediente_status_du007" if programa == "du007" else "expediente_status"
     if estado:
-        filt["expediente_status"] = estado
+        filt[campo_status] = estado
 
     users = await db.users.find(filt, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(limit)
     if not users:
@@ -3541,11 +3545,19 @@ async def admin_list_expedientes(
                 inv_map[k]["conf"] += enered_map[emp]["count"]
                 inv_map[k]["imp"] += enered_map[emp].get("imp", 0) or 0
 
-    decl_list = await db.subsidio_declaraciones.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
+    # DU 007 firma por periodo en su propia colección (declaraciones_du007) — no en
+    # subsidio_declaraciones, que es la declaración única del DU 004. Antes la columna
+    # "DJ" del panel DU 007 mostraba la firma del DU 004 (o su ausencia) sin relación real.
+    decl_col = db.declaraciones_du007 if programa == "du007" else db.subsidio_declaraciones
+    decl_list = await decl_col.find({"user_id": {"$in": uids}}, {"_id": 0}).to_list(10000)
     decl_map = {}
     for d in decl_list:
-        if d.get("user_id"):
-            decl_map[_emp_key(d["user_id"], d.get("empresa"), base_de)] = d
+        if not d.get("user_id"):
+            continue
+        k = _emp_key(d["user_id"], d.get("empresa"), base_de)
+        # DU 007: puede haber una declaración por periodo — nos quedamos con la más reciente.
+        if k not in decl_map or (d.get("accepted_at") or "") > (decl_map[k].get("accepted_at") or ""):
+            decl_map[k] = d
 
     out = []
     for (u, emp, ruc) in filas:
@@ -3569,11 +3581,13 @@ async def admin_list_expedientes(
             "contacto": u.get("contacto"),
             "telefono": u.get("telefono"),
             "created_at": u.get("created_at"),
-            "expediente_status": u.get("expediente_status") or "uploading",
-            "expediente_stage": u.get("expediente_stage"),
-            "expediente_stage_updated_at": u.get("expediente_stage_updated_at"),
+            "expediente_status": u.get(campo_status) or "uploading",
+            "expediente_stage": u.get("expediente_stage_du007" if programa == "du007" else "expediente_stage"),
+            "expediente_stage_updated_at": u.get(
+                "expediente_stage_du007_updated_at" if programa == "du007" else "expediente_stage_updated_at"),
             "documentos_completos": bool(u.get("documentos_completos")),
-            "expediente_submitted_at": u.get("expediente_submitted_at"),
+            "expediente_submitted_at": u.get(
+                "expediente_submitted_at_du007" if programa == "du007" else "expediente_submitted_at"),
             "ahorro_estimado": calc.get("subsidio_estimado", 0),
             "ahorro_reconocido": round(float(inv["gal"]) * 1.5, 2),
             "galones_confirmados": round(float(inv["gal"]), 2),
@@ -3626,10 +3640,21 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
     
-    # Obtener el último banco y declaración (cualquiera de la empresa sirve)
+    # Obtener el último banco y declaración (cualquiera de la empresa sirve). DU 007 firma
+    # por periodo en su propia colección — no en subsidio_declaraciones, que es del DU 004.
     bank = await db.subsidio_bank_accounts.find_one(_own_q(u, uids), {"_id": 0}, sort=[("updated_at", -1)])
-    decl = await db.subsidio_declaraciones.find_one(_own_q(u, uids), {"_id": 0}, sort=[("accepted_at", -1)])
-    
+    decl_col = db.declaraciones_du007 if programa == "du007" else db.subsidio_declaraciones
+    decl = await decl_col.find_one(_own_q(u, uids), {"_id": 0}, sort=[("accepted_at", -1)])
+
+    # Estado/etapa del trámite: DU 007 tiene sus propios campos (no comparte con el DU 004
+    # el "Confirmado" / "Enviado ATU" / etapa del trámite — antes heredaba lo del DU 004
+    # aunque nada se hubiera presentado todavía para el DU 007).
+    if programa == "du007":
+        u["expediente_status"] = u.get("expediente_status_du007") or "uploading"
+        u["expediente_stage"] = u.get("expediente_stage_du007")
+        u["expediente_stage_updated_at"] = u.get("expediente_stage_du007_updated_at")
+        u["expediente_submitted_at"] = u.get("expediente_submitted_at_du007")
+
     docs = await db.subsidio_documents.find(_own_q(u, uids), {"_id": 0, "storage_key": 0}).sort("uploaded_at", -1).to_list(500)
     
     # Merge vehicles from both main fleet and subsidio
@@ -4012,21 +4037,22 @@ async def admin_download_document(doc_id: str, dl: int = 0, _: dict = Depends(_r
 async def admin_update_stage(
     user_id: str,
     payload: StageUpdateIn,
+    programa: Optional[str] = None,
     _: dict = Depends(_require_admin_enered),
 ):
     """Admin cambia la etapa del expediente del cliente_subsidio.
     Etapas: solicitud_enviada → evaluacion_atu → aprobada → abonado_en_cuenta
+    `programa`: du007 escribe en los campos propios del DU 007 (no comparte etapa con el DU 004).
     """
     u = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     now = datetime.now(timezone.utc).isoformat()
+    campo, campo_at = ("expediente_stage_du007", "expediente_stage_du007_updated_at") if programa == "du007" \
+        else ("expediente_stage", "expediente_stage_updated_at")
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {
-            "expediente_stage": payload.stage,
-            "expediente_stage_updated_at": now,
-        }},
+        {"$set": {campo: payload.stage, campo_at: now}},
     )
     return {"ok": True, "expediente_stage": payload.stage, "updated_at": now}
 

@@ -278,7 +278,7 @@ function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
     if (!window.confirm(`¿Confirmas cambiar la etapa a "${STAGE_LABEL[newStage]}"?`)) return;
     setSavingStage(true);
     try {
-      const { data: res } = await api.put(`/admin/subsidio/expedientes/${userId}/stage`, { stage: newStage });
+      const { data: res } = await api.put(`/admin/subsidio/expedientes/${userId}/stage?programa=${programa}`, { stage: newStage });
       setData((d) => ({
         ...d,
         user: { ...d.user, expediente_stage: res.expediente_stage, expediente_stage_updated_at: res.updated_at },
@@ -335,7 +335,7 @@ function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
     { id: "banco", label: "Cuenta bancaria", icon: Banknote },
     { id: "documentos", label: `Documentos (${companyDocs.length})`, icon: FileText },
     { id: "flota", label: `Flota (${stats.vehicles_count})`, icon: Truck },
-    { id: "facturas", label: `Facturas (${stats.invoices_confirmed}/${stats.invoices_confirmed + stats.invoices_draft})`, icon: Fuel },
+    { id: "facturas", label: `Facturas (${stats.invoices_confirmed}/${invoices.length})`, icon: Fuel },
     { id: "declaracion", label: "Declaración jurada", icon: ShieldCheck },
     { id: "editar", label: "Editar", icon: Pencil },
   ];
