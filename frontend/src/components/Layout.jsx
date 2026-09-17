@@ -19,6 +19,13 @@ const ICON_BASE = "/assets/icons";
 
 const ALL_REGULAR_ROLES = ["admin_enered", "administrador", "logistica", "contabilidad", "cliente_subsidio"];
 
+// Módulos opcionales fuera de la base (Dashboard, Combustible, Cuenta, Vehículos,
+// Documentación, que siempre están disponibles). Un usuario de empresa (administrador/
+// logística/contabilidad) solo los ve si la empresa tiene "plataforma" activa y, si el
+// admin restringió módulos puntuales (modulos_habilitados != null en /auth/me), que ese
+// módulo esté en la lista. Mismos nombres que el `titulo` que revisa SubsidioGate.
+const MODULOS_OPCIONALES = ["Analytics BI", "Mantenimiento", "Checklist", "Infracciones", "Neumáticos", "Viajes"];
+
 const MENU = [
   {
     label: "Subsidios", icon: FolderCheck, roles: ["cliente_subsidio"], testid: "nav-subsidios",
@@ -330,6 +337,14 @@ export default function Layout({ children }) {
       if (!user?.servicios?.plataforma) {
         return false;
       }
+    }
+    // Módulos opcionales: se ocultan del sidebar directamente (no solo el contenido) para
+    // administrador/logística/contabilidad. cliente_subsidio los conserva visibles-pero-
+    // bloqueados a propósito (upsell de "Migrar a Plataforma"), así que no se tocan aquí.
+    if (MODULOS_OPCIONALES.includes(i.label) && user.role !== "admin_enered" && user.role !== "cliente_subsidio") {
+      const habilitados = user.modulos_habilitados;
+      const tieneAcceso = user?.servicios?.plataforma === true && (habilitados == null || habilitados.includes(i.label));
+      if (!tieneAcceso) return false;
     }
 
     return true;

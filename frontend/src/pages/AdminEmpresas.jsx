@@ -4,7 +4,8 @@ import { api } from "../lib/api";
 import { toast } from "sonner";
 import {
   Building2, Server, Fuel, MapPin, ShieldCheck, KeyRound,
-  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw, AlertTriangle, Banknote
+  CheckCircle2, XCircle, Loader2, Trash2, Edit3, Save, X, Plus, RefreshCw, AlertTriangle, Banknote,
+  BarChart3, Wrench, ClipboardCheck, Disc, Route,
 } from "lucide-react";
 
 const SERVICE_META = {
@@ -13,6 +14,19 @@ const SERVICE_META = {
   gps:         { label: "GPS · Wialon", color: "#3B82F6", icon: MapPin,   desc: "Monitoreo satelital con Wialon (mapa + KM + sensores)" },
   subsidio:    { label: "Subsidio DU 004", color: "#F59E0B", icon: ShieldCheck, desc: "Expediente DU 004-2026: Mi Flota + Dashboard Subsidio" },
 };
+
+// Módulos base (Dashboard, Combustible, Cuenta, Vehículos, Documentación) siempre están
+// disponibles para cualquier cliente — no aparecen aquí porque no se pueden desactivar.
+// Estos, en cambio, son opcionales por empresa: si "Plataforma" está activo, se puede
+// elegir cuáles habilitar (ninguno seleccionado = todos habilitados, sin restricción).
+const MODULOS_OPCIONALES = [
+  { key: "Analytics BI",  icon: BarChart3,      desc: "Reportes y analítica de flota" },
+  { key: "Mantenimiento", icon: Wrench,         desc: "Órdenes y control de mantenimiento" },
+  { key: "Checklist",     icon: ClipboardCheck, desc: "Checklist de inspección vehicular" },
+  { key: "Infracciones",  icon: AlertTriangle,  desc: "Registro de papeletas e infracciones" },
+  { key: "Neumáticos",    icon: Disc,           desc: "Control de neumáticos por vehículo" },
+  { key: "Viajes",        icon: Route,          desc: "Planificación y registro de viajes" },
+];
 
 export default function AdminEmpresas() {
   const [rows, setRows] = useState([]);
@@ -260,7 +274,20 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
     subsidio: !!empresa.servicios?.subsidio,
   });
   const [tipoCliente, setTipoCliente] = useState(empresa.tipo_cliente || "enered");
+  // null = sin restricción (todos los módulos opcionales habilitados, como siempre fue).
+  // Al marcar "Elegir módulos" se arranca con la lista actual (o vacía) y se puede tildar
+  // uno por uno; al desmarcar, vuelve a null (sin restricción).
+  const [restringir, setRestringir] = useState(Array.isArray(empresa.modulos_habilitados));
+  const [modulosSel, setModulosSel] = useState(new Set(empresa.modulos_habilitados || []));
   const [saving, setSaving] = useState(false);
+
+  const toggleModulo = (key) => {
+    setModulosSel((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  };
 
   async function save() {
     setSaving(true);
@@ -268,6 +295,7 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
       await api.put(`/admin/empresas/${encodeURIComponent(empresa.empresa)}/servicios`, {
         servicios,
         tipo_cliente: tipoCliente,
+        modulos_habilitados: restringir ? [...modulosSel] : null,
       });
       toast.success("Servicios actualizados");
       onSaved();
@@ -351,6 +379,49 @@ function ServiciosModal({ empresa, onClose, onSaved }) {
         <div style={{ marginTop: 14, padding: "12px 14px", background: "#EFF6FF", border: "1px solid #DBEAFE", borderRadius: 10, fontSize: 13, color: "#1E40AF" }}>
           <ShieldCheck style={{ width: 15, height: 15, display: "inline", verticalAlign: -2, marginRight: 6 }} />
           El módulo <strong>Monitoreo</strong> se habilitará. Configura el token Wialon desde el botón <KeyRound style={{ width: 12, height: 12, display: "inline", verticalAlign: -1 }} /> en la tabla.
+        </div>
+      )}
+
+      {/* Módulos opcionales — solo aplica con Plataforma activa. Dashboard, Combustible,
+          Cuenta, Vehículos y Documentación siempre están incluidos, no aparecen aquí. */}
+      {servicios.plataforma && (
+        <div style={{ marginTop: 18 }}>
+          <label style={{ ...styles.label, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Módulos opcionales</span>
+            <span
+              onClick={() => setRestringir((r) => !r)}
+              style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 500, fontSize: 12.5, color: "#6b7280", cursor: "pointer", textTransform: "none", letterSpacing: 0 }}
+            >
+              <input type="checkbox" checked={restringir} onChange={() => setRestringir((r) => !r)} style={{ width: 14, height: 14, accentColor: "#8B3DFF" }} />
+              Elegir módulos específicos
+            </span>
+          </label>
+          {!restringir ? (
+            <div style={{ marginTop: 6, fontSize: 12.5, color: "#6b7280" }}>
+              Sin restricción: la empresa ve todos los módulos opcionales (Analytics BI, Mantenimiento, Checklist, Infracciones, Neumáticos, Viajes).
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+              {MODULOS_OPCIONALES.map(({ key, icon: Icon, desc }) => {
+                const active = modulosSel.has(key);
+                return (
+                  <div key={key} onClick={() => toggleModulo(key)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                      border: `1.5px solid ${active ? "#8B3DFF" : "#E5E7EB"}`, borderRadius: 10,
+                      background: active ? "#8B3DFF0A" : "#fff", cursor: "pointer",
+                    }}>
+                    <Icon style={{ width: 16, height: 16, color: active ? "#8B3DFF" : "#9CA3AF", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "#111827" }}>{key}</div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{desc}</div>
+                    </div>
+                    <input type="checkbox" checked={active} readOnly style={{ width: 15, height: 15, accentColor: "#8B3DFF", flexShrink: 0 }} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

@@ -252,6 +252,7 @@ async def user_public_with_servicios(u: dict) -> dict:
     base["servicios"] = info["servicios"]
     base["tipo_cliente"] = info["tipo_cliente"]
     base["wialon_configurado"] = info["wialon_configurado"]
+    base["modulos_habilitados"] = info.get("modulos_habilitados")
     # Usuarios creados sin RUC propio: heredan el de su empresa (empresas_config o
     # cualquier usuario hermano que sí lo tenga) para que el diagnóstico Etapa 0 cargue.
     if not base.get("ruc") and empresa:
@@ -2499,6 +2500,10 @@ class EmpresaConfig(BaseModel):
 class ServiciosUpdate(BaseModel):
     servicios: EmpresaServicios
     tipo_cliente: Optional[Literal["enered", "subsidio"]] = None
+    # None = sin restricción (todos los módulos opcionales visibles). Una lista (incluso
+    # vacía) restringe a exactamente esos módulos opcionales — los módulos base nunca
+    # dependen de esto. Omitir el campo en el body no lo toca.
+    modulos_habilitados: Optional[List[str]] = None
 
 
 class WialonConfigIn(BaseModel):
@@ -2613,6 +2618,7 @@ async def upsert_empresa_config(data: EmpresaConfig, user: dict = Depends(requir
 async def update_empresa_servicios(empresa: str, data: ServiciosUpdate, user: dict = Depends(require_roles("admin_enered"))):
     patch = {
         "servicios": _svc._normalize_servicios(data.servicios.model_dump()),
+        "modulos_habilitados": data.modulos_habilitados,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if data.tipo_cliente:
@@ -2632,7 +2638,9 @@ async def update_empresa_servicios(empresa: str, data: ServiciosUpdate, user: di
         })
     else:
         await db.empresas_config.update_one({"empresa": empresa}, {"$set": patch})
-    return {"ok": True, "empresa": empresa, "servicios": patch["servicios"], "tipo_cliente": patch.get("tipo_cliente", existing.get("tipo_cliente") if existing else _svc.DEFAULT_TIPO_CLIENTE)}
+    return {"ok": True, "empresa": empresa, "servicios": patch["servicios"],
+            "modulos_habilitados": patch["modulos_habilitados"],
+            "tipo_cliente": patch.get("tipo_cliente", existing.get("tipo_cliente") if existing else _svc.DEFAULT_TIPO_CLIENTE)}
 
 
 @api.put("/admin/empresas/{empresa}/wialon")

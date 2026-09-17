@@ -87,6 +87,7 @@ async def get_empresa_servicios(db, empresa: Optional[str]) -> dict:
             "servicios": dict(DEFAULT_SERVICIOS),
             "tipo_cliente": DEFAULT_TIPO_CLIENTE,
             "wialon_configurado": False,
+            "modulos_habilitados": None,
         }
     cfg = await db.empresas_config.find_one({"empresa": empresa}, {"_id": 0})
     if not cfg:
@@ -94,12 +95,18 @@ async def get_empresa_servicios(db, empresa: Optional[str]) -> dict:
             "servicios": dict(DEFAULT_SERVICIOS),
             "tipo_cliente": DEFAULT_TIPO_CLIENTE,
             "wialon_configurado": False,
+            "modulos_habilitados": None,
         }
     wialon_cfg = cfg.get("wialon") or {}
     return {
         "servicios": _normalize_servicios(cfg.get("servicios")),
         "tipo_cliente": cfg.get("tipo_cliente") or DEFAULT_TIPO_CLIENTE,
         "wialon_configurado": bool(wialon_cfg.get("token")),
+        # None = sin restricción (todos los módulos opcionales visibles, comportamiento de
+        # siempre); una lista = solo esos módulos opcionales están habilitados para la
+        # empresa. Los módulos base (Dashboard, Combustible, Cuenta, Vehículos,
+        # Documentación) nunca dependen de esto — siempre están disponibles.
+        "modulos_habilitados": cfg.get("modulos_habilitados"),
     }
 
 

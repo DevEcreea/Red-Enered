@@ -38,8 +38,9 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
   }
 
   // 2. Resto de roles (administrador, logística, contabilidad): lógica premium por servicios.
-  //    Módulos liberados por defecto:
-  const modulosLiberados = ["Dashboard", "Combustible", "Gestión Gastos", "Vehículos", "Documentación"];
+  //    Módulos liberados por defecto (base, siempre disponibles — igual que para el cliente
+  //    de subsidio arriba): Dashboard, Combustible, Cuenta, Vehículos, Documentación.
+  const modulosLiberados = ["Dashboard", "Combustible", "Cuenta", "Vehículos", "Documentación"];
 
   if (!modulosLiberados.includes(titulo)) {
     // Verificamos si tiene el servicio específico
@@ -48,8 +49,11 @@ export default function SubsidioGate({ children, titulo = "Tu Módulo" }) {
     if (titulo === "Monitoreo") {
       tieneAcceso = user.servicios?.gps === true;
     } else {
-      // Para el resto de módulos (Analytics, Calendario, etc.), requiere "plataforma"
-      tieneAcceso = user.servicios?.plataforma === true;
+      // Para el resto de módulos (Analytics, Calendario, etc.), requiere "plataforma" Y,
+      // si el admin restringió módulos puntuales para esta empresa (modulos_habilitados
+      // != null), que este módulo esté en esa lista. null = sin restricción (todos).
+      const habilitados = user.modulos_habilitados;
+      tieneAcceso = user.servicios?.plataforma === true && (habilitados == null || habilitados.includes(titulo));
     }
 
     if (!tieneAcceso) {
