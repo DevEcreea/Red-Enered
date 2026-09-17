@@ -716,7 +716,7 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
   const totImp = filtradas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
 
   const zipHref = () => {
-    const p = new URLSearchParams({ t: dlToken });
+    const p = new URLSearchParams({ t: dlToken, programa });
     if (empresa) p.set("empresa", empresa);
     if (fPlaca) p.set("placa", fPlaca);
     if (fMes) { p.set("desde", `${fMes}-01`); p.set("hasta", `${fMes}-31`); }

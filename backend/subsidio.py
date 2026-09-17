@@ -3490,7 +3490,7 @@ async def admin_list_expedientes(
     inv_agg = await db.consumos_subsidio.aggregate([
         {"$match": {"user_id": {"$in": uids}, **prog_match}},
         {"$group": {
-            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status"},
+            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status", "val": "$validacion_estado"},
             "count": {"$sum": 1},
             "gal": {"$sum": "$galones"},
             "imp": {"$sum": "$importe_total"}
@@ -3507,6 +3507,11 @@ async def admin_list_expedientes(
             inv_map[k]["draft"] += r["count"]
         elif status == "confirmed":
             inv_map[k]["conf"] += r["count"]
+        # DU 007 no tiene paso de "Confirmar" (queda en draft para siempre): se cuenta como
+        # "reconocido" todo lo que el validador no rechazó, igual criterio que el expediente
+        # y que /subsidio/du007/estado. DU 004 sigue exigiendo status=confirmed.
+        reconocida = (r["_id"].get("val") != "RECHAZADA") if programa == "du007" else (status == "confirmed")
+        if reconocida:
             inv_map[k]["gal"] += r.get("gal", 0) or 0
             inv_map[k]["imp"] += r.get("imp", 0) or 0
 
@@ -3583,6 +3588,27 @@ async def admin_list_expedientes(
 
 
 
+
+
+def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
+    """KPIs de facturas del expediente (tarjetas 'Galones confirm.' / 'Ahorro recalculado').
+    DU 004: 'confirmado' = el cliente revisó los datos OCR y le dio 'Confirmar facturas'
+    (status=confirmed) — se mantiene igual, es un paso real de su flujo.
+    DU 007: esa página no tiene paso de 'Confirmar' (las facturas quedan en status=draft
+    para siempre); 'reconocido' es lo que el validador ya acepta como válido — igual
+    criterio que /subsidio/du007/estado usa para el cliente (todo lo que no sea
+    RECHAZADA). Antes esto se computaba solo por status=confirmed y el DU 007 siempre
+    mostraba S/ 0 arriba aunque la tabla de abajo sí sumara las facturas."""
+    if programa == "du007":
+        cuenta = lambda i: (i.get("validacion_estado") or "") != "RECHAZADA"
+    else:
+        cuenta = lambda i: i.get("status") == "confirmed"
+    return {
+        "invoices_draft": sum(1 for i in invoices if i.get("status") == "draft"),
+        "invoices_confirmed": sum(1 for i in invoices if cuenta(i)),
+        "galones_confirmados": round(sum((i.get("galones") or 0) for i in invoices if cuenta(i)), 2),
+        "importe_confirmado": round(sum((i.get("importe_total") or 0) for i in invoices if cuenta(i)), 2),
+    }
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
@@ -3715,10 +3741,7 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
         "stats": {
             "docs_count": len(docs),
             "vehicles_count": len(vehicles),
-            "invoices_draft": sum(1 for i in invoices if i.get("status") == "draft"),
-            "invoices_confirmed": sum(1 for i in invoices if i.get("status") == "confirmed"),
-            "galones_confirmados": round(sum((i.get("galones") or 0) for i in invoices if i.get("status") == "confirmed"), 2),
-            "importe_confirmado": round(sum((i.get("importe_total") or 0) for i in invoices if i.get("status") == "confirmed"), 2),
+            **_expediente_stats(invoices, programa),
         },
     }
 
@@ -3829,7 +3852,7 @@ async def admin_revalidar_invoices(user_id: str, empresa: Optional[str] = None, 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
 async def admin_zip_invoices(
     user_id: str,
-    placa: str = "", desde: str = "", hasta: str = "", q: str = "", empresa: str = "",
+    placa: str = "", desde: str = "", hasta: str = "", q: str = "", empresa: str = "", programa: Optional[str] = None,
     _: dict = Depends(_require_admin_enered),
 ):
     """Descarga en UN ZIP los archivos de las facturas del expediente (respetando los
@@ -3845,6 +3868,12 @@ async def admin_zip_invoices(
     t_user = _usuario_en_empresa(t_user, empresa)
     uids = await _get_company_uids(t_user)
     filtro = _own_q(t_user, uids)
+    # Sin esto, el ZIP del panel DU 007 bajaba también las facturas del DU 004 (y viceversa):
+    # no filtraba por programa como sí hace la lista y el detalle del expediente.
+    if programa == "du007":
+        filtro["programa"] = "du007"
+    elif programa == "du004":
+        filtro["programa"] = {"$ne": "du007"}
     if placa:
         filtro["placa"] = placa.upper().strip()
     if desde or hasta:
