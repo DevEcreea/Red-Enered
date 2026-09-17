@@ -3420,16 +3420,25 @@ async def admin_list_expedientes(
     filt = {"$or": role_or} if len(role_or) > 1 else role_or[0]
 
     if q:
-        filt = {"$and": [
-            filt,
-            {"$or": [
-                {"empresa": {"$regex": q, "$options": "i"}},
-                {"ruc": {"$regex": q}},
-                {"email": {"$regex": q, "$options": "i"}},
-                {"empresas_asignadas.empresa": {"$regex": q, "$options": "i"}},
-                {"empresas_asignadas.ruc": {"$regex": q}},
-            ]}
-        ]}
+        # El RUC de la empresa puede vivir SOLO en empresas_config (lo carga "Empresas y
+        # Servicios") si el usuario nunca inició sesión: _heredar_ruc recién lo copia a su
+        # ficha en el primer login. Sin esto, buscar por RUC no encontraba expedientes de
+        # empresas que ya tenían su RUC registrado, solo por no haber entrado nunca.
+        empresas_por_ruc = [
+            cfg["empresa"] async for cfg in db.empresas_config.find(
+                {"ruc": {"$regex": q}}, {"_id": 0, "empresa": 1}) if cfg.get("empresa")
+        ]
+        or_q = [
+            {"empresa": {"$regex": q, "$options": "i"}},
+            {"ruc": {"$regex": q}},
+            {"email": {"$regex": q, "$options": "i"}},
+            {"empresas_asignadas.empresa": {"$regex": q, "$options": "i"}},
+            {"empresas_asignadas.ruc": {"$regex": q}},
+        ]
+        if empresas_por_ruc:
+            or_q.append({"empresa": {"$in": empresas_por_ruc}})
+            or_q.append({"empresas_asignadas.empresa": {"$in": empresas_por_ruc}})
+        filt = {"$and": [filt, {"$or": or_q}]}
     campo_status = "expediente_status_du007" if programa == "du007" else "expediente_status"
     if estado:
         filt[campo_status] = estado
@@ -3462,6 +3471,17 @@ async def admin_list_expedientes(
                     filas.append((u, a["empresa"], a.get("ruc") or ""))
         else:
             filas.append((u, u.get("empresa"), u.get("ruc")))
+
+    # RUC de respaldo desde empresas_config, para filas sin RUC propio en el usuario
+    # (mismo caso: nunca inició sesión, así que _heredar_ruc no llegó a copiarlo).
+    _empresas_filas = sorted({e for (_, e, _) in filas if e})
+    _ruc_por_empresa = {}
+    if _empresas_filas:
+        async for cfg in db.empresas_config.find(
+            {"empresa": {"$in": _empresas_filas}}, {"_id": 0, "empresa": 1, "ruc": 1}):
+            if cfg.get("empresa") and cfg.get("ruc"):
+                _ruc_por_empresa[cfg["empresa"]] = cfg["ruc"]
+    filas = [(u, emp, ruc or _ruc_por_empresa.get(emp, "")) for (u, emp, ruc) in filas]
 
     # Conteos por (user_id, empresa). Los registros antiguos sin empresa se atribuyen a
     # la empresa base del usuario (mismo criterio que _own_q).
@@ -3635,11 +3655,15 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     if not u:
         raise HTTPException(status_code=404, detail="Expediente no encontrado")
     u = _usuario_en_empresa(u, empresa)
+    # Si el usuario nunca inició sesión, su RUC pudo quedar sin copiar desde empresas_config
+    # (eso lo hace _heredar_ruc recién en el primer login) — el expediente admin mostraba
+    # "RUC" en blanco aunque la empresa ya lo tuviera registrado en Empresas y Servicios.
+    u = await _heredar_ruc(u)
 
     uids = await _get_company_uids(u)
-    
+
     calc = await db.calculations.find_one({"id": u.get("calc_id")}, {"_id": 0}) if u.get("calc_id") else None
-    
+
     # Obtener el último banco y declaración (cualquiera de la empresa sirve). DU 007 firma
     # por periodo en su propia colección — no en subsidio_declaraciones, que es del DU 004.
     bank = await db.subsidio_bank_accounts.find_one(_own_q(u, uids), {"_id": 0}, sort=[("updated_at", -1)])
