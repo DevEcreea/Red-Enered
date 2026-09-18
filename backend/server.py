@@ -9876,6 +9876,368 @@ async def upload_invoice_file(
     return {"ok": True, "storage_key": storage_key}
 
 
+# ======================================================================================
+# MANTENIMIENTO (Fleetrun ENERED): plan de intervalos, km real desde Wialon, servicios,
+# costos. Colecciones: mtto_intervalos, mtto_servicios.
+# ======================================================================================
+_MTTO_PLAN_ESTANDAR = [
+    {"nombre": "Cambio de aceite y filtro de aceite", "categoria": "Motor", "cada_km": 10000, "cada_dias": 180, "aviso_km": 1000, "aviso_dias": 15},
+    {"nombre": "Filtro de aire", "categoria": "Motor", "cada_km": 20000, "cada_dias": 365, "aviso_km": 1500, "aviso_dias": 15},
+    {"nombre": "Filtro de combustible", "categoria": "Motor", "cada_km": 20000, "cada_dias": 365, "aviso_km": 1500, "aviso_dias": 15},
+    {"nombre": "Revisión de frenos (pastillas / zapatas)", "categoria": "Frenos", "cada_km": 20000, "cada_dias": 0, "aviso_km": 2000, "aviso_dias": 0},
+    {"nombre": "Rotación y presión de neumáticos", "categoria": "Neumáticos", "cada_km": 10000, "cada_dias": 0, "aviso_km": 1000, "aviso_dias": 0},
+    {"nombre": "Cambio de neumáticos", "categoria": "Neumáticos", "cada_km": 60000, "cada_dias": 0, "aviso_km": 5000, "aviso_dias": 0},
+    {"nombre": "Refrigerante y sistema de enfriamiento", "categoria": "Motor", "cada_km": 40000, "cada_dias": 730, "aviso_km": 3000, "aviso_dias": 30},
+    {"nombre": "Batería", "categoria": "Eléctrico", "cada_km": 0, "cada_dias": 730, "aviso_km": 0, "aviso_dias": 30},
+    {"nombre": "Alineamiento y balanceo", "categoria": "Suspensión", "cada_km": 20000, "cada_dias": 0, "aviso_km": 2000, "aviso_dias": 0},
+    {"nombre": "Caja y transmisión (aceite)", "categoria": "Transmisión", "cada_km": 60000, "cada_dias": 0, "aviso_km": 5000, "aviso_dias": 0},
+]
+
+
+def _mtto_empresa(u: dict) -> str:
+    emp = (u.get("_empresa_activa") or u.get("empresa") or "").strip()
+    if not emp:
+        raise HTTPException(status_code=400, detail="Elige una empresa para ver su mantenimiento")
+    return emp
+
+
+def _mtto_placa(p: str) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (p or "").upper())
+
+
+def _mtto_placa_de_unidad(nombre: str) -> str:
+    """'CCQ-845 (V-413)' → 'CCQ845'."""
+    m = re.search(r"\b([A-Z0-9]{3})-?([0-9]{3})\b", (nombre or "").upper())
+    return (m.group(1) + m.group(2)) if m else _mtto_placa(nombre)[:6]
+
+
+class MttoIntervaloIn(BaseModel):
+    nombre: str
+    categoria: Optional[str] = "General"
+    cada_km: Optional[float] = 0
+    cada_dias: Optional[int] = 0
+    aviso_km: Optional[float] = 0
+    aviso_dias: Optional[int] = 0
+    placas: Optional[List[str]] = None   # vacío/None = aplica a toda la flota
+    activo: Optional[bool] = True
+
+
+class MttoRepuestoIn(BaseModel):
+    descripcion: str
+    cantidad: Optional[float] = 1
+    costo: Optional[float] = 0
+
+
+class MttoServicioIn(BaseModel):
+    placa: str
+    intervalo_id: Optional[str] = None
+    nombre: str
+    estado: Optional[str] = "hecho"          # planificado | en_taller | hecho
+    fecha: Optional[str] = None              # YYYY-MM-DD
+    km: Optional[float] = None
+    taller: Optional[str] = ""
+    costo_mano_obra: Optional[float] = 0
+    costo_repuestos: Optional[float] = None  # si None se suma de repuestos
+    repuestos: Optional[List[MttoRepuestoIn]] = None
+    notas: Optional[str] = ""
+    documento_id: Optional[str] = None
+
+
+async def _mtto_km_actual(empresa: str, user: dict) -> dict:
+    """Km actual por placa: Wialon (odómetro en vivo) si la empresa tiene GPS; si no, el
+    kilometraje del módulo Vehículos. Devuelve {PLACA: {km, fuente, en, encendido}}."""
+    out = {}
+    try:
+        info = await _svc.get_empresa_servicios(db, empresa)
+        if info["servicios"].get("gps"):
+            w = await get_wialon_units(empresa=empresa if user.get("role") == "admin_enered" else None, user=user)
+            for un in (w or {}).get("units") or []:
+                pn = _mtto_placa_de_unidad(un.get("name"))
+                if not pn:
+                    continue
+                km = un.get("odometer") or 0
+                try:
+                    km = float(km)
+                except Exception:
+                    km = 0.0
+                if km > 5_000_000:  # metros → km
+                    km = km / 1000.0
+                ts = un.get("timestamp")
+                out[pn] = {"km": round(km, 1), "fuente": "Wialon", "en": datetime.fromtimestamp(ts, tz=timezone.utc).isoformat() if ts else None,
+                           "encendido": bool(un.get("ignition")), "unidad": un.get("name")}
+    except HTTPException:
+        pass
+    except Exception as e:
+        logger.warning(f"Mantenimiento: km desde Wialon falló para {empresa}: {e}")
+    # Persistir el último km leído (para historial y para cuando Wialon no responda)
+    if out:
+        ahora = datetime.now(timezone.utc).isoformat()
+        for pn, d in out.items():
+            try:
+                await db.vehiculos.update_many({"empresa": empresa, "placa": {"$regex": f"^{pn[:3]}-?{pn[3:]}$", "$options": "i"}},
+                                               {"$set": {"km_wialon": d["km"], "km_wialon_en": ahora}})
+            except Exception:
+                pass
+    async for v in db.vehiculos.find({"empresa": empresa}, {"_id": 0, "placa": 1, "kilometraje": 1, "km_wialon": 1, "km_wialon_en": 1}):
+        pn = _mtto_placa(v.get("placa"))
+        if pn and pn not in out:
+            if v.get("km_wialon"):
+                out[pn] = {"km": float(v["km_wialon"]), "fuente": "Wialon (último)", "en": v.get("km_wialon_en"), "encendido": None}
+            elif v.get("kilometraje"):
+                try:
+                    if float(v["kilometraje"]) > 0:
+                        out[pn] = {"km": float(v["kilometraje"]), "fuente": "Manual", "en": None, "encendido": None}
+                except Exception:
+                    pass
+    return out
+
+
+def _mtto_estado(restante_km, restante_dias, aviso_km, aviso_dias):
+    vals = [x for x in (restante_km, restante_dias) if x is not None]
+    if not vals:
+        return "sin_dato"
+    if min(vals) < 0:
+        return "vencido"
+    pronto = (restante_km is not None and aviso_km and restante_km <= aviso_km) or \
+             (restante_dias is not None and aviso_dias and restante_dias <= aviso_dias)
+    return "pronto" if pronto else "ok"
+
+
+@api.get("/mantenimiento/intervalos")
+async def mtto_listar_intervalos(user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    items = await db.mtto_intervalos.find({"empresa": emp}, {"_id": 0}).sort("categoria", 1).to_list(500)
+    return {"empresa": emp, "intervalos": items}
+
+
+@api.post("/mantenimiento/intervalos")
+async def mtto_crear_intervalo(body: MttoIntervaloIn, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    doc = {"id": str(uuid.uuid4()), "empresa": emp, **body.model_dump(),
+           "placas": [_mtto_placa(p) for p in (body.placas or []) if _mtto_placa(p)],
+           "created_at": datetime.now(timezone.utc).isoformat(), "created_by": user.get("id")}
+    await db.mtto_intervalos.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/mantenimiento/intervalos/{iid}")
+async def mtto_editar_intervalo(iid: str, body: MttoIntervaloIn, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    upd = body.model_dump()
+    upd["placas"] = [_mtto_placa(p) for p in (body.placas or []) if _mtto_placa(p)]
+    upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.mtto_intervalos.update_one({"id": iid, "empresa": emp}, {"$set": upd})
+    if not r.matched_count:
+        raise HTTPException(404, "Intervalo no encontrado")
+    return {"ok": True}
+
+
+@api.delete("/mantenimiento/intervalos/{iid}")
+async def mtto_borrar_intervalo(iid: str, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    r = await db.mtto_intervalos.delete_one({"id": iid, "empresa": emp})
+    if not r.deleted_count:
+        raise HTTPException(404, "Intervalo no encontrado")
+    return {"ok": True}
+
+
+@api.post("/mantenimiento/intervalos/plan-estandar")
+async def mtto_plan_estandar(user: dict = Depends(get_current_user)):
+    """Carga el plan estándar de flota pesada (solo agrega los que la empresa no tiene)."""
+    emp = _mtto_empresa(user)
+    existentes = {(i.get("nombre") or "").strip().lower() async for i in db.mtto_intervalos.find({"empresa": emp}, {"_id": 0, "nombre": 1})}
+    nuevos = []
+    for p in _MTTO_PLAN_ESTANDAR:
+        if p["nombre"].strip().lower() in existentes:
+            continue
+        nuevos.append({"id": str(uuid.uuid4()), "empresa": emp, **p, "placas": [], "activo": True,
+                       "created_at": datetime.now(timezone.utc).isoformat(), "created_by": user.get("id")})
+    if nuevos:
+        await db.mtto_intervalos.insert_many(nuevos)
+    return {"ok": True, "agregados": len(nuevos)}
+
+
+@api.get("/mantenimiento/servicios")
+async def mtto_listar_servicios(placa: Optional[str] = None, estado: Optional[str] = None, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    q = {"empresa": emp}
+    if placa:
+        q["placa"] = _mtto_placa(placa)
+    if estado:
+        q["estado"] = estado
+    items = await db.mtto_servicios.find(q, {"_id": 0}).sort([("fecha", -1), ("created_at", -1)]).to_list(2000)
+    return {"empresa": emp, "servicios": items}
+
+
+def _mtto_servicio_doc(body: MttoServicioIn, emp: str, user: dict) -> dict:
+    reps = [r.model_dump() for r in (body.repuestos or [])]
+    costo_rep = body.costo_repuestos if body.costo_repuestos is not None else sum(float(r.get("cantidad") or 1) * float(r.get("costo") or 0) for r in reps)
+    estado = body.estado if body.estado in ("planificado", "en_taller", "hecho") else "hecho"
+    return {
+        "empresa": emp, "placa": _mtto_placa(body.placa), "intervalo_id": body.intervalo_id or None,
+        "nombre": (body.nombre or "").strip(), "estado": estado,
+        "fecha": (body.fecha or datetime.now(timezone.utc).strftime("%Y-%m-%d"))[:10],
+        "km": float(body.km) if body.km is not None else None,
+        "taller": (body.taller or "").strip(),
+        "costo_mano_obra": float(body.costo_mano_obra or 0), "costo_repuestos": round(float(costo_rep or 0), 2),
+        "costo_total": round(float(body.costo_mano_obra or 0) + float(costo_rep or 0), 2),
+        "repuestos": reps, "notas": (body.notas or "").strip(), "documento_id": body.documento_id or None,
+    }
+
+
+@api.post("/mantenimiento/servicios")
+async def mtto_crear_servicio(body: MttoServicioIn, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    if not _mtto_placa(body.placa):
+        raise HTTPException(400, "Placa requerida")
+    doc = {"id": str(uuid.uuid4()), **_mtto_servicio_doc(body, emp, user),
+           "created_at": datetime.now(timezone.utc).isoformat(), "created_by": user.get("id"), "por": user.get("name") or user.get("email") or ""}
+    await db.mtto_servicios.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/mantenimiento/servicios/{sid}")
+async def mtto_editar_servicio(sid: str, body: MttoServicioIn, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    upd = _mtto_servicio_doc(body, emp, user)
+    upd["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.mtto_servicios.update_one({"id": sid, "empresa": emp}, {"$set": upd})
+    if not r.matched_count:
+        raise HTTPException(404, "Servicio no encontrado")
+    return {"ok": True}
+
+
+@api.delete("/mantenimiento/servicios/{sid}")
+async def mtto_borrar_servicio(sid: str, user: dict = Depends(get_current_user)):
+    emp = _mtto_empresa(user)
+    r = await db.mtto_servicios.delete_one({"id": sid, "empresa": emp})
+    if not r.deleted_count:
+        raise HTTPException(404, "Servicio no encontrado")
+    return {"ok": True}
+
+
+@api.get("/mantenimiento/tablero")
+async def mtto_tablero(user: dict = Depends(get_current_user)):
+    """Estado de mantenimiento por unidad: km actual (Wialon), y por cada intervalo del plan
+    cuánto falta en km y días, con semáforo ok / pronto / vencido / sin_dato."""
+    emp = _mtto_empresa(user)
+    hoy = datetime.now(timezone.utc).date()
+    kms = await _mtto_km_actual(emp, user)
+    intervalos = [i async for i in db.mtto_intervalos.find({"empresa": emp, "activo": {"$ne": False}}, {"_id": 0})]
+    vehiculos = [v async for v in db.vehiculos.find({"empresa": emp}, {"_id": 0, "placa": 1, "tipo": 1, "marca": 1, "modelo": 1, "año": 1, "estado": 1})]
+    placas = {}
+    for v in vehiculos:
+        pn = _mtto_placa(v.get("placa"))
+        if pn:
+            placas[pn] = {"placa": v.get("placa"), "tipo": v.get("tipo") or "", "marca": v.get("marca") or "", "modelo": v.get("modelo") or "",
+                          "anio": v.get("año"), "estado_vehiculo": v.get("estado") or ""}
+    for pn, d in kms.items():  # unidades que están en Wialon pero no en Vehículos
+        placas.setdefault(pn, {"placa": pn, "tipo": "", "marca": "", "modelo": "", "anio": None, "estado_vehiculo": "", "solo_wialon": True})
+    hechos = [s async for s in db.mtto_servicios.find({"empresa": emp, "estado": "hecho"}, {"_id": 0})]
+    abiertos = [s async for s in db.mtto_servicios.find({"empresa": emp, "estado": {"$in": ["planificado", "en_taller"]}}, {"_id": 0})]
+
+    def _ultimo(pn, itv):
+        cands = [s for s in hechos if s["placa"] == pn and (s.get("intervalo_id") == itv["id"] or (s.get("nombre") or "").strip().lower() == (itv.get("nombre") or "").strip().lower())]
+        if not cands:
+            return None
+        return max(cands, key=lambda s: ((s.get("fecha") or ""), (s.get("km") or 0)))
+
+    unidades = []
+    tot = {"ok": 0, "pronto": 0, "vencido": 0, "sin_dato": 0}
+    for pn, info in sorted(placas.items()):
+        km_info = kms.get(pn) or {}
+        km_actual = km_info.get("km")
+        items = []
+        peor = "ok"
+        orden = {"vencido": 3, "pronto": 2, "sin_dato": 1, "ok": 0}
+        for itv in intervalos:
+            if itv.get("placas") and pn not in itv["placas"]:
+                continue
+            u = _ultimo(pn, itv)
+            restante_km = restante_dias = None
+            proximo_km = proxima_fecha = None
+            if u:
+                if itv.get("cada_km") and u.get("km") is not None and km_actual is not None:
+                    proximo_km = float(u["km"]) + float(itv["cada_km"])
+                    restante_km = round(proximo_km - km_actual)
+                if itv.get("cada_dias") and u.get("fecha"):
+                    try:
+                        f0 = datetime.strptime(u["fecha"][:10], "%Y-%m-%d").date()
+                        proxima_fecha = (f0 + timedelta(days=int(itv["cada_dias"]))).isoformat()
+                        restante_dias = (f0 + timedelta(days=int(itv["cada_dias"])) - hoy).days
+                    except Exception:
+                        pass
+                est = _mtto_estado(restante_km, restante_dias, itv.get("aviso_km"), itv.get("aviso_dias"))
+            else:
+                est = "sin_dato"
+            abierto = next((s for s in abiertos if s["placa"] == pn and (s.get("intervalo_id") == itv["id"] or (s.get("nombre") or "").lower() == (itv.get("nombre") or "").lower())), None)
+            items.append({"intervalo_id": itv["id"], "nombre": itv["nombre"], "categoria": itv.get("categoria") or "General",
+                          "cada_km": itv.get("cada_km") or 0, "cada_dias": itv.get("cada_dias") or 0,
+                          "ultimo_km": u.get("km") if u else None, "ultima_fecha": u.get("fecha") if u else None,
+                          "proximo_km": proximo_km, "proxima_fecha": proxima_fecha,
+                          "restante_km": restante_km, "restante_dias": restante_dias, "estado": est,
+                          "orden_abierta": {"id": abierto["id"], "estado": abierto["estado"], "fecha": abierto.get("fecha")} if abierto else None})
+            if orden[est] > orden[peor]:
+                peor = est
+        items.sort(key=lambda x: (-orden[x["estado"]], x["restante_km"] if x["restante_km"] is not None else 10**9))
+        tot[peor] += 1
+        unidades.append({**info, "placa_norm": pn, "km_actual": km_actual, "km_fuente": km_info.get("fuente"), "km_en": km_info.get("en"),
+                         "encendido": km_info.get("encendido"), "estado": peor, "items": items,
+                         "vencidos": sum(1 for i in items if i["estado"] == "vencido"), "pronto": sum(1 for i in items if i["estado"] == "pronto")})
+    unidades.sort(key=lambda u: (-{"vencido": 3, "pronto": 2, "sin_dato": 1, "ok": 0}[u["estado"]], u["placa"]))
+    return {"empresa": emp, "actualizado_en": datetime.now(timezone.utc).isoformat(), "total_unidades": len(unidades),
+            "con_km_wialon": sum(1 for u in unidades if (u.get("km_fuente") or "").startswith("Wialon")),
+            "resumen": tot, "intervalos_activos": len(intervalos), "unidades": unidades}
+
+
+@api.get("/mantenimiento/resumen")
+async def mtto_resumen(desde: Optional[str] = None, hasta: Optional[str] = None, user: dict = Depends(get_current_user)):
+    """Costos por unidad y costo por km (según km recorridos entre el primer y el último servicio,
+    o hasta el km actual de Wialon)."""
+    emp = _mtto_empresa(user)
+    q = {"empresa": emp, "estado": "hecho"}
+    if desde:
+        q["fecha"] = {"$gte": desde[:10]}
+    if hasta:
+        q.setdefault("fecha", {})["$lte"] = hasta[:10]
+    servicios = [s async for s in db.mtto_servicios.find(q, {"_id": 0})]
+    kms = await _mtto_km_actual(emp, user)
+    por_placa = {}
+    for s in servicios:
+        d = por_placa.setdefault(s["placa"], {"placa": s["placa"], "servicios": 0, "costo_total": 0.0, "mano_obra": 0.0, "repuestos": 0.0,
+                                               "km_min": None, "km_max": None, "ultimo": None, "por_categoria": {}})
+        d["servicios"] += 1
+        d["costo_total"] += float(s.get("costo_total") or 0)
+        d["mano_obra"] += float(s.get("costo_mano_obra") or 0)
+        d["repuestos"] += float(s.get("costo_repuestos") or 0)
+        if s.get("km") is not None:
+            d["km_min"] = s["km"] if d["km_min"] is None else min(d["km_min"], s["km"])
+            d["km_max"] = s["km"] if d["km_max"] is None else max(d["km_max"], s["km"])
+        if not d["ultimo"] or (s.get("fecha") or "") > (d["ultimo"].get("fecha") or ""):
+            d["ultimo"] = {"nombre": s.get("nombre"), "fecha": s.get("fecha"), "costo": s.get("costo_total")}
+    out = []
+    for pn, d in por_placa.items():
+        km_actual = (kms.get(pn) or {}).get("km")
+        km_rec = None
+        if d["km_min"] is not None:
+            km_fin = km_actual if km_actual is not None else d["km_max"]
+            if km_fin is not None and km_fin > d["km_min"]:
+                km_rec = km_fin - d["km_min"]
+        d["km_recorridos"] = round(km_rec) if km_rec else None
+        d["costo_por_km"] = round(d["costo_total"] / km_rec, 3) if km_rec and km_rec > 0 else None
+        for k in ("costo_total", "mano_obra", "repuestos"):
+            d[k] = round(d[k], 2)
+        out.append(d)
+    out.sort(key=lambda x: -x["costo_total"])
+    mes = datetime.now(timezone.utc).strftime("%Y-%m")
+    return {"empresa": emp, "total": round(sum(x["costo_total"] for x in out), 2), "servicios": len(servicios),
+            "mes_actual": round(sum(float(s.get("costo_total") or 0) for s in servicios if (s.get("fecha") or "").startswith(mes)), 2),
+            "unidades": out}
+
+
+
 app.include_router(api)
 
 
