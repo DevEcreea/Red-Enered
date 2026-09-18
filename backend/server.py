@@ -10744,6 +10744,204 @@ async def checklist_foto(key: str, user: dict = Depends(get_current_user)):
     return storage.download_response(key, filename=key.rsplit("/", 1)[-1], content_type="image/jpeg")
 
 
+# ── Neumáticos ───────────────────────────────────────────────────────────────
+NEU_UMBRAL_CRITICO_MM = 3.0
+NEU_UMBRAL_ALERTA_MM = 5.0
+NEU_POSICIONES_COMUNES = [
+    "1-Izq", "1-Der", "2-Izq-Ext", "2-Izq-Int", "2-Der-Ext", "2-Der-Int",
+    "3-Izq-Ext", "3-Izq-Int", "3-Der-Ext", "3-Der-Int", "Repuesto",
+]
+
+
+def _neu_alerta(profundidad_mm) -> str:
+    if profundidad_mm is None:
+        return "—"
+    if profundidad_mm <= NEU_UMBRAL_CRITICO_MM:
+        return "critico"
+    if profundidad_mm <= NEU_UMBRAL_ALERTA_MM:
+        return "proximo"
+    return "ok"
+
+
+class NeumaticoIn(BaseModel):
+    codigo: str
+    marca: Optional[str] = ""
+    medida: Optional[str] = ""
+    profundidad_inicial_mm: Optional[float] = None
+    costo: Optional[float] = None
+    proveedor: Optional[str] = ""
+    placa: Optional[str] = None
+    posicion: Optional[str] = None
+    km_instalacion: Optional[float] = None
+
+
+class NeuInstalarIn(BaseModel):
+    placa: str
+    posicion: str
+    km: Optional[float] = None
+
+
+class NeuMedicionIn(BaseModel):
+    profundidad_mm: float
+    km: Optional[float] = None
+    notas: Optional[str] = ""
+
+
+class NeuReencaucharIn(BaseModel):
+    profundidad_mm: float
+    proveedor: Optional[str] = ""
+    costo: Optional[float] = None
+
+
+class NeuBajaIn(BaseModel):
+    motivo: str
+
+
+def _neu_evento(tipo: str, **kw) -> dict:
+    return {"id": str(uuid.uuid4()), "tipo": tipo, "fecha": datetime.now(timezone.utc).isoformat(), **kw}
+
+
+@api.get("/neumaticos")
+async def neumaticos_listar(placa: Optional[str] = None, estado: Optional[str] = None, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    q = {"empresa": emp}
+    if placa:
+        q["placa"] = _mtto_placa(placa)
+    if estado:
+        q["estado"] = estado
+    items = await db.neumaticos.find(q, {"_id": 0}).sort("created_at", -1).to_list(3000)
+    for it in items:
+        it["alerta"] = _neu_alerta(it.get("profundidad_actual_mm"))
+    return {"empresa": emp, "neumaticos": items}
+
+
+@api.get("/neumaticos/kpis")
+async def neumaticos_kpis(user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    items = await db.neumaticos.find({"empresa": emp}, {"_id": 0, "estado": 1, "profundidad_actual_mm": 1}).to_list(3000)
+    en_uso = [it for it in items if it.get("estado") in ("en_uso", "reencauchada")]
+    return {
+        "total": len(items),
+        "en_uso": len(en_uso),
+        "en_almacen": len([it for it in items if it.get("estado") == "almacen"]),
+        "criticos": len([it for it in en_uso if _neu_alerta(it.get("profundidad_actual_mm")) == "critico"]),
+        "proximos": len([it for it in en_uso if _neu_alerta(it.get("profundidad_actual_mm")) == "proximo"]),
+        "desechados": len([it for it in items if it.get("estado") == "desechada"]),
+    }
+
+
+@api.post("/neumaticos")
+async def neumaticos_crear(body: NeumaticoIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    if not (body.codigo or "").strip():
+        raise HTTPException(status_code=400, detail="El código / DOT del neumático es obligatorio")
+    ahora = datetime.now(timezone.utc).isoformat()
+    placa_n = _mtto_placa(body.placa) if body.placa else None
+    instalado = bool(placa_n and body.posicion)
+    doc = {
+        "id": str(uuid.uuid4()), "empresa": emp, "codigo": body.codigo.strip(),
+        "marca": (body.marca or "").strip(), "medida": (body.medida or "").strip(),
+        "costo": body.costo, "proveedor": (body.proveedor or "").strip(),
+        "profundidad_inicial_mm": body.profundidad_inicial_mm,
+        "profundidad_actual_mm": body.profundidad_inicial_mm,
+        "reencauches": 0,
+        "placa": placa_n if instalado else None,
+        "posicion": body.posicion if instalado else None,
+        "km_instalacion": body.km_instalacion if instalado else None,
+        "fecha_instalacion": ahora if instalado else None,
+        "estado": "en_uso" if instalado else "almacen",
+        "historial": [_neu_evento("alta", placa=placa_n if instalado else None, posicion=body.posicion if instalado else None)],
+        "created_at": ahora, "creado_por": user.get("id"),
+    }
+    await db.neumaticos.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/neumaticos/{nid}")
+async def neumaticos_editar(nid: str, body: NeumaticoIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    upd = {
+        "codigo": body.codigo.strip(), "marca": (body.marca or "").strip(), "medida": (body.medida or "").strip(),
+        "costo": body.costo, "proveedor": (body.proveedor or "").strip(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    r = await db.neumaticos.update_one({"id": nid, "empresa": emp}, {"$set": upd})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
+@api.delete("/neumaticos/{nid}")
+async def neumaticos_borrar(nid: str, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    r = await db.neumaticos.delete_one({"id": nid, "empresa": emp})
+    if not r.deleted_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
+@api.post("/neumaticos/{nid}/instalar")
+async def neumaticos_instalar(nid: str, body: NeuInstalarIn, user: dict = Depends(get_current_user)):
+    """Instala o rota el neumático a una placa + posición (libera la posición anterior)."""
+    emp = _empresa_de(user)
+    placa_n = _mtto_placa(body.placa)
+    if not placa_n or not (body.posicion or "").strip():
+        raise HTTPException(status_code=400, detail="Placa y posición son obligatorias")
+    ahora = datetime.now(timezone.utc).isoformat()
+    ocupante = await db.neumaticos.find_one({"empresa": emp, "placa": placa_n, "posicion": body.posicion, "id": {"$ne": nid}})
+    if ocupante:
+        await db.neumaticos.update_one({"id": ocupante["id"]}, {
+            "$set": {"placa": None, "posicion": None, "estado": "almacen"},
+            "$push": {"historial": _neu_evento("retiro", motivo=f"Reemplazado por otro neumático en {body.posicion}")},
+        })
+    upd = {"placa": placa_n, "posicion": body.posicion, "km_instalacion": body.km, "fecha_instalacion": ahora, "estado": "en_uso"}
+    r = await db.neumaticos.update_one({"id": nid, "empresa": emp}, {
+        "$set": upd, "$push": {"historial": _neu_evento("instalacion", placa=placa_n, posicion=body.posicion, km=body.km)},
+    })
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
+@api.post("/neumaticos/{nid}/medicion")
+async def neumaticos_medicion(nid: str, body: NeuMedicionIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    r = await db.neumaticos.update_one({"id": nid, "empresa": emp}, {
+        "$set": {"profundidad_actual_mm": body.profundidad_mm},
+        "$push": {"historial": _neu_evento("medicion", profundidad_mm=body.profundidad_mm, km=body.km, notas=body.notas)},
+    })
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
+@api.post("/neumaticos/{nid}/reencauchar")
+async def neumaticos_reencauchar(nid: str, body: NeuReencaucharIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    r = await db.neumaticos.update_one({"id": nid, "empresa": emp}, {
+        "$set": {"profundidad_actual_mm": body.profundidad_mm, "estado": "reencauchada",
+                 "proveedor": (body.proveedor or "").strip() or None},
+        "$inc": {"reencauches": 1},
+        "$push": {"historial": _neu_evento("reencauche", profundidad_mm=body.profundidad_mm, costo=body.costo, proveedor=body.proveedor)},
+    })
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
+@api.post("/neumaticos/{nid}/baja")
+async def neumaticos_dar_baja(nid: str, body: NeuBajaIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    r = await db.neumaticos.update_one({"id": nid, "empresa": emp}, {
+        "$set": {"estado": "desechada", "placa": None, "posicion": None},
+        "$push": {"historial": _neu_evento("baja", motivo=body.motivo)},
+    })
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Neumático no encontrado")
+    return {"ok": True}
+
+
 app.include_router(api)
 
 
