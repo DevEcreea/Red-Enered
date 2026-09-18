@@ -10351,20 +10351,39 @@ class ChecklistPlantillaIn(BaseModel):
     items: List[ChecklistPlantillaItemIn]
 
 
+async def _buscar_conductor_por_dni(dni: str) -> Optional[dict]:
+    """El registro real de choferes vive en Documentación (Personal → Perfil,
+    creado con "Agregar personal"), no en la colección `conductores` (que
+    nunca la llena el frontend). Se busca ahí primero y se cae a `conductores`
+    solo por si algún día se usa ese flujo directo."""
+    perfil = await db.documents.find_one({
+        "tipo": {"$regex": "^personal$", "$options": "i"}, "doc": "Perfil",
+        "desc": dni, "archived": {"$ne": 1},
+    }, {"_id": 0})
+    if perfil:
+        placa_field = perfil.get("placa") or ""
+        nombre = placa_field.split(":::")[0].strip() if ":::" in placa_field else (perfil.get("ref") or "").strip()
+        return {"empresa": perfil.get("empresa"), "nombre": nombre or dni}
+    c = await db.conductores.find_one({"dni": dni}, {"_id": 0})
+    if c:
+        return {"empresa": c.get("empresa"), "nombre": f"{c.get('nombre', '')} {c.get('apellidos', '')}".strip() or dni}
+    return None
+
+
 # ── Conductor (app móvil) ───────────────────────────────────────────────────
 @api.post("/conductor/entrar")
 async def conductor_entrar(body: ConductorLoginIn, response: Response):
     dni = re.sub(r"\D", "", body.dni or "")
     if len(dni) != 8:
         raise HTTPException(status_code=400, detail="El DNI debe tener 8 dígitos")
-    c = await db.conductores.find_one({"dni": dni}, {"_id": 0})
+    c = await _buscar_conductor_por_dni(dni)
     if not c:
         raise HTTPException(status_code=404,
                             detail="No encontramos ese DNI. Pide a tu empresa que te registre en Personal / Conductores.")
     empresa = (c.get("empresa") or "").strip()
     if not empresa:
         raise HTTPException(status_code=400, detail="Tu registro de conductor no tiene una empresa asignada. Avisa a tu empresa.")
-    nombre = f"{c.get('nombre', '')} {c.get('apellidos', '')}".strip() or dni
+    nombre = c.get("nombre") or dni
     token = create_conductor_token(dni, empresa, nombre)
     response.set_cookie("access_token", token, httponly=True, secure=True, **_cookie_extra(), max_age=16 * 3600, path="/")
     response.headers["X-Access-Token"] = token
