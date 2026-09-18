@@ -10306,6 +10306,84 @@ _CHECKLIST_ITEMS_ESTANDAR = [
 ]
 
 
+# ── Contactos (libreta de direcciones: remitente/destinatario) ─────────────
+class ContactoDireccionIn(BaseModel):
+    id: Optional[str] = None
+    etiqueta: str
+    direccion: str
+    ubigeo: Optional[str] = None
+
+
+class ContactoIn(BaseModel):
+    tipo_doc: Optional[str] = "RUC"
+    num_doc: str
+    razon_social: str
+
+
+@api.get("/ruc/{ruc}")
+async def ruc_ficha_publica(ruc: str, user: dict = Depends(get_current_user)):
+    """Ficha SUNAT de un RUC (razón social + dirección fiscal), para autocompletar
+    remitente/destinatario/origen sin tener que digitarlo a mano."""
+    ruc_n = re.sub(r"\D", "", ruc or "")
+    if len(ruc_n) != 11:
+        raise HTTPException(status_code=400, detail="RUC inválido (11 dígitos)")
+    ficha = await _sunat_ficha_ruc(ruc_n)
+    if not ficha:
+        raise HTTPException(status_code=404, detail="SUNAT no devolvió datos para este RUC")
+    return {"ruc": ruc_n, **ficha}
+
+
+@api.get("/contactos")
+async def contactos_listar(q: Optional[str] = None, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    filt = {"empresa": emp}
+    if q:
+        filt["$or"] = [{"num_doc": {"$regex": re.escape(q)}}, {"razon_social": {"$regex": re.escape(q), "$options": "i"}}]
+    items = await db.contactos.find(filt, {"_id": 0}).sort("razon_social", 1).to_list(500)
+    return {"contactos": items}
+
+
+@api.get("/contactos/{num_doc}")
+async def contacto_obtener(num_doc: str, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    c = await db.contactos.find_one({"empresa": emp, "num_doc": re.sub(r"\D", "", num_doc)}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="No tienes ese contacto guardado todavía")
+    return c
+
+
+@api.post("/contactos")
+async def contacto_guardar(body: ContactoIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    num_doc = re.sub(r"\D", "", body.num_doc or "")
+    if not num_doc:
+        raise HTTPException(status_code=400, detail="Documento requerido")
+    existente = await db.contactos.find_one({"empresa": emp, "num_doc": num_doc}, {"_id": 0})
+    doc = {
+        "id": (existente or {}).get("id") or str(uuid.uuid4()), "empresa": emp,
+        "tipo_doc": body.tipo_doc or "RUC", "num_doc": num_doc,
+        "razon_social": (body.razon_social or "").strip(),
+        "direcciones": (existente or {}).get("direcciones", []),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.contactos.update_one({"empresa": emp, "num_doc": num_doc}, {"$set": doc}, upsert=True)
+    return doc
+
+
+@api.post("/contactos/{num_doc}/direcciones")
+async def contacto_agregar_direccion(num_doc: str, body: ContactoDireccionIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    num_doc = re.sub(r"\D", "", num_doc)
+    if not (body.etiqueta or "").strip() or not (body.direccion or "").strip():
+        raise HTTPException(status_code=400, detail="Etiqueta y dirección son obligatorias")
+    nueva = {"id": str(uuid.uuid4()), "etiqueta": body.etiqueta.strip(), "direccion": body.direccion.strip(),
+              "ubigeo": (body.ubigeo or "").strip()}
+    r = await db.contactos.update_one({"empresa": emp, "num_doc": num_doc}, {"$push": {"direcciones": nueva}})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Primero guarda el contacto (RUC/DNI y razón social)")
+    return nueva
+
+
 class ConductorLoginIn(BaseModel):
     dni: str
 

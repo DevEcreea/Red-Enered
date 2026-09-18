@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../lib/api";
 import {
-  Route, Plus, Loader2, Pencil, Trash2, MapPin, Truck, PlayCircle, CheckCircle2, XCircle, Clock,
+  Route, Plus, Loader2, Pencil, Trash2, MapPin, Truck, PlayCircle, CheckCircle2, XCircle, Clock, Search,
 } from "lucide-react";
 
 const fmtFecha = (s) => {
@@ -256,22 +256,16 @@ function ModalViaje({ init, placasFlota, onClose, onSaved }) {
           <div><label style={lbl}>Nombre completo</label><input style={inp} value={f.conductor_nombre} onChange={(e) => set("conductor_nombre", e.target.value)} /></div>
           <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>N° de licencia de conducir</label><input style={inp} value={f.conductor_licencia} onChange={(e) => set("conductor_licencia", e.target.value)} /></div>
 
-          <div style={seccion}>Remitente y destinatario</div>
-          <div><label style={lbl}>RUC remitente</label><input style={inp} value={f.remitente_ruc} onChange={(e) => set("remitente_ruc", e.target.value.replace(/\D/g, "").slice(0, 11))} /></div>
-          <div><label style={lbl}>Razón social remitente</label><input style={inp} value={f.remitente_razon_social} onChange={(e) => set("remitente_razon_social", e.target.value)} /></div>
-          <div><label style={lbl}>Doc. destinatario</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              <select style={{ ...inp, width: 90 }} value={f.destinatario_tipo_doc} onChange={(e) => set("destinatario_tipo_doc", e.target.value)}>
-                <option value="RUC">RUC</option><option value="DNI">DNI</option>
-              </select>
-              <input style={inp} value={f.destinatario_num_doc} onChange={(e) => set("destinatario_num_doc", e.target.value.replace(/\D/g, "").slice(0, 11))} />
-            </div>
-          </div>
-          <div><label style={lbl}>Razón social / nombre destinatario</label><input style={inp} value={f.destinatario_razon_social} onChange={(e) => set("destinatario_razon_social", e.target.value)} /></div>
-          <div><label style={lbl}>Dirección punto de partida</label><input style={inp} value={f.punto_partida_direccion} onChange={(e) => set("punto_partida_direccion", e.target.value)} /></div>
-          <div><label style={lbl}>Ubigeo de partida</label><input style={inp} value={f.punto_partida_ubigeo} onChange={(e) => set("punto_partida_ubigeo", e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 dígitos" /></div>
-          <div><label style={lbl}>Dirección punto de llegada</label><input style={inp} value={f.punto_llegada_direccion} onChange={(e) => set("punto_llegada_direccion", e.target.value)} /></div>
-          <div><label style={lbl}>Ubigeo de llegada</label><input style={inp} value={f.punto_llegada_ubigeo} onChange={(e) => set("punto_llegada_ubigeo", e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 dígitos" /></div>
+          <ContactoBox
+            titulo="Remitente (punto de partida)" f={f} set={set} tipoDocFijo="RUC"
+            numDocKey="remitente_ruc" razonSocialKey="remitente_razon_social"
+            direccionKey="punto_partida_direccion" ubigeoKey="punto_partida_ubigeo" cortoKey="origen"
+          />
+          <ContactoBox
+            titulo="Destinatario (punto de llegada)" f={f} set={set}
+            tipoDocKey="destinatario_tipo_doc" numDocKey="destinatario_num_doc" razonSocialKey="destinatario_razon_social"
+            direccionKey="punto_llegada_direccion" ubigeoKey="punto_llegada_ubigeo" cortoKey="destino"
+          />
 
           <div style={seccion}>Carga transportada</div>
           <div><label style={lbl}>Motivo de traslado</label>
@@ -286,5 +280,104 @@ function ModalViaje({ init, placasFlota, onClose, onSaved }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * RUC/DNI + razón social + libreta de direcciones guardadas de ese contacto
+ * (estilo Odoo): busca la ficha en SUNAT, deja elegir una dirección estándar
+ * ya guardada o crear una nueva, que queda disponible para la próxima vez.
+ */
+function ContactoBox({ titulo, f, set, tipoDocFijo, tipoDocKey, numDocKey, razonSocialKey, direccionKey, ubigeoKey, cortoKey }) {
+  const tipoDoc = tipoDocFijo || f[tipoDocKey] || "RUC";
+  const [contacto, setContacto] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  const [modoNueva, setModoNueva] = useState(false);
+  const [nEtiqueta, setNEtiqueta] = useState("");
+  const [nDireccion, setNDireccion] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const buscar = async () => {
+    const doc = (f[numDocKey] || "").trim();
+    const largoOk = tipoDoc === "RUC" ? doc.length === 11 : doc.length === 8;
+    if (!largoOk) return;
+    setBuscando(true);
+    if (tipoDoc === "RUC") {
+      try {
+        const { data } = await api.get(`/ruc/${doc}`);
+        if (data.razon_social) set(razonSocialKey, data.razon_social);
+      } catch { /* SUNAT no respondió a tiempo, se completa a mano */ }
+    }
+    try {
+      const { data } = await api.get(`/contactos/${doc}`);
+      setContacto(data);
+    } catch { setContacto(null); }
+    setBuscando(false);
+  };
+
+  const elegir = (d) => {
+    set(direccionKey, d.direccion);
+    if (ubigeoKey) set(ubigeoKey, d.ubigeo || "");
+    if (cortoKey) set(cortoKey, d.etiqueta);
+  };
+
+  const guardarDireccion = async () => {
+    const doc = (f[numDocKey] || "").trim();
+    if (!doc) return alert(`Ingresa el ${tipoDoc} primero`);
+    if (!(f[razonSocialKey] || "").trim()) return alert("Completa la razón social / nombre primero");
+    if (!nEtiqueta.trim() || !nDireccion.trim()) return alert("Completa la etiqueta y la dirección");
+    setGuardando(true);
+    try {
+      await api.post("/contactos", { tipo_doc: tipoDoc, num_doc: doc, razon_social: f[razonSocialKey] });
+      const { data } = await api.post(`/contactos/${doc}/direcciones`, { etiqueta: nEtiqueta, direccion: nDireccion });
+      setContacto((p) => ({ ...(p || { direcciones: [] }), direcciones: [...(((p || {}).direcciones) || []), data] }));
+      elegir(data);
+      setModoNueva(false); setNEtiqueta(""); setNDireccion("");
+    } catch (err) { alert(err.response?.data?.detail || err.message); }
+    finally { setGuardando(false); }
+  };
+
+  return (
+    <>
+      <div style={seccion}>{titulo}</div>
+      {!tipoDocFijo && (
+        <div><label style={lbl}>Tipo de documento</label>
+          <select style={inp} value={f[tipoDocKey]} onChange={(e) => set(tipoDocKey, e.target.value)}>
+            <option value="RUC">RUC</option><option value="DNI">DNI</option>
+          </select></div>
+      )}
+      <div style={tipoDocFijo ? { gridColumn: "1 / -1" } : {}}>
+        <label style={lbl}>{tipoDoc}</label>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input style={inp} value={f[numDocKey]} onChange={(e) => set(numDocKey, e.target.value.replace(/\D/g, "").slice(0, tipoDoc === "RUC" ? 11 : 8))} onBlur={buscar} />
+          <button type="button" style={{ ...btnS, padding: "0 12px" }} onClick={buscar} disabled={buscando}>{buscando ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}</button>
+        </div>
+      </div>
+      <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Razón social / nombre</label><input style={inp} value={f[razonSocialKey]} onChange={(e) => set(razonSocialKey, e.target.value)} /></div>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <label style={lbl}>Dirección</label>
+        <select style={inp} value="" onChange={(e) => {
+          const v = e.target.value;
+          if (!v) return;
+          if (v === "__nueva__") setModoNueva(true);
+          else { const d = (contacto?.direcciones || []).find((x) => x.id === v); if (d) elegir(d); }
+        }}>
+          <option value="">{(contacto?.direcciones || []).length ? "Elige una dirección guardada…" : "Sin direcciones guardadas todavía"}</option>
+          {(contacto?.direcciones || []).map((d) => <option key={d.id} value={d.id}>{d.etiqueta} — {d.direccion}</option>)}
+          <option value="__nueva__">+ Añadir otra dirección…</option>
+        </select>
+        {modoNueva && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, background: "#FAFAFA", padding: 10, borderRadius: 8, marginTop: 6 }}>
+            <input style={inp} placeholder="Etiqueta (ej. Almacén Lima Norte)" value={nEtiqueta} onChange={(e) => setNEtiqueta(e.target.value)} />
+            <input style={inp} placeholder="Dirección completa" value={nDireccion} onChange={(e) => setNDireccion(e.target.value)} />
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" style={btnP} onClick={guardarDireccion} disabled={guardando}>{guardando && <Loader2 size={13} className="animate-spin" />} Guardar dirección</button>
+              <button type="button" style={btnS} onClick={() => { setModoNueva(false); setNEtiqueta(""); setNDireccion(""); }}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        <input style={{ ...inp, marginTop: 6 }} placeholder="Dirección (puedes escribirla directamente)" value={f[direccionKey]} onChange={(e) => set(direccionKey, e.target.value)} />
+      </div>
+    </>
   );
 }
