@@ -10312,8 +10312,10 @@ class ConductorLoginIn(BaseModel):
 
 class ViajeIn(BaseModel):
     placa: str
+    placa_carreta: Optional[str] = None
     conductor_dni: Optional[str] = None
     conductor_nombre: Optional[str] = None
+    conductor_licencia: Optional[str] = None
     origen: str
     destino: str
     fecha_salida: Optional[str] = None
@@ -10322,6 +10324,21 @@ class ViajeIn(BaseModel):
     guia_remision: Optional[str] = None
     notas: Optional[str] = ""
     estado: Optional[str] = "planificado"  # planificado | en_curso | finalizado | cancelado
+    # Datos para emitir la guía de remisión - transportista (formato SUNAT)
+    motivo_traslado: Optional[str] = None
+    remitente_ruc: Optional[str] = None
+    remitente_razon_social: Optional[str] = None
+    destinatario_tipo_doc: Optional[str] = None
+    destinatario_num_doc: Optional[str] = None
+    destinatario_razon_social: Optional[str] = None
+    punto_partida_direccion: Optional[str] = None
+    punto_partida_ubigeo: Optional[str] = None
+    punto_llegada_direccion: Optional[str] = None
+    punto_llegada_ubigeo: Optional[str] = None
+    peso_bruto_kg: Optional[float] = None
+    num_bultos: Optional[int] = None
+    descripcion_bienes: Optional[str] = None
+    doc_relacionado: Optional[str] = None
 
 
 class ChecklistPlantillaItemIn(BaseModel):
@@ -10519,6 +10536,28 @@ async def viajes_listar(placa: Optional[str] = None, estado: Optional[str] = Non
     return {"empresa": emp, "viajes": items}
 
 
+def _viaje_gr_fields(body: "ViajeIn") -> dict:
+    """Campos para poder emitir la guía de remisión - transportista (formato SUNAT)."""
+    return {
+        "placa_carreta": _mtto_placa(body.placa_carreta) if body.placa_carreta else "",
+        "conductor_licencia": (body.conductor_licencia or "").strip(),
+        "motivo_traslado": (body.motivo_traslado or "").strip(),
+        "remitente_ruc": (body.remitente_ruc or "").strip(),
+        "remitente_razon_social": (body.remitente_razon_social or "").strip(),
+        "destinatario_tipo_doc": (body.destinatario_tipo_doc or "").strip(),
+        "destinatario_num_doc": (body.destinatario_num_doc or "").strip(),
+        "destinatario_razon_social": (body.destinatario_razon_social or "").strip(),
+        "punto_partida_direccion": (body.punto_partida_direccion or "").strip(),
+        "punto_partida_ubigeo": (body.punto_partida_ubigeo or "").strip(),
+        "punto_llegada_direccion": (body.punto_llegada_direccion or "").strip(),
+        "punto_llegada_ubigeo": (body.punto_llegada_ubigeo or "").strip(),
+        "peso_bruto_kg": body.peso_bruto_kg,
+        "num_bultos": body.num_bultos,
+        "descripcion_bienes": (body.descripcion_bienes or "").strip(),
+        "doc_relacionado": (body.doc_relacionado or "").strip(),
+    }
+
+
 @api.post("/viajes")
 async def viajes_crear(body: ViajeIn, user: dict = Depends(get_current_user)):
     emp = _empresa_de(user)
@@ -10532,6 +10571,7 @@ async def viajes_crear(body: ViajeIn, user: dict = Depends(get_current_user)):
         "guia_remision": (body.guia_remision or "").strip(), "notas": (body.notas or "").strip(),
         "estado": body.estado or "planificado", "creado_por": user.get("id"),
         "created_at": datetime.now(timezone.utc).isoformat(),
+        **_viaje_gr_fields(body),
     }
     await db.viajes.insert_one(doc)
     doc.pop("_id", None)
@@ -10548,6 +10588,7 @@ async def viajes_editar(vid: str, body: ViajeIn, user: dict = Depends(get_curren
         "fecha_llegada_est": body.fecha_llegada_est, "guia_remision": (body.guia_remision or "").strip(),
         "notas": (body.notas or "").strip(), "estado": body.estado or "planificado",
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        **_viaje_gr_fields(body),
     }
     if upd["estado"] == "finalizado":
         upd["finalizado_en"] = datetime.now(timezone.utc).isoformat()

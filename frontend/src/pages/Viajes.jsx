@@ -34,9 +34,21 @@ const btnP = { background: "#8039F4", color: "#fff", border: "none", borderRadiu
 const btnS = { background: "#fff", color: "#374151", border: "1px solid #D1D5DB", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 };
 const inp = { width: "100%", height: 38, border: "1px solid #E5E7EB", borderRadius: 8, padding: "0 12px", fontSize: 13, color: "#374151", boxSizing: "border-box", outline: "none", background: "#fff" };
 const lbl = { fontSize: 11, color: "#6B7280", marginBottom: 4, display: "block", fontWeight: 600 };
+const seccion = { gridColumn: "1 / -1", fontSize: 12, fontWeight: 800, color: "#8039F4", textTransform: "uppercase", letterSpacing: ".04em", marginTop: 8, paddingTop: 8, borderTop: "1px solid #F0F0F0" };
+
+const MOTIVOS_TRASLADO = [
+  { v: "01", l: "01 · Venta" },
+  { v: "02", l: "02 · Compra" },
+  { v: "04", l: "04 · Traslado entre establecimientos de la misma empresa" },
+  { v: "08", l: "08 · Importación" },
+  { v: "09", l: "09 · Exportación" },
+  { v: "13", l: "13 · Otros" },
+  { v: "14", l: "14 · Venta sujeta a confirmación del comprador" },
+];
 
 export default function Viajes() {
   const [viajes, setViajes] = useState([]);
+  const [flota, setFlota] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filtroPlaca, setFiltroPlaca] = useState("");
@@ -55,6 +67,21 @@ export default function Viajes() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    api.get("/vehiculos").then(({ data }) => setFlota(Array.isArray(data) ? data : []))
+      .catch(() => setFlota([]));
+  }, []);
+  const placasFlota = useMemo(() => {
+    const vistas = new Set();
+    const out = [];
+    for (const v of flota) {
+      const p = (v.placa || v.veh || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (!p || vistas.has(p)) continue;
+      vistas.add(p);
+      out.push({ placa: p, marca: v.marca || "", modelo: v.modelo || "" });
+    }
+    return out.sort((a, b) => a.placa.localeCompare(b.placa));
+  }, [flota]);
 
   const filtrados = useMemo(() => viajes.filter((v) => {
     if (filtroPlaca && v.placa !== filtroPlaca.toUpperCase().replace(/[^A-Z0-9]/g, "")) return false;
@@ -157,18 +184,27 @@ export default function Viajes() {
         </div>
       </div>
 
-      {modal && <ModalViaje init={modal} onClose={() => setModal(null)} onSaved={(m) => { setModal(null); aviso(m); cargar(); }} />}
+      {modal && <ModalViaje init={modal} placasFlota={placasFlota} onClose={() => setModal(null)} onSaved={(m) => { setModal(null); aviso(m); cargar(); }} />}
       {toast && <div style={{ position: "fixed", bottom: 24, right: 24, background: "#111827", color: "#fff", padding: "10px 16px", borderRadius: 10, fontSize: 13, zIndex: 60 }}>{toast}</div>}
     </div>
   );
 }
 
-function ModalViaje({ init, onClose, onSaved }) {
+function ModalViaje({ init, placasFlota, onClose, onSaved }) {
   const [f, setF] = useState({
-    placa: init.placa || "", conductor_dni: init.conductor_dni || "", conductor_nombre: init.conductor_nombre || "",
+    placa: init.placa || "", placa_carreta: init.placa_carreta || "",
+    conductor_dni: init.conductor_dni || "", conductor_nombre: init.conductor_nombre || "", conductor_licencia: init.conductor_licencia || "",
     origen: init.origen || "", destino: init.destino || "", fecha_salida: init.fecha_salida || hoyIso(),
     hora_salida: init.hora_salida || "", guia_remision: init.guia_remision || "", notas: init.notas || "",
     estado: init.estado || "planificado",
+    motivo_traslado: init.motivo_traslado || "04",
+    remitente_ruc: init.remitente_ruc || "", remitente_razon_social: init.remitente_razon_social || "",
+    destinatario_tipo_doc: init.destinatario_tipo_doc || "RUC", destinatario_num_doc: init.destinatario_num_doc || "",
+    destinatario_razon_social: init.destinatario_razon_social || "",
+    punto_partida_direccion: init.punto_partida_direccion || "", punto_partida_ubigeo: init.punto_partida_ubigeo || "",
+    punto_llegada_direccion: init.punto_llegada_direccion || "", punto_llegada_ubigeo: init.punto_llegada_ubigeo || "",
+    peso_bruto_kg: init.peso_bruto_kg ?? "", num_bultos: init.num_bultos ?? "",
+    descripcion_bienes: init.descripcion_bienes || "", doc_relacionado: init.doc_relacionado || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
@@ -178,7 +214,8 @@ function ModalViaje({ init, onClose, onSaved }) {
     if (!f.origen.trim() || !f.destino.trim()) return alert("Indica origen y destino");
     setSaving(true);
     try {
-      if (init.id) await api.put(`/viajes/${init.id}`, f); else await api.post("/viajes", f);
+      const body = { ...f, peso_bruto_kg: f.peso_bruto_kg === "" ? null : Number(f.peso_bruto_kg), num_bultos: f.num_bultos === "" ? null : Number(f.num_bultos) };
+      if (init.id) await api.put(`/viajes/${init.id}`, body); else await api.post("/viajes", body);
       onSaved(init.id ? "Viaje actualizado" : "Viaje creado");
     } catch (err) { alert(err.response?.data?.detail || err.message); }
     finally { setSaving(false); }
@@ -186,25 +223,66 @@ function ModalViaje({ init, onClose, onSaved }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,.45)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 16, width: 640, maxWidth: "100%", maxHeight: "92vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,.2)" }} onClick={(ev) => ev.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #E5E7EB" }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: 720, maxWidth: "100%", maxHeight: "92vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,.2)" }} onClick={(ev) => ev.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid #E5E7EB", position: "sticky", top: 0, background: "#fff", zIndex: 1 }}>
           <div style={{ fontWeight: 800, fontSize: 16 }}>{init.id ? "Editar viaje" : "Nuevo viaje"}</div>
           <div style={{ display: "flex", gap: 8 }}><button style={btnS} onClick={onClose}>Cancelar</button><button style={btnP} onClick={guardar} disabled={saving}>{saving && <Loader2 size={15} className="animate-spin" />} Guardar</button></div>
         </div>
         <div style={{ padding: 20, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <div><label style={lbl}>Placa *</label><input style={inp} value={f.placa} onChange={(e) => set("placa", e.target.value.toUpperCase())} /></div>
+          <div style={seccion}>Datos del viaje</div>
+          <div><label style={lbl}>Placa (unidad) *</label>
+            <select style={inp} value={f.placa} onChange={(e) => set("placa", e.target.value)}>
+              <option value="">Selecciona una placa…</option>
+              {placasFlota.map((v) => <option key={v.placa} value={v.placa}>{v.placa}{v.marca ? ` · ${v.marca} ${v.modelo || ""}`.trimEnd() : ""}</option>)}
+              {f.placa && !placasFlota.some((v) => v.placa === f.placa) && <option value={f.placa}>{f.placa} (no está en tu flota)</option>}
+            </select></div>
+          <div><label style={lbl}>Placa de carreta / semirremolque</label>
+            <select style={inp} value={f.placa_carreta} onChange={(e) => set("placa_carreta", e.target.value)}>
+              <option value="">— No aplica —</option>
+              {placasFlota.filter((v) => v.placa !== f.placa).map((v) => <option key={v.placa} value={v.placa}>{v.placa}</option>)}
+            </select></div>
+          <div><label style={lbl}>Origen *</label><input style={inp} value={f.origen} onChange={(e) => set("origen", e.target.value)} placeholder="Ciudad / punto de partida" /></div>
+          <div><label style={lbl}>Destino *</label><input style={inp} value={f.destino} onChange={(e) => set("destino", e.target.value)} placeholder="Ciudad / punto de llegada" /></div>
+          <div><label style={lbl}>Fecha de salida</label><input type="date" style={inp} value={f.fecha_salida} onChange={(e) => set("fecha_salida", e.target.value)} /></div>
+          <div><label style={lbl}>Hora de salida</label><input type="time" style={inp} value={f.hora_salida} onChange={(e) => set("hora_salida", e.target.value)} /></div>
           <div><label style={lbl}>Estado</label>
             <select style={inp} value={f.estado} onChange={(e) => set("estado", e.target.value)}>
               {Object.entries(ESTADO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select></div>
-          <div><label style={lbl}>Origen *</label><input style={inp} value={f.origen} onChange={(e) => set("origen", e.target.value)} /></div>
-          <div><label style={lbl}>Destino *</label><input style={inp} value={f.destino} onChange={(e) => set("destino", e.target.value)} /></div>
-          <div><label style={lbl}>Fecha de salida</label><input type="date" style={inp} value={f.fecha_salida} onChange={(e) => set("fecha_salida", e.target.value)} /></div>
-          <div><label style={lbl}>Hora de salida</label><input type="time" style={inp} value={f.hora_salida} onChange={(e) => set("hora_salida", e.target.value)} /></div>
-          <div><label style={lbl}>Conductor (DNI)</label><input style={inp} value={f.conductor_dni} onChange={(e) => set("conductor_dni", e.target.value.replace(/\D/g, "").slice(0, 8))} /></div>
-          <div><label style={lbl}>Conductor (nombre)</label><input style={inp} value={f.conductor_nombre} onChange={(e) => set("conductor_nombre", e.target.value)} /></div>
-          <div><label style={lbl}>Guía de remisión</label><input style={inp} value={f.guia_remision} onChange={(e) => set("guia_remision", e.target.value)} /></div>
-          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Notas</label><textarea style={{ ...inp, height: 60, padding: 10 }} value={f.notas} onChange={(e) => set("notas", e.target.value)} /></div>
+          <div><label style={lbl}>N° de guía de remisión</label><input style={inp} value={f.guia_remision} onChange={(e) => set("guia_remision", e.target.value)} placeholder="Serie-número, si ya la emitiste" /></div>
+
+          <div style={seccion}>Conductor</div>
+          <div><label style={lbl}>DNI</label><input style={inp} value={f.conductor_dni} onChange={(e) => set("conductor_dni", e.target.value.replace(/\D/g, "").slice(0, 8))} /></div>
+          <div><label style={lbl}>Nombre completo</label><input style={inp} value={f.conductor_nombre} onChange={(e) => set("conductor_nombre", e.target.value)} /></div>
+          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>N° de licencia de conducir</label><input style={inp} value={f.conductor_licencia} onChange={(e) => set("conductor_licencia", e.target.value)} /></div>
+
+          <div style={seccion}>Remitente y destinatario</div>
+          <div><label style={lbl}>RUC remitente</label><input style={inp} value={f.remitente_ruc} onChange={(e) => set("remitente_ruc", e.target.value.replace(/\D/g, "").slice(0, 11))} /></div>
+          <div><label style={lbl}>Razón social remitente</label><input style={inp} value={f.remitente_razon_social} onChange={(e) => set("remitente_razon_social", e.target.value)} /></div>
+          <div><label style={lbl}>Doc. destinatario</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select style={{ ...inp, width: 90 }} value={f.destinatario_tipo_doc} onChange={(e) => set("destinatario_tipo_doc", e.target.value)}>
+                <option value="RUC">RUC</option><option value="DNI">DNI</option>
+              </select>
+              <input style={inp} value={f.destinatario_num_doc} onChange={(e) => set("destinatario_num_doc", e.target.value.replace(/\D/g, "").slice(0, 11))} />
+            </div>
+          </div>
+          <div><label style={lbl}>Razón social / nombre destinatario</label><input style={inp} value={f.destinatario_razon_social} onChange={(e) => set("destinatario_razon_social", e.target.value)} /></div>
+          <div><label style={lbl}>Dirección punto de partida</label><input style={inp} value={f.punto_partida_direccion} onChange={(e) => set("punto_partida_direccion", e.target.value)} /></div>
+          <div><label style={lbl}>Ubigeo de partida</label><input style={inp} value={f.punto_partida_ubigeo} onChange={(e) => set("punto_partida_ubigeo", e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 dígitos" /></div>
+          <div><label style={lbl}>Dirección punto de llegada</label><input style={inp} value={f.punto_llegada_direccion} onChange={(e) => set("punto_llegada_direccion", e.target.value)} /></div>
+          <div><label style={lbl}>Ubigeo de llegada</label><input style={inp} value={f.punto_llegada_ubigeo} onChange={(e) => set("punto_llegada_ubigeo", e.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 dígitos" /></div>
+
+          <div style={seccion}>Carga transportada</div>
+          <div><label style={lbl}>Motivo de traslado</label>
+            <select style={inp} value={f.motivo_traslado} onChange={(e) => set("motivo_traslado", e.target.value)}>
+              {MOTIVOS_TRASLADO.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+            </select></div>
+          <div><label style={lbl}>Documento relacionado</label><input style={inp} value={f.doc_relacionado} onChange={(e) => set("doc_relacionado", e.target.value)} placeholder="Factura / guía remitente" /></div>
+          <div><label style={lbl}>Peso bruto total (kg)</label><input type="number" min="0" style={inp} value={f.peso_bruto_kg} onChange={(e) => set("peso_bruto_kg", e.target.value)} /></div>
+          <div><label style={lbl}>N° de bultos</label><input type="number" min="0" style={inp} value={f.num_bultos} onChange={(e) => set("num_bultos", e.target.value)} /></div>
+          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Descripción de los bienes transportados</label><textarea style={{ ...inp, height: 54, padding: 10 }} value={f.descripcion_bienes} onChange={(e) => set("descripcion_bienes", e.target.value)} /></div>
+          <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>Notas internas</label><textarea style={{ ...inp, height: 54, padding: 10 }} value={f.notas} onChange={(e) => set("notas", e.target.value)} /></div>
         </div>
       </div>
     </div>
