@@ -59,6 +59,7 @@ import SubsidioVerificar from "./pages/SubsidioVerificar";
 import SubsidioFinalizado from "./pages/SubsidioFinalizado";
 import SubsidioAdmin from "./pages/SubsidioAdmin";
 import Bitacora from "./pages/Bitacora";
+import ConductorApp from "./pages/ConductorApp";
 import Privacidad from "./pages/Privacidad";
 import { useAuth } from "./context/AuthContext";
 import ConstanciaModal from "./components/ConstanciaModal";
@@ -126,6 +127,8 @@ function App() {
           <Route path="/registro-subsidio" element={<RegistroSubsidio />} />
           <Route path="/subsidio" element={<SubsidioPublico />} />
           <Route path="/precios" element={<PreciosPublico />} />
+          {/* App del conductor (celular): entra solo con DNI, sin sidebar */}
+          <Route path="/conductor" element={<ConductorApp />} />
           {/* Subsidio: páginas DENTRO del Shell (sidebar visible) y NO gateadas */}
           <Route path="/subsidio/diagnostico" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><SubsidioDiagnostico /></Shell>} />
           <Route path="/testing" element={<Shell roles={["admin_enered", "cliente_subsidio", "administrador", "logistica", "contabilidad"]}><TestingVerificacion /></Shell>} />

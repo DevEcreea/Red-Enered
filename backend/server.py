@@ -7,6 +7,7 @@ load_dotenv(ROOT_DIR / '.env')
 import os
 import io
 import re
+import json
 import asyncio
 import uuid
 import random
@@ -123,6 +124,17 @@ def create_download_token(user_id: str, minutes: int = 5) -> str:
         "sub": user_id,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=minutes),
         "type": "download",
+    }
+    return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def create_conductor_token(dni: str, empresa: str, nombre: str) -> str:
+    """Sesión del conductor (app móvil de Checklist): identificación por DNI, sin
+    contraseña — igual mecanismo que la sesión invitada del subsidio (token con los
+    datos adentro, no crea un usuario en la BD). Dura un turno largo (16h)."""
+    payload = {
+        "type": "conductor", "dni": dni, "empresa": empresa, "nombre": nombre,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=16),
     }
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
@@ -312,6 +324,11 @@ async def get_current_user(request: Request) -> dict:
                     "role": "cliente_subsidio", "empresa": _emp, "ruc": _rc,
                     "acceso_etapa0": True, "registrado_etapa0": False, "es_guest": True,
                     "documentos_completos": False, "permisos": None}
+        if payload.get("type") == "conductor":
+            # Sesión de conductor (Checklist móvil): sintética, no existe en db.users.
+            _dni = payload.get("dni", "")
+            return {"id": f"conductor:{_dni}", "email": "", "name": payload.get("nombre") or _dni,
+                    "role": "conductor", "empresa": payload.get("empresa"), "dni": _dni, "permisos": None}
         if payload.get("type") == "download":
             # Token efímero de descarga: SOLO lecturas (GET). Nunca autoriza escrituras.
             if request.method != "GET":
@@ -10251,6 +10268,342 @@ async def mtto_resumen(desde: Optional[str] = None, hasta: Optional[str] = None,
             "mes_actual": round(sum(float(s.get("costo_total") or 0) for s in servicios if (s.get("fecha") or "").startswith(mes)), 2),
             "unidades": out}
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# VIAJES + CHECKLIST (app móvil del conductor)
+# ══════════════════════════════════════════════════════════════════════════
+# El conductor entra desde su celular SOLO con su DNI (sin contraseña — mismo
+# mecanismo que la sesión invitada del subsidio, ver create_conductor_token).
+# Debe existir antes en Personal/Conductores (con su empresa asignada). Ahí
+# elige/confirma la placa y el viaje que está realizando, llena el checklist
+# con fotos, y cada ítem marcado como falla genera SOLA una orden de
+# mantenimiento reactivo en el mismo tablero de Mantenimiento.
+
+def _empresa_de(u: dict) -> str:
+    # Los endpoints admin de Viajes/Checklist no son para el token del conductor
+    # (ese solo usa /conductor/*, con su propio alcance más chico).
+    if u.get("role") == "conductor":
+        raise HTTPException(status_code=403, detail="No disponible para conductores")
+    emp = (u.get("_empresa_activa") or u.get("empresa") or "").strip()
+    if not emp:
+        raise HTTPException(status_code=400, detail="Elige una empresa")
+    return emp
+
+
+_CHECKLIST_ITEMS_ESTANDAR = [
+    "Luces delanteras, posteriores y direccionales",
+    "Frenos (pedal y freno de mano)",
+    "Llantas y presión (incluye llanta de repuesto)",
+    "Niveles: aceite, refrigerante, agua limpiaparabrisas",
+    "Extintor vigente",
+    "Botiquín de primeros auxilios",
+    "Triángulos / conos de seguridad",
+    "Cinturones de seguridad",
+    "Espejos retrovisores",
+    "Limpiaparabrisas y plumillas",
+    "Placas legibles y bien aseguradas",
+    "Documentos a bordo (tarjeta de propiedad, SOAT, revisión técnica)",
+]
+
+
+class ConductorLoginIn(BaseModel):
+    dni: str
+
+
+class ViajeIn(BaseModel):
+    placa: str
+    conductor_dni: Optional[str] = None
+    conductor_nombre: Optional[str] = None
+    origen: str
+    destino: str
+    fecha_salida: Optional[str] = None
+    hora_salida: Optional[str] = None
+    fecha_llegada_est: Optional[str] = None
+    guia_remision: Optional[str] = None
+    notas: Optional[str] = ""
+    estado: Optional[str] = "planificado"  # planificado | en_curso | finalizado | cancelado
+
+
+class ChecklistPlantillaItemIn(BaseModel):
+    id: Optional[str] = None
+    label: str
+    foto_si_falla: Optional[bool] = True
+
+
+class ChecklistPlantillaIn(BaseModel):
+    items: List[ChecklistPlantillaItemIn]
+
+
+# ── Conductor (app móvil) ───────────────────────────────────────────────────
+@api.post("/conductor/entrar")
+async def conductor_entrar(body: ConductorLoginIn, response: Response):
+    dni = re.sub(r"\D", "", body.dni or "")
+    if len(dni) != 8:
+        raise HTTPException(status_code=400, detail="El DNI debe tener 8 dígitos")
+    c = await db.conductores.find_one({"dni": dni}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404,
+                            detail="No encontramos ese DNI. Pide a tu empresa que te registre en Personal / Conductores.")
+    empresa = (c.get("empresa") or "").strip()
+    if not empresa:
+        raise HTTPException(status_code=400, detail="Tu registro de conductor no tiene una empresa asignada. Avisa a tu empresa.")
+    nombre = f"{c.get('nombre', '')} {c.get('apellidos', '')}".strip() or dni
+    token = create_conductor_token(dni, empresa, nombre)
+    response.set_cookie("access_token", token, httponly=True, secure=True, **_cookie_extra(), max_age=16 * 3600, path="/")
+    response.headers["X-Access-Token"] = token
+    return {"access_token": token, "conductor": {"dni": dni, "nombre": nombre, "empresa": empresa}}
+
+
+def _require_conductor(user: dict) -> dict:
+    if user.get("role") != "conductor":
+        raise HTTPException(status_code=403, detail="Solo disponible para conductores")
+    return user
+
+
+async def _checklist_plantilla_de(emp: str) -> dict:
+    plant = await db.checklist_plantillas.find_one({"empresa": emp}, {"_id": 0})
+    if not plant:
+        items = [{"id": str(uuid.uuid4()), "label": t, "foto_si_falla": True} for t in _CHECKLIST_ITEMS_ESTANDAR]
+        plant = {"id": str(uuid.uuid4()), "empresa": emp, "items": items,
+                 "created_at": datetime.now(timezone.utc).isoformat()}
+        await db.checklist_plantillas.insert_one(dict(plant))
+    return plant
+
+
+@api.get("/conductor/contexto")
+async def conductor_contexto(user: dict = Depends(get_current_user)):
+    """Todo lo que necesita el celular del conductor al entrar: su flota, los viajes
+    abiertos de su empresa y la plantilla de checklist vigente."""
+    _require_conductor(user)
+    emp = user["empresa"]
+    vehiculos = await db.vehiculos.find({"empresa": emp}, {"_id": 0, "placa": 1, "tipo": 1, "marca": 1, "modelo": 1}).to_list(500)
+    viajes = await db.viajes.find({"empresa": emp, "estado": {"$in": ["planificado", "en_curso"]}},
+                                  {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Los viajes ya asignados a este DNI van primero.
+    viajes.sort(key=lambda v: v.get("conductor_dni") != user["dni"])
+    plant = await _checklist_plantilla_de(emp)
+    return {
+        "conductor": {"dni": user["dni"], "nombre": user["name"], "empresa": emp},
+        "vehiculos": [{"placa": (v.get("placa") or "").upper(), "tipo": v.get("tipo") or "",
+                       "marca": v.get("marca") or "", "modelo": v.get("modelo") or ""} for v in vehiculos if v.get("placa")],
+        "viajes_abiertos": viajes,
+        "plantilla": plant.get("items", []),
+    }
+
+
+@api.post("/conductor/viajes")
+async def conductor_crear_viaje(body: ViajeIn, user: dict = Depends(get_current_user)):
+    """El conductor puede crear su propio viaje si no hay uno ya planificado para él."""
+    _require_conductor(user)
+    emp = user["empresa"]
+    if not _mtto_placa(body.placa):
+        raise HTTPException(status_code=400, detail="Elige la placa")
+    if not (body.origen or "").strip() or not (body.destino or "").strip():
+        raise HTTPException(status_code=400, detail="Indica origen y destino")
+    ahora = datetime.now(timezone.utc)
+    doc = {
+        "id": str(uuid.uuid4()), "empresa": emp, "placa": _mtto_placa(body.placa),
+        "conductor_dni": user["dni"], "conductor_nombre": user["name"],
+        "origen": body.origen.strip(), "destino": body.destino.strip(),
+        "fecha_salida": body.fecha_salida or ahora.strftime("%Y-%m-%d"),
+        "hora_salida": body.hora_salida or ahora.strftime("%H:%M"),
+        "fecha_llegada_est": body.fecha_llegada_est, "guia_remision": (body.guia_remision or "").strip(),
+        "notas": (body.notas or "").strip(), "estado": "en_curso",
+        "creado_por": "conductor", "created_at": ahora.isoformat(),
+    }
+    await db.viajes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.post("/conductor/checklist")
+async def conductor_checklist_submit(
+    viaje_id: str = Form(...),
+    placa: str = Form(...),
+    km: Optional[str] = Form(None),
+    tipo: str = Form("pre-viaje"),
+    items: str = Form(...),               # JSON: [{id, label, ok, nota}]
+    file_item_ids: str = Form("[]"),      # JSON: [item_id, ...] en el mismo orden que "files"
+    files: List[UploadFile] = File(default=[]),
+    user: dict = Depends(get_current_user),
+):
+    """Envío del checklist desde el celular. Cada ítem marcado como falla crea SOLO
+    una orden de mantenimiento reactivo (mismo tablero que las tareas preventivas)."""
+    _require_conductor(user)
+    emp = user["empresa"]
+    placa_n = _mtto_placa(placa)
+    if not placa_n:
+        raise HTTPException(status_code=400, detail="Placa requerida")
+    try:
+        items_data = json.loads(items)
+        if not isinstance(items_data, list) or not items_data:
+            raise ValueError
+    except Exception:
+        raise HTTPException(status_code=400, detail="Checklist inválido")
+    try:
+        file_ids = json.loads(file_item_ids)
+    except Exception:
+        file_ids = []
+
+    fotos_por_item: dict = {}
+    for i, f in enumerate(files or []):
+        item_id = file_ids[i] if i < len(file_ids) else None
+        if not item_id:
+            continue
+        content = await f.read()
+        if len(content) > 12 * 1024 * 1024:
+            continue  # foto demasiado pesada, se ignora en vez de romper todo el envío
+        key = f"checklist/{emp}/{placa_n}/{uuid.uuid4().hex[:8]}_{re.sub(r'[^A-Za-z0-9_.-]', '_', f.filename or 'foto.jpg')}"
+        storage.save_object(key, content, f.content_type or "image/jpeg")
+        fotos_por_item[item_id] = key
+
+    items_out, fallas = [], []
+    for it in items_data:
+        iid = it.get("id")
+        ok = bool(it.get("ok"))
+        row = {"id": iid, "label": (it.get("label") or "").strip(), "ok": ok,
+               "nota": (it.get("nota") or "").strip(), "foto_key": fotos_por_item.get(iid)}
+        items_out.append(row)
+        if not ok:
+            fallas.append(row)
+
+    km_val = None
+    if km:
+        try:
+            km_val = float(km)
+        except Exception:
+            pass
+
+    ahora = datetime.now(timezone.utc)
+    envio = {
+        "id": str(uuid.uuid4()), "empresa": emp, "placa": placa_n, "viaje_id": viaje_id or None,
+        "conductor_dni": user["dni"], "conductor_nombre": user["name"], "tipo": tipo or "pre-viaje",
+        "km": km_val, "items": items_out, "conforme": len(fallas) == 0, "fallas_count": len(fallas),
+        "created_at": ahora.isoformat(),
+    }
+    await db.checklist_envios.insert_one(dict(envio))
+
+    ordenes = []
+    for f in fallas:
+        sid = str(uuid.uuid4())
+        await db.mtto_servicios.insert_one({
+            "id": sid, "empresa": emp, "placa": placa_n, "intervalo_id": None,
+            "nombre": f"Checklist: {f['label']}", "estado": "planificado",
+            "fecha": ahora.strftime("%Y-%m-%d"), "km": km_val, "taller": "",
+            "costo_mano_obra": 0.0, "costo_repuestos": 0.0, "costo_total": 0.0, "repuestos": [],
+            "notas": f.get("nota") or "Reportado por el conductor en el checklist.",
+            "documento_id": None, "origen": "checklist", "checklist_envio_id": envio["id"],
+            "foto_key": f.get("foto_key"), "created_at": ahora.isoformat(),
+            "created_by": f"conductor:{user['dni']}", "por": user["name"],
+        })
+        ordenes.append(sid)
+
+    if viaje_id:
+        await db.viajes.update_one({"id": viaje_id, "empresa": emp, "estado": "planificado"},
+                                   {"$set": {"estado": "en_curso"}})
+
+    envio.pop("_id", None)
+    return {"ok": True, "envio": envio, "ordenes_creadas": len(ordenes)}
+
+
+# ── Viajes (panel admin) ────────────────────────────────────────────────────
+@api.get("/viajes")
+async def viajes_listar(placa: Optional[str] = None, estado: Optional[str] = None, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    q = {"empresa": emp}
+    if placa:
+        q["placa"] = _mtto_placa(placa)
+    if estado:
+        q["estado"] = estado
+    items = await db.viajes.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return {"empresa": emp, "viajes": items}
+
+
+@api.post("/viajes")
+async def viajes_crear(body: ViajeIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    if not _mtto_placa(body.placa) or not (body.origen or "").strip() or not (body.destino or "").strip():
+        raise HTTPException(status_code=400, detail="Placa, origen y destino son obligatorios")
+    doc = {
+        "id": str(uuid.uuid4()), "empresa": emp, "placa": _mtto_placa(body.placa),
+        "conductor_dni": (body.conductor_dni or "").strip(), "conductor_nombre": (body.conductor_nombre or "").strip(),
+        "origen": body.origen.strip(), "destino": body.destino.strip(),
+        "fecha_salida": body.fecha_salida, "hora_salida": body.hora_salida, "fecha_llegada_est": body.fecha_llegada_est,
+        "guia_remision": (body.guia_remision or "").strip(), "notas": (body.notas or "").strip(),
+        "estado": body.estado or "planificado", "creado_por": user.get("id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.viajes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.put("/viajes/{vid}")
+async def viajes_editar(vid: str, body: ViajeIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    upd = {
+        "placa": _mtto_placa(body.placa), "conductor_dni": (body.conductor_dni or "").strip(),
+        "conductor_nombre": (body.conductor_nombre or "").strip(), "origen": (body.origen or "").strip(),
+        "destino": (body.destino or "").strip(), "fecha_salida": body.fecha_salida, "hora_salida": body.hora_salida,
+        "fecha_llegada_est": body.fecha_llegada_est, "guia_remision": (body.guia_remision or "").strip(),
+        "notas": (body.notas or "").strip(), "estado": body.estado or "planificado",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if upd["estado"] == "finalizado":
+        upd["finalizado_en"] = datetime.now(timezone.utc).isoformat()
+    r = await db.viajes.update_one({"id": vid, "empresa": emp}, {"$set": upd})
+    if not r.matched_count:
+        raise HTTPException(status_code=404, detail="Viaje no encontrado")
+    return {"ok": True}
+
+
+@api.delete("/viajes/{vid}")
+async def viajes_borrar(vid: str, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    r = await db.viajes.delete_one({"id": vid, "empresa": emp})
+    if not r.deleted_count:
+        raise HTTPException(status_code=404, detail="Viaje no encontrado")
+    return {"ok": True}
+
+
+# ── Checklist (panel admin) ─────────────────────────────────────────────────
+@api.get("/checklist/envios")
+async def checklist_listar(placa: Optional[str] = None, conforme: Optional[str] = None, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    q = {"empresa": emp}
+    if placa:
+        q["placa"] = _mtto_placa(placa)
+    if conforme in ("1", "0"):
+        q["conforme"] = conforme == "1"
+    items = await db.checklist_envios.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return {"empresa": emp, "envios": items}
+
+
+@api.get("/checklist/plantilla")
+async def checklist_plantilla_get(user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    return await _checklist_plantilla_de(emp)
+
+
+@api.put("/checklist/plantilla")
+async def checklist_plantilla_set(body: ChecklistPlantillaIn, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user)
+    items = [{"id": it.id or str(uuid.uuid4()), "label": it.label.strip(), "foto_si_falla": bool(it.foto_si_falla)}
+             for it in body.items if it.label.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="La plantilla necesita al menos un ítem")
+    await db.checklist_plantillas.update_one({"empresa": emp}, {"$set": {"items": items}}, upsert=True)
+    return {"ok": True, "items": items}
+
+
+@api.get("/checklist/foto/{key:path}")
+async def checklist_foto(key: str, user: dict = Depends(get_current_user)):
+    emp = _empresa_de(user) if user.get("role") != "admin_enered" else None
+    if emp and not key.startswith(f"checklist/{emp}/"):
+        raise HTTPException(status_code=403, detail="Sin acceso a este archivo")
+    if not storage.object_exists(key):
+        raise HTTPException(status_code=404, detail="Foto no encontrada")
+    return storage.download_response(key, filename=key.rsplit("/", 1)[-1], content_type="image/jpeg")
 
 
 app.include_router(api)
