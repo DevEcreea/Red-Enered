@@ -5619,12 +5619,20 @@ async def _placa_soat(placa: str) -> dict:
     consultadatos como respaldo. Devuelve {} sin datos."""
     jp = await _jsonpe("soat", {"placa": placa})
     if jp and (jp.get("fecha_fin") or jp.get("estado")):
-        return {k: x for k, x in {
+        out = {k: x for k, x in {
             "soat_vencimiento": jp.get("fecha_fin", ""),
             "soat_compania": jp.get("nombre_compania", ""),
             "soat_poliza": jp.get("numero_poliza", ""),
             "soat_estado": jp.get("estado", ""),
         }.items() if x}
+        # Inicio de vigencia: antes nunca se pedía, así que la ficha siempre mostraba "–"
+        # aunque el portal público del SOAT sí trae esta fecha. El nombre exacto del campo
+        # en json.pe no está confirmado — se prueban los candidatos más probables.
+        for k in ("fecha_inicio", "inicio_vigencia", "fecha_ini", "vigencia_desde", "fecha_inicio_vigencia"):
+            if jp.get(k):
+                out["soat_desde"] = jp[k]
+                break
+        return out
     token = os.getenv("CONSULTADATOS_TOKEN", "").strip()
     if not token:
         return {}
@@ -8153,7 +8161,7 @@ async def list_documents(
              "$or": [{"soat_vencimiento": {"$nin": [None, ""]}},
                      {"revtec_vencimiento": {"$nin": [None, ""]}}]},
             {"_id": 0, "placa": 1, "soat_vencimiento": 1, "soat_compania": 1, "soat_poliza": 1,
-             "soat_estado": 1, "revtec_vencimiento": 1, "revtec_estado": 1, "revtec_desde": 1,
+             "soat_estado": 1, "soat_desde": 1, "revtec_vencimiento": 1, "revtec_estado": 1, "revtec_desde": 1,
              "revtec_certificado": 1, "revtec_centro": 1, "revtec_resultado": 1,
              "enriquecido_en": 1},
         ):
@@ -8184,7 +8192,7 @@ async def list_documents(
                     "ref": ref,
                     "por": extra,
                     "el": el_api,
-                    "emi": (v.get("revtec_desde") or "—") if campo == "revtec_vencimiento" else "—",
+                    "emi": (v.get("revtec_desde") or "—") if campo == "revtec_vencimiento" else (v.get("soat_desde") or "—"),
                     "ven": ven,
                     "atr": "—",
                     "veh": 1, "grp": 0, "all": 0,
