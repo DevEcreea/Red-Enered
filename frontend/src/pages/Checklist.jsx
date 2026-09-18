@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../lib/api";
 import {
-  ClipboardCheck, Loader2, CheckCircle2, AlertTriangle, Truck, Camera, X, Settings, Save, Plus, Trash2,
+  ClipboardCheck, Loader2, CheckCircle2, AlertTriangle, Truck, Camera, X, Settings, Save, Plus, Trash2, Smartphone, Copy, Check,
 } from "lucide-react";
 
 const fmtFechaHora = (s) => {
@@ -41,6 +41,27 @@ function FotoItem({ itemKey }) {
   if (err) return <div style={{ fontSize: 11, color: "#9CA3AF" }}>No se pudo cargar la foto</div>;
   if (!url) return <div style={{ width: 90, height: 90, borderRadius: 8, background: "#F3F4F6", display: "flex", alignItems: "center", justifyContent: "center" }}><Loader2 size={16} className="animate-spin" color="#9CA3AF" /></div>;
   return <img src={url} alt="evidencia" style={{ width: 90, height: 90, objectFit: "cover", borderRadius: 8, border: "1px solid #E5E7EB", cursor: "pointer" }} onClick={() => window.open(url, "_blank")} />;
+}
+
+function EnlaceConductor() {
+  const [copiado, setCopiado] = useState(false);
+  const link = `${window.location.origin}/conductor`;
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(link); setCopiado(true); setTimeout(() => setCopiado(false), 2000); }
+    catch { /* clipboard no disponible, el link ya está visible para copiar a mano */ }
+  };
+  return (
+    <div style={{ ...card, padding: 14, display: "flex", alignItems: "center", gap: 12, background: "#8039F40D", borderColor: "#8039F433", flexWrap: "wrap" }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, background: "#8039F4", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Smartphone size={17} /></div>
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>App del conductor</div>
+        <div style={{ fontSize: 12, color: "#6B7280" }}>Compártela con tus choferes: ingresan solo con su DNI, eligen la unidad y el viaje, y llenan el checklist con fotos.</div>
+      </div>
+      <code style={{ fontSize: 12, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "6px 10px", color: "#374151" }}>{link}</code>
+      <button style={btnS} onClick={copiar}>{copiado ? <Check size={14} color="#16A34A" /> : <Copy size={14} />} {copiado ? "Copiado" : "Copiar link"}</button>
+      <a href="/conductor" target="_blank" rel="noreferrer" style={{ ...btnP, textDecoration: "none" }}>Abrir</a>
+    </div>
+  );
 }
 
 export default function Checklist() {
@@ -89,6 +110,8 @@ export default function Checklist() {
         </div>
         <button style={btnS} onClick={() => setPlantillaAbierta(true)}><Settings size={15} /> Editar plantilla</button>
       </div>
+
+      <EnlaceConductor />
 
       {error && <div style={{ ...card, borderColor: "#FCA5A5", background: "#FEF2F2", color: "#B91C1C", fontSize: 13 }}>{error}</div>}
 
