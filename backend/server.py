@@ -5614,6 +5614,21 @@ async def _placa_leyenda(placa: str) -> dict:
     }.items() if x}
 
 
+def _poliza_legible(numero: str) -> str:
+    """json.pe devuelve el 'código único de póliza' de la SBS (~26 dígitos: relleno de
+    ceros + el número real + más relleno + dígito verificador), no el número simple que
+    se ve en el portal público del SOAT (ej. '143073789'). Solo se limpia para MOSTRAR —
+    el valor crudo se guarda tal cual en soat_poliza, esto no lo toca.
+    Heurística: el número real de póliza no trae 3+ ceros seguidos, así que se parte el
+    código por cada corrida de 3+ ceros y se toma el trozo más largo (el relleno y el
+    dígito verificador quedan siempre más cortos que la póliza real)."""
+    s = (numero or "").strip()
+    if not s or not s.isdigit() or len(s) <= 12:
+        return s  # ya parece un número de póliza normal, no el código compuesto
+    partes = [p for p in re.split(r"0{3,}", s) if p]
+    return max(partes, key=len) if partes else s
+
+
 async def _placa_soat(placa: str) -> dict:
     """SOAT vigente por placa: json.pe primero (compañía, vigencia, póliza, estado);
     consultadatos como respaldo. Devuelve {} sin datos."""
@@ -8006,7 +8021,7 @@ async def list_documents(
             return ""
         n = re.sub(r"[^a-z0-9]", "", (doc_nombre or "").lower())
         if "soat" in n and vm.get("soat_poliza"):
-            return f"Póliza N° {vm['soat_poliza']}" + (f" · {vm['soat_compania']}" if vm.get("soat_compania") else "")
+            return f"Póliza N° {_poliza_legible(vm['soat_poliza'])}" + (f" · {vm['soat_compania']}" if vm.get("soat_compania") else "")
         if ("revisi" in n or "citv" in n) and vm.get("revtec_certificado"):
             return f"Certificado {vm['revtec_certificado']}"
         return ""
@@ -8171,7 +8186,7 @@ async def list_documents(
             el_api = (v.get("enriquecido_en") or "")[:10]
             # Rótulo: quién lo emite en "por"; número de póliza / certificado aparte en "ref"
             soat_por = v.get("soat_compania") or "SOAT verificado"
-            soat_ref = f"Póliza N° {v['soat_poliza']}" if v.get("soat_poliza") else ""
+            soat_ref = f"Póliza N° {_poliza_legible(v['soat_poliza'])}" if v.get("soat_poliza") else ""
             rev_por = " · ".join(x for x in [(v.get("revtec_centro") or "")[:48], v.get("revtec_resultado") or ""] if x) or "Revisión verificada"
             rev_ref = f"Certificado {v['revtec_certificado']}" if v.get("revtec_certificado") else ""
             for campo, doc_name, extra, ref in (
