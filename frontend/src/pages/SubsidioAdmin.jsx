@@ -1105,17 +1105,15 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
       : { ...c, motivos_invalidez: c.motivos_invalidez.includes(m) ? c.motivos_invalidez.filter((x) => x !== m) : [...c.motivos_invalidez, m] })));
   };
 
-  // Auto-fetch Razón Social from SUNAT
+  // Auto-fetch Razón Social from SUNAT. Usa /ruc/{ruc} (json.pe) — el endpoint viejo
+  // /sunat/ruc (decolecta.com) está devolviendo 401 del proveedor, así que se reemplaza
+  // por el mismo que ya usa la libreta de Contactos de Viajes, que sí funciona.
   useEffect(() => {
     const ruc = invRuc.trim();
     if (ruc.length === 11) {
-      api.get(`/sunat/ruc/${ruc}`).then(res => {
-        if (res.data && res.data.razonSocial) {
-          setInvEstacion(res.data.razonSocial);
-        } else if (res.data && res.data.razon_social) {
+      api.get(`/ruc/${ruc}`).then(res => {
+        if (res.data && res.data.razon_social) {
           setInvEstacion(res.data.razon_social);
-        } else if (res.data && res.data.nombre) {
-          setInvEstacion(res.data.nombre);
         }
       }).catch(() => {});
     }
