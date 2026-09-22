@@ -13,7 +13,6 @@ const ESTADOS = {
   OBSERVADA: { txt: "Observada", cls: "bg-amber-100 text-amber-700 border-amber-200",       dot: "bg-amber-500" },
   RECHAZADA: { txt: "Rechazada", cls: "bg-red-100 text-red-700 border-red-200",             dot: "bg-red-500" },
 };
-const CATEGORIAS = ["M2", "M3", "N1", "N2", "N3"];
 const COMBUSTIBLES = ["B5", "B20"];
 
 const fmtGal = (g) => g != null ? `${Number(g).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} gal` : "—";
@@ -471,7 +470,9 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
 
           <section>
             <div className="text-[11px] font-bold text-brand uppercase tracking-wide mb-2">3 · Vehículo y combustible</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* Sin campo de Categoría: se toma sola de la placa elegida (la trae la
+                consulta MTC de tu flota), no hace falta que el cliente la escriba. */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div><label className={lbl}>Placa *</label>
                 <select className={inp} value={f.placa} onChange={(e) => {
                   const v = vehicles.find((x) => x.placa === e.target.value);
@@ -479,12 +480,6 @@ function ModalEditar({ item, vehicles, onClose, onSaved }) {
                 }}>
                   <option value="">Elige…</option>
                   {vehicles.map((v) => <option key={v.placa} value={v.placa}>{v.placa}</option>)}
-                </select>
-              </div>
-              <div><label className={lbl}>Categoría</label>
-                <select className={inp} value={f.categoria} onChange={set("categoria")}>
-                  <option value="">—</option>
-                  {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div><label className={lbl}>Combustible</label>
