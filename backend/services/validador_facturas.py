@@ -38,8 +38,8 @@ def periodo_du007(f: date) -> Optional[int]:
             return n
     return None
 
-# Combustibles reconocidos para el subsidio.
-_PRODUCTO_OK = re.compile(r"DIES?EL|DB5|B5|S-?50|GASOHOL|GASOLINA", re.IGNORECASE)
+# El subsidio SOLO aplica a diésel (B5/B20) — gasoholes, gasolina y AdBlue quedan fuera.
+_PRODUCTO_OK = re.compile(r"DIES?EL|DB5\b|B5\b|B20\b|S-?50", re.IGNORECASE)
 
 _CAT_BASE = re.compile(r"^([MN][123])")
 
@@ -174,12 +174,17 @@ def validar_factura(doc: dict, *, placas_flota: set[str] | None = None,
             else f"{galones:,.2f} gal supera el tope de {tope:,.2f} gal de la categoría {cat}.",
         ))
 
-    # 5) Producto reconocido
+    # 5) Producto reconocido: el subsidio SOLO cubre diésel (B5/B20). Todo lo demás
+    # (gasoholes, gasolina, AdBlue, etc.) se cataloga como "otro" y se rechaza — no es
+    # un dato corregible, es un combustible que no aplica.
     prod = str(doc.get("producto") or "")
     if prod:
         ok = bool(_PRODUCTO_OK.search(prod))
-        checks.append(_check("producto", "Combustible reconocido", ok,
-                             prod if ok else f"'{prod}' no parece un combustible subsidiable."))
+        checks.append(_check(
+            "producto", "Combustible diésel (subsidiable)", ok,
+            prod if ok else f"'{prod}' no es diésel — el subsidio solo cubre diésel B5/B20, no gasoholes, gasolina ni AdBlue.",
+            bloqueante=True,
+        ))
 
     # 6) Comprobante duplicado.
     #    Un mismo comprobante SÍ puede repetirse para varias placas (así lo exige la ATU:
