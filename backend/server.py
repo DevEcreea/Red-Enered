@@ -4608,6 +4608,7 @@ async def admin_invoices_confirm_ocr(
         if sub_user:
             import uuid
             sub_id = str(uuid.uuid4())
+            programa_calc, periodo_calc = _programa_y_periodo_por_fecha(it.f_emision)
             sub_doc = {
                 "id": sub_id,
                 "user_id": sub_user["id"],
@@ -4638,6 +4639,9 @@ async def admin_invoices_confirm_ocr(
                 "numero_documento": it.n_doc,
                 "confianza": 1.0,
                 "origin": "admin_ocr",
+                # Según la fecha de emisión: DU 004 o el periodo del DU 007 que le toque.
+                "programa": programa_calc,
+                "periodo_du007": periodo_calc,
             }
             await db.consumos_subsidio.insert_one(sub_doc)
         
@@ -4669,6 +4673,7 @@ async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("ad
         existing = await db.consumos_subsidio.find_one({"empresa": empresa, "numero_documento": n_doc})
         if not existing:
             sub_id = str(uuid.uuid4())
+            programa_calc, periodo_calc = _programa_y_periodo_por_fecha(inv.get("f_emision"))
             sub_doc = {
                 "id": sub_id,
                 "user_id": sub_user["id"],
@@ -4699,11 +4704,35 @@ async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("ad
                 "numero_documento": n_doc,
                 "confianza": 1.0,
                 "origin": "admin_ocr",
+                "programa": programa_calc,
+                "periodo_du007": periodo_calc,
             }
             await db.consumos_subsidio.insert_one(sub_doc)
             synced += 1
             
     return {"synced": synced, "total_admin_invoices": len(all_admin_invs)}
+
+
+@api.post("/admin/invoices/fix-programa")
+async def admin_invoices_fix_programa(empresa: Optional[str] = None, user: dict = Depends(require_roles("admin_enered"))):
+    """Recalcula `programa`/`periodo_du007` según la fecha de emisión para las facturas
+    que se cargaron por el panel Admin (origin=admin_ocr) ANTES de que ese flujo lo
+    guardara: quedaron todas cayendo en DU 004 por defecto, aunque fueran del DU 007.
+    Solo toca las que no tienen `programa` puesto (o lo tienen como resultado de ese bug),
+    nunca las de la carga masiva del subsidio, que ya lo hacían bien."""
+    q = {"origin": "admin_ocr"}
+    if empresa:
+        q["empresa"] = empresa
+    docs = await db.consumos_subsidio.find(q, {"_id": 0, "id": 1, "fecha": 1, "programa": 1, "empresa": 1, "numero_documento": 1}).to_list(5000)
+    corregidas = []
+    for d in docs:
+        programa_calc, periodo_calc = _programa_y_periodo_por_fecha(d.get("fecha"))
+        if d.get("programa") == programa_calc:
+            continue  # ya está correcto, no la toca
+        await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {"programa": programa_calc, "periodo_du007": periodo_calc}})
+        corregidas.append({"id": d["id"], "empresa": d.get("empresa"), "numero_documento": d.get("numero_documento"),
+                            "fecha": d.get("fecha"), "programa_anterior": d.get("programa"), "programa_nuevo": programa_calc})
+    return {"revisadas": len(docs), "corregidas": len(corregidas), "detalle": corregidas}
 
 
 def _safe_doc(name: str) -> str:
@@ -7530,7 +7559,25 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
 
 # Tope de galones máximos a reclamar por categoría de unidad (DU 004). × factor = monto.
 _TOPES_GALONES = {"M2": 674.65, "M3": 1915.41, "N1": 552.52, "N2": 888.45, "N3": 1412.54}
-from services.validador_facturas import clase_base_categoria
+from services.validador_facturas import clase_base_categoria, periodo_du007, PERIODO_INICIO, PERIODO_FIN
+
+
+def _programa_y_periodo_por_fecha(fecha_str):
+    """A qué decreto pertenece una factura de combustible, según su fecha de emisión:
+    DU 004 (29/05–29/07/2026) o alguno de los 3 periodos del DU 007 (desde 16/08/2026).
+    Devuelve (programa, periodo_du007 o None). Si la fecha no cae en ninguno, devuelve
+    ("du004", None) por compatibilidad con lo que ya existía antes del DU 007."""
+    from datetime import date as _date
+    try:
+        f = _date.fromisoformat(str(fecha_str)[:10])
+    except (ValueError, TypeError):
+        return "du004", None
+    n = periodo_du007(f)
+    if n is not None:
+        return "du007", n
+    if PERIODO_INICIO <= f <= PERIODO_FIN:
+        return "du004", None
+    return "du004", None
 _FACTOR_SUBSIDIO = 4  # galones máximos × 4 = monto máximo a reclamar
 _RESUMEN_CACHE = {}   # ruc -> (timestamp, payload, ttl) para /subsidio/resumen
 
