@@ -3726,9 +3726,23 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     }
     seen_ndocs.discard("")
 
-    # El espejo db.invoices no distingue programa, así que solo se agrega al expediente del
-    # DU 004 (el DU 007 solo muestra lo que el cliente subió explícitamente para ese programa).
-    if u.get("empresa") and programa != "du007":
+    # El espejo db.invoices no trae `programa` (se creó por el panel Admin, ajeno al
+    # subsidio), así que se calcula aquí según su fecha de emisión — igual que cualquier
+    # otra factura — y solo se agrega al expediente que le corresponde según esa fecha.
+    if u.get("empresa"):
+        from services.validador_facturas import periodo_du007 as _periodo_du007, PERIODO_INICIO as _P_INI, PERIODO_FIN as _P_FIN
+        from datetime import date as _date
+
+        def _programa_de_fecha(fecha_str):
+            try:
+                f = _date.fromisoformat(str(fecha_str)[:10])
+            except (ValueError, TypeError):
+                return "du004", None
+            n = _periodo_du007(f)
+            if n is not None:
+                return "du007", n
+            return "du004", None
+
         enered_invs = await db.invoices.find(
             {"empresa": u.get("empresa")},
             {"_id": 0}
@@ -3740,6 +3754,9 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
                 continue
             if ndoc and ndoc in seen_ndocs:
                 continue
+            prog_ei, periodo_ei = _programa_de_fecha(ei.get("f_emision"))
+            if prog_ei != programa:
+                continue  # esta factura le toca al otro decreto, no a este expediente
             seen_ids.add(ei.get("id"))
             if ndoc:
                 seen_ndocs.add(ndoc)
@@ -3767,7 +3784,9 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
                 "motivos_invalidez": ei.get("motivos_invalidez"),
                 "motivo_invalidez_otros": ei.get("motivo_invalidez_otros"),
                 "origen": "RED_ENERED",
-                "is_tercero": False
+                "is_tercero": False,
+                "programa": prog_ei,
+                "periodo_du007": periodo_ei,
             }
             invoices.append(mapped_inv)
             
