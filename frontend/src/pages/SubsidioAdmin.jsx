@@ -1044,6 +1044,10 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
   const [savingVeh, setSavingVeh] = useState(false);
 
   // INVOICES STATE
+  // Una factura (N° + fecha + proveedor) puede cubrir varias placas — el cliente la sube
+  // así, una sola vez, con una fila por unidad. Por eso el header se digita una vez y
+  // "consumos" es la lista de filas (una por placa) que se guardan como facturas separadas
+  // que comparten el mismo numero_documento/ruc_emisor.
   const [editingInvoice, setEditingInvoice] = useState(null);
   const [showInvoiceForm, setShowInvoiceForm] = useState(false);
   const [invNumero, setInvNumero] = useState("");
@@ -1051,41 +1055,55 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
   const [invEstacion, setInvEstacion] = useState("");
   const [invRuc, setInvRuc] = useState("");
   const [invCiudad, setInvCiudad] = useState("");
-  const [invPlaca, setInvPlaca] = useState("");
-  const [invGalones, setInvGalones] = useState("");
-  const [invPrecio, setInvPrecio] = useState("");
-  const [invImporte, setInvImporte] = useState("");
-  const [invProducto, setInvProducto] = useState("DIESEL B5");
-  const [invIgv, setInvIgv] = useState(false);
   const [savingInv, setSavingInv] = useState(false);
-  // Declarar factura como inválida (no se borra, solo se marca con motivo)
-  const [invInvalida, setInvInvalida] = useState(false);
-  const [invMotivos, setInvMotivos] = useState([]);
-  const [invMotivoOtros, setInvMotivoOtros] = useState("");
-  const toggleMotivo = (key) => {
-    setInvMotivos((prev) => prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]);
-  };
 
-  // Checkbox "Agregar IGV (18%)": multiplica el precio unitario × 1.18 (o ÷ al desmarcar).
-  // El Importe Total se recalcula solo (galones × precio) por el useEffect de arriba.
-  const toggleIgv = (checked) => {
-    setInvIgv(checked);
-    const p = parseFloat(invPrecio);
-    if (!isNaN(p) && p > 0) {
-      setInvPrecio((checked ? p * 1.18 : p / 1.18).toFixed(4));
-    }
-  };
+  const nuevoConsumo = () => ({
+    _key: `c${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: null, placa: "", producto: "DIESEL B5", galones: "", precio_unitario: "", importe_total: "",
+    invalida: false, motivos_invalidez: [], motivo_invalidez_otros: "",
+  });
+  const [consumos, setConsumos] = useState([nuevoConsumo()]);
 
-  // Auto-calculate Importe Total
-  useEffect(() => {
-    if (invGalones && invPrecio) {
-      const g = parseFloat(invGalones);
-      const p = parseFloat(invPrecio);
-      if (!isNaN(g) && !isNaN(p)) {
-        setInvImporte((g * p).toFixed(2));
-      }
+  const agregarConsumo = () => setConsumos((prev) => [...prev, nuevoConsumo()]);
+  const quitarConsumo = async (c) => {
+    if (consumos.length <= 1) return;
+    if (c.id) {
+      if (!window.confirm("¿Eliminar este consumo (placa) ya guardado?")) return;
+      try { await api.delete(`/admin/subsidio/invoices/${c.id}`); }
+      catch (err) { alert(`Error al eliminar: ${err.response?.data?.detail || err.message}`); return; }
     }
-  }, [invGalones, invPrecio]);
+    setConsumos((prev) => prev.filter((x) => x._key !== c._key));
+  };
+  const setConsumoField = (key, field, value) => {
+    setConsumos((prev) => prev.map((c) => (c._key !== key ? c : { ...c, [field]: value })));
+  };
+  // Galones/precio recalculan el importe de esa fila al vuelo (galones × precio).
+  const setConsumoCantidad = (key, field, value) => {
+    setConsumos((prev) => prev.map((c) => {
+      if (c._key !== key) return c;
+      const next = { ...c, [field]: value };
+      const g = parseFloat(field === "galones" ? value : c.galones);
+      const p = parseFloat(field === "precio_unitario" ? value : c.precio_unitario);
+      if (!isNaN(g) && !isNaN(p)) next.importe_total = (g * p).toFixed(2);
+      return next;
+    }));
+  };
+  // Checkbox "Agregar IGV (18%)" de esa fila: × 1.18 al precio (o ÷ al desmarcar).
+  const toggleIgvConsumo = (key, checked) => {
+    setConsumos((prev) => prev.map((c) => {
+      if (c._key !== key) return c;
+      const p = parseFloat(c.precio_unitario);
+      const precioNuevo = (!isNaN(p) && p > 0) ? (checked ? p * 1.18 : p / 1.18).toFixed(4) : c.precio_unitario;
+      const g = parseFloat(c.galones);
+      const pn = parseFloat(precioNuevo);
+      const importe = (!isNaN(g) && !isNaN(pn)) ? (g * pn).toFixed(2) : c.importe_total;
+      return { ...c, precio_unitario: precioNuevo, importe_total: importe };
+    }));
+  };
+  const toggleMotivoConsumo = (key, m) => {
+    setConsumos((prev) => prev.map((c) => (c._key !== key ? c
+      : { ...c, motivos_invalidez: c.motivos_invalidez.includes(m) ? c.motivos_invalidez.filter((x) => x !== m) : [...c.motivos_invalidez, m] })));
+  };
 
   // Auto-fetch Razón Social from SUNAT
   useEffect(() => {
@@ -1184,15 +1202,7 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
     setInvEstacion("");
     setInvRuc("");
     setInvCiudad("");
-    setInvPlaca(vehicles[0]?.placa || "");
-    setInvGalones("");
-    setInvPrecio("");
-    setInvImporte("");
-    setInvProducto("DIESEL B5");
-    setInvIgv(false);
-    setInvInvalida(false);
-    setInvMotivos([]);
-    setInvMotivoOtros("");
+    setConsumos([{ ...nuevoConsumo(), placa: vehicles[0]?.placa || "" }]);
     setInvArchivoSel(null);
     setPreviewUrl(null);
     setShowInvoiceForm(true);
@@ -1218,15 +1228,20 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
     setInvEstacion(inv.estacion || "");
     setInvRuc(inv.ruc_emisor || "");
     setInvCiudad(inv.ciudad || "");
-    setInvPlaca(inv.placa || "");
-    setInvGalones(inv.galones || "");
-    setInvPrecio(inv.precio_unitario || "");
-    setInvImporte(inv.importe_total || inv.monto_total || "");
-    setInvProducto(inv.producto || "DIESEL B5");
-    setInvIgv(false);
-    setInvInvalida(!!inv.invalida);
-    setInvMotivos(inv.motivos_invalidez || []);
-    setInvMotivoOtros(inv.motivo_invalidez_otros || "");
+    // La misma factura puede tener varias placas: trae TODAS las filas que compartan
+    // N° de documento + RUC emisor, no solo la que se clickeó, para poder verlas y
+    // editarlas juntas (y agregar más abajo con "+ Agregar consumo").
+    const num = (inv.numero_documento || inv.n_doc || "").trim().toUpperCase();
+    const ruc = (inv.ruc_emisor || "").trim();
+    const hermanas = (invoices || []).filter((i) =>
+      (i.numero_documento || "").trim().toUpperCase() === num && (i.ruc_emisor || "").trim() === ruc
+    );
+    const filas = (hermanas.length ? hermanas : [inv]).map((i) => ({
+      _key: `c${i.id}`, id: i.id, placa: i.placa || "", producto: i.producto || "DIESEL B5",
+      galones: i.galones ?? "", precio_unitario: i.precio_unitario ?? "", importe_total: i.importe_total ?? i.monto_total ?? "",
+      invalida: !!i.invalida, motivos_invalidez: i.motivos_invalidez || [], motivo_invalidez_otros: i.motivo_invalidez_otros || "",
+    }));
+    setConsumos(filas);
     setInvArchivoSel(null);
     setPreviewUrl(null);
     setShowInvoiceForm(true);
@@ -1234,58 +1249,54 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
 
   const saveInvoice = async (e) => {
     e.preventDefault();
-    // Al declarar inválida no exigimos los campos (ej. motivo "sin placa"), pero sí un motivo.
-    if (invInvalida) {
-      if (invMotivos.length === 0) return alert("Selecciona al menos un motivo de invalidez.");
-      if (invMotivos.includes("otros") && !invMotivoOtros.trim()) return alert("Especifica el motivo en 'Otros'.");
-    } else if (!invNumero.trim() || !invFecha || !invPlaca) {
-      return alert("Número, fecha y placa son campos obligatorios.");
+    if (!invNumero.trim() || !invFecha) return alert("Número y fecha de factura son obligatorios.");
+    for (const c of consumos) {
+      if (c.invalida) {
+        if (c.motivos_invalidez.length === 0) return alert("Cada consumo inválido necesita al menos un motivo.");
+        if (c.motivos_invalidez.includes("otros") && !c.motivo_invalidez_otros.trim()) return alert("Especifica el motivo en 'Otros'.");
+      } else if (!c.placa.trim()) {
+        return alert("Cada consumo necesita una placa (o márcalo como inválido).");
+      }
     }
     setSavingInv(true);
     try {
-      const payload = {
-        numero_documento: invNumero.trim(),
-        fecha: invFecha,
-        estacion: invEstacion.trim(),
-        ruc_emisor: invRuc.trim(),
-        ciudad: invCiudad.trim(),
-        placa: invPlaca.trim().toUpperCase(),
-        galones: Number(invGalones || 0),
-        precio_unitario: Number(invPrecio || 0),
-        importe_total: Number(invImporte || 0),
-        producto: invProducto,
-        invalida: invInvalida,
-        motivos_invalidez: invInvalida ? invMotivos : [],
-        motivo_invalidez_otros: invInvalida && invMotivos.includes("otros") ? invMotivoOtros.trim() : "",
-        programa,
+      const header = {
+        numero_documento: invNumero.trim(), fecha: invFecha,
+        estacion: invEstacion.trim(), ruc_emisor: invRuc.trim(), ciudad: invCiudad.trim(), programa,
       };
-
-      let vinculadoA = "";
-      if (editingInvoice) {
-        await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${editingInvoice.id}`, payload);
-      } else {
-        const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices${qEmp}`, payload);
-        const nuevoId = res?.data?.invoice?.id;
-        if (nuevoId && invArchivoSel) {
-          // Asocia el documento elegido al consumo recién creado. La selección se
-          // conserva para registrar la siguiente placa de la misma factura.
-          await api.put(`/admin/subsidio/invoices/${nuevoId}/usar-archivo`, invArchivoSel.origen);
-          vinculadoA = invArchivoSel.nombre;
+      let creadas = 0, actualizadas = 0, archivoAsociado = "";
+      for (const c of consumos) {
+        const payload = {
+          ...header,
+          placa: c.placa.trim().toUpperCase(),
+          galones: Number(c.galones || 0),
+          precio_unitario: Number(c.precio_unitario || 0),
+          importe_total: Number(c.importe_total || 0),
+          producto: c.producto,
+          invalida: c.invalida,
+          motivos_invalidez: c.invalida ? c.motivos_invalidez : [],
+          motivo_invalidez_otros: c.invalida && c.motivos_invalidez.includes("otros") ? c.motivo_invalidez_otros.trim() : "",
+        };
+        if (c.id) {
+          await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${c.id}`, payload);
+          actualizadas++;
+        } else {
+          const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices${qEmp}`, payload);
+          const nuevoId = res?.data?.invoice?.id;
+          creadas++;
+          if (nuevoId && invArchivoSel) {
+            // El mismo documento del cliente se asocia a CADA consumo nuevo (una placa cubierta
+            // por esa factura), así el visor muestra el PDF real en todas.
+            await api.put(`/admin/subsidio/invoices/${nuevoId}/usar-archivo`, invArchivoSel.origen);
+            archivoAsociado = invArchivoSel.nombre;
+          }
         }
       }
 
-      // En lugar de ocultar el form y correr el riesgo de perder foco o estado,
-      // limpiamos los campos si es nueva factura, o simplemente refrescamos.
-      alert(vinculadoA ? `Factura guardada y asociada al archivo "${vinculadoA}".` : "Factura guardada correctamente.");
-      
-      if (!editingInvoice) {
-        setInvNumero("");
-        setInvFecha("");
-        setInvGalones("");
-        setInvPrecio("");
-        setInvImporte("");
-      }
-      
+      alert(archivoAsociado
+        ? `Factura guardada (${creadas} nueva(s), ${actualizadas} actualizada(s)) y asociada al archivo "${archivoAsociado}".`
+        : `Factura guardada (${creadas} nueva(s), ${actualizadas} actualizada(s)).`);
+      setShowInvoiceForm(false);
       await onRefresh();
     } catch (err) {
       alert(`Error al guardar factura: ${err.response?.data?.detail || err.message}`);
@@ -1545,178 +1556,214 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
                 
                 <div className={`grid gap-6 ${(editingInvoice?.factura_filename || editingInvoice?.pdf_filename || editingInvoice?.factura_storage_key || (!editingInvoice && (comprobantesCliente.length > 0 || facturasConArchivo.length > 0))) ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1 max-w-3xl"}`}>
                   {/* Formulario */}
-                  <form onSubmit={saveInvoice} className="grid grid-cols-1 md:grid-cols-3 gap-4 h-min">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Número de Factura *</label>
-                      <input
-                        type="text"
-                        required
-                        value={invNumero}
-                        onChange={(e) => setInvNumero(e.target.value)}
-                        placeholder="Ej. F001-12345"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-mono uppercase"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Fecha de Emisión *</label>
-                      <input
-                        type="date"
-                        required
-                        value={invFecha}
-                        onChange={(e) => setInvFecha(e.target.value)}
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Placa Vehículo *</label>
-                      <select
-                        value={invPlaca}
-                        required
-                        onChange={(e) => setInvPlaca(e.target.value)}
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white font-mono"
-                      >
-                        <option value="">Selecciona placa...</option>
-                        {vehicles.map((v) => (
-                          <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
-                      <input
-                        type="text"
-                        value={invEstacion}
-                        onChange={(e) => setInvEstacion(e.target.value)}
-                        placeholder="Ej. GRIFO PRIMAX S.A."
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
-                      <input
-                        type="text"
-                        value={invRuc}
-                        onChange={(e) => setInvRuc(e.target.value)}
-                        placeholder="Ej. 20601234567"
-                        maxLength="11"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Ciudad</label>
-                      <input
-                        type="text"
-                        value={invCiudad}
-                        onChange={(e) => setInvCiudad(e.target.value)}
-                        placeholder="Ej. Lima"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Combustible</label>
-                      <select
-                        value={invProducto}
-                        onChange={(e) => setInvProducto(e.target.value)}
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
-                      >
-                        <option value="DIESEL B5">DIESEL B5</option>
-                        <option value="DIESEL B20">DIESEL B20</option>
-                        <option value="GASOHOL 90">GASOHOL 90</option>
-                        <option value="GASOHOL 95">GASOHOL 95</option>
-                        <option value="GASOHOL 97">GASOHOL 97</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Cantidad (Galones)</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={invGalones}
-                        onChange={(e) => setInvGalones(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-neutral-600">Precio Unitario (S/)</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={invPrecio}
-                        onChange={(e) => setInvPrecio(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                      />
-                      <label className="flex items-center gap-1.5 mt-1 text-[11px] font-medium text-neutral-600 cursor-pointer select-none">
+                  <form onSubmit={saveInvoice} className="space-y-5 h-min">
+                    {/* Datos de la factura (una vez — puede cubrir varias placas) */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">Número de Factura *</label>
                         <input
-                          type="checkbox"
-                          checked={invIgv}
-                          onChange={(e) => toggleIgv(e.target.checked)}
-                          className="accent-brand w-3.5 h-3.5"
+                          type="text"
+                          required
+                          value={invNumero}
+                          onChange={(e) => setInvNumero(e.target.value)}
+                          placeholder="Ej. F001-12345"
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-mono uppercase"
                         />
-                        Agregar IGV (18%)
-                      </label>
-                    </div>
-                    <div className="space-y-1 md:col-span-3">
-                      <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
-                      <input
-                        type="number"
-                        step="any"
-                        value={invImporte}
-                        onChange={(e) => setInvImporte(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
-                      />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">Fecha de Emisión *</label>
+                        <input
+                          type="date"
+                          required
+                          value={invFecha}
+                          onChange={(e) => setInvFecha(e.target.value)}
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">Ciudad</label>
+                        <input
+                          type="text"
+                          value={invCiudad}
+                          onChange={(e) => setInvCiudad(e.target.value)}
+                          placeholder="Ej. Lima"
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
+                        <input
+                          type="text"
+                          value={invEstacion}
+                          onChange={(e) => setInvEstacion(e.target.value)}
+                          placeholder="Ej. GRIFO PRIMAX S.A."
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
+                        <input
+                          type="text"
+                          value={invRuc}
+                          onChange={(e) => setInvRuc(e.target.value)}
+                          placeholder="Ej. 20601234567"
+                          maxLength="11"
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                        />
+                      </div>
                     </div>
 
-                    {/* Declarar factura como inválida (no se borra, solo se marca) */}
-                    <div className="md:col-span-3 border-t border-neutral-200 pt-3 mt-1">
-                      <label className="flex items-center gap-2 text-sm font-bold text-neutral-700 cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={invInvalida}
-                          onChange={(e) => setInvInvalida(e.target.checked)}
-                          className="accent-red-600 w-4 h-4"
-                          data-testid="inv-invalida-toggle"
-                        />
-                        Declarar factura como inválida
-                      </label>
-                      {invInvalida && (
-                        <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                          <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide">Motivo (marca uno o más)</p>
-                          <div className="flex flex-wrap gap-3">
-                            {[
-                              { key: "tipo_combustible", label: "Tipo de combustible" },
-                              { key: "sin_placa", label: "Sin placa" },
-                              { key: "otros", label: "Otros" },
-                            ].map((m) => (
-                              <label key={m.key} className="flex items-center gap-1.5 text-xs font-medium text-neutral-700 cursor-pointer select-none">
+                    {/* Consumos: una fila por placa que cubre esta misma factura */}
+                    <div className="border-t border-neutral-200 pt-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-neutral-600 uppercase tracking-wide">
+                          Consumos ({consumos.length})
+                        </p>
+                        <button
+                          type="button"
+                          onClick={agregarConsumo}
+                          className="h-8 px-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold rounded-lg text-[11px] flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" /> Agregar consumo
+                        </button>
+                      </div>
+
+                      {consumos.map((c, idx) => (
+                        <div key={c._key} className="bg-white border border-neutral-200 rounded-lg p-3 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-neutral-500">Consumo {idx + 1}{c.id ? "" : " (nuevo)"}</span>
+                            {consumos.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => quitarConsumo(c)}
+                                className="text-red-600 hover:underline text-[11px] font-bold flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" /> Quitar
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-neutral-600">Placa Vehículo *</label>
+                              <select
+                                value={c.placa}
+                                onChange={(e) => setConsumoField(c._key, "placa", e.target.value)}
+                                className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white font-mono"
+                              >
+                                <option value="">Selecciona placa...</option>
+                                {vehicles.map((v) => (
+                                  <option key={v.placa} value={v.placa}>{v.placa} ({v.categoria})</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-neutral-600">Combustible</label>
+                              <select
+                                value={c.producto}
+                                onChange={(e) => setConsumoField(c._key, "producto", e.target.value)}
+                                className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm bg-white"
+                              >
+                                <option value="DIESEL B5">DIESEL B5</option>
+                                <option value="DIESEL B20">DIESEL B20</option>
+                                <option value="GASOHOL 90">GASOHOL 90</option>
+                                <option value="GASOHOL 95">GASOHOL 95</option>
+                                <option value="GASOHOL 97">GASOHOL 97</option>
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-neutral-600">Cantidad (Galones)</label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={c.galones}
+                                onChange={(e) => setConsumoCantidad(c._key, "galones", e.target.value)}
+                                placeholder="0.00"
+                                className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-neutral-600">Precio Unitario (S/)</label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={c.precio_unitario}
+                                onChange={(e) => setConsumoCantidad(c._key, "precio_unitario", e.target.value)}
+                                placeholder="0.00"
+                                className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                              />
+                              <label className="flex items-center gap-1.5 mt-1 text-[11px] font-medium text-neutral-600 cursor-pointer select-none">
                                 <input
                                   type="checkbox"
-                                  checked={invMotivos.includes(m.key)}
-                                  onChange={() => toggleMotivo(m.key)}
-                                  className="accent-red-600 w-3.5 h-3.5"
-                                  data-testid={`inv-motivo-${m.key}`}
+                                  onChange={(e) => toggleIgvConsumo(c._key, e.target.checked)}
+                                  className="accent-brand w-3.5 h-3.5"
                                 />
-                                {m.label}
+                                Agregar IGV (18%)
                               </label>
-                            ))}
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-neutral-600">Importe Total (S/)</label>
+                              <input
+                                type="number"
+                                step="any"
+                                value={c.importe_total}
+                                onChange={(e) => setConsumoField(c._key, "importe_total", e.target.value)}
+                                placeholder="0.00"
+                                className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm font-bold text-brand"
+                              />
+                            </div>
                           </div>
-                          {invMotivos.includes("otros") && (
-                            <input
-                              type="text"
-                              value={invMotivoOtros}
-                              onChange={(e) => setInvMotivoOtros(e.target.value)}
-                              placeholder="Especifica el motivo…"
-                              className="w-full h-9 px-3 border border-red-300 rounded-lg text-sm"
-                              data-testid="inv-motivo-otros"
-                            />
-                          )}
+
+                          {/* Declarar este consumo como inválido (no se borra, solo se marca) */}
+                          <div className="border-t border-neutral-100 pt-2">
+                            <label className="flex items-center gap-2 text-xs font-bold text-neutral-700 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={c.invalida}
+                                onChange={(e) => setConsumoField(c._key, "invalida", e.target.checked)}
+                                className="accent-red-600 w-3.5 h-3.5"
+                                data-testid="inv-invalida-toggle"
+                              />
+                              Declarar este consumo como inválido
+                            </label>
+                            {c.invalida && (
+                              <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
+                                <p className="text-[11px] font-bold text-red-700 uppercase tracking-wide">Motivo (marca uno o más)</p>
+                                <div className="flex flex-wrap gap-3">
+                                  {[
+                                    { key: "tipo_combustible", label: "Tipo de combustible" },
+                                    { key: "sin_placa", label: "Sin placa" },
+                                    { key: "otros", label: "Otros" },
+                                  ].map((m) => (
+                                    <label key={m.key} className="flex items-center gap-1.5 text-xs font-medium text-neutral-700 cursor-pointer select-none">
+                                      <input
+                                        type="checkbox"
+                                        checked={c.motivos_invalidez.includes(m.key)}
+                                        onChange={() => toggleMotivoConsumo(c._key, m.key)}
+                                        className="accent-red-600 w-3.5 h-3.5"
+                                        data-testid={`inv-motivo-${m.key}`}
+                                      />
+                                      {m.label}
+                                    </label>
+                                  ))}
+                                </div>
+                                {c.motivos_invalidez.includes("otros") && (
+                                  <input
+                                    type="text"
+                                    value={c.motivo_invalidez_otros}
+                                    onChange={(e) => setConsumoField(c._key, "motivo_invalidez_otros", e.target.value)}
+                                    placeholder="Especifica el motivo…"
+                                    className="w-full h-9 px-3 border border-red-300 rounded-lg text-sm"
+                                    data-testid="inv-motivo-otros"
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      )}
+                      ))}
                     </div>
 
-                    <div className="md:col-span-3 flex justify-end gap-2 pt-2">
+                    <div className="flex justify-end gap-2 pt-2">
                       <button
                         type="button"
                         onClick={() => setShowInvoiceForm(false)}
