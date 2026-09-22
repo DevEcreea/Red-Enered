@@ -4714,15 +4714,19 @@ async def sync_admin_invoices_to_subsidio(user: dict = Depends(require_roles("ad
 
 
 @api.post("/admin/invoices/fix-programa")
-async def admin_invoices_fix_programa(empresa: Optional[str] = None, user: dict = Depends(require_roles("admin_enered"))):
-    """Recalcula `programa`/`periodo_du007` según la fecha de emisión para las facturas
-    que se cargaron por el panel Admin (origin=admin_ocr) ANTES de que ese flujo lo
-    guardara: quedaron todas cayendo en DU 004 por defecto, aunque fueran del DU 007.
-    Solo toca las que no tienen `programa` puesto (o lo tienen como resultado de ese bug),
-    nunca las de la carga masiva del subsidio, que ya lo hacían bien."""
-    q = {"origin": "admin_ocr"}
+async def admin_invoices_fix_programa(empresa: Optional[str] = None, incluir_sin_origen: bool = True,
+                                       user: dict = Depends(require_roles("admin_enered"))):
+    """Recalcula `programa`/`periodo_du007` según la fecha de emisión para facturas que
+    quedaron sin ese campo (por eso caían siempre en el balde de DU 004, invisibles para
+    DU 007, sin importar su fecha real): las del panel Admin (origin=admin_ocr) y —la
+    causa real más común— registros viejos de consumos_subsidio a los que el campo
+    `programa` directamente nunca se les puso (ni "du004" ni "du007").
+    Nunca toca un doc que YA tiene programa correcto para su fecha."""
+    q = {"$or": [{"origin": "admin_ocr"}]}
+    if incluir_sin_origen:
+        q["$or"].append({"programa": {"$exists": False}})
     if empresa:
-        q["empresa"] = empresa
+        q = {"$and": [q, {"empresa": empresa}]}
     docs = await db.consumos_subsidio.find(q, {"_id": 0, "id": 1, "fecha": 1, "programa": 1, "empresa": 1, "numero_documento": 1}).to_list(5000)
     corregidas = []
     for d in docs:
