@@ -304,6 +304,23 @@ async def _require_subsidio(request: Request) -> dict:
     return user
 
 
+def _programa_de_fecha(fecha_str) -> tuple:
+    """A qué decreto pertenece una factura según su fecha de emisión: DU 004 o el periodo
+    del DU 007 que le toque (1, 2 o 3). Se usa para clasificar las facturas de db.invoices
+    (el espejo de Facturación, ajeno al subsidio, que nunca trae el campo `programa`) igual
+    que cualquier otra factura — no fijas siempre a un solo decreto."""
+    from services.validador_facturas import periodo_du007
+    from datetime import date as _date
+    try:
+        f = _date.fromisoformat(str(fecha_str)[:10])
+    except (ValueError, TypeError):
+        return "du004", None
+    n = periodo_du007(f)
+    if n is not None:
+        return "du007", n
+    return "du004", None
+
+
 def _normalize_doc(d: dict) -> dict:
     if not d:
         return d
@@ -3541,21 +3558,29 @@ async def admin_list_expedientes(
 
     # Facturas de Red-Enered (db.invoices) por empresa, SIN contar el espejo de las que
     # ya están en consumos_subsidio (mismo id): antes se sumaban dos veces y la lista
-    # decía "40 facturas" donde había 20. Este espejo no distingue programa, así que
-    # solo se suma al panel del DU 004 (el DU 007 solo cuenta lo marcado programa=du007).
-    empresas_list = sorted({e for (_, e, _) in filas if e}) if programa != "du007" else []
+    # decía "40 facturas" donde había 20. Este espejo no trae `programa`, así que se
+    # calcula por su fecha de emisión (igual que en el detalle del expediente) y solo se
+    # suma al panel del decreto que le corresponde — antes el DU 007 no sumaba nada de
+    # aquí, sin importar la fecha real de esas facturas.
+    empresas_list = sorted({e for (_, e, _) in filas if e})
     if empresas_list:
         ids_consumos = [c.get("id") async for c in db.consumos_subsidio.find(
             {"user_id": {"$in": uids}}, {"_id": 0, "id": 1}) if c.get("id")]
-        enered_inv_agg = await db.invoices.aggregate([
-            {"$match": {"empresa": {"$in": empresas_list}, "id": {"$nin": ids_consumos}}},
-            {"$group": {
-                "_id": "$empresa",
-                "count": {"$sum": 1},
-                "imp": {"$sum": "$monto_total"}
-            }}
-        ]).to_list(10000)
-        enered_map = {r["_id"]: r for r in enered_inv_agg}
+        enered_invs = await db.invoices.find(
+            {"empresa": {"$in": empresas_list}, "id": {"$nin": ids_consumos}},
+            {"_id": 0, "empresa": 1, "monto_total": 1, "f_emision": 1},
+        ).to_list(20000)
+        enered_map = {}
+        for ei in enered_invs:
+            prog_ei, _periodo_ei = _programa_de_fecha(ei.get("f_emision"))
+            if prog_ei != programa:
+                continue
+            emp = ei.get("empresa")
+            if not emp:
+                continue
+            agg = enered_map.setdefault(emp, {"count": 0, "imp": 0.0})
+            agg["count"] += 1
+            agg["imp"] += float(ei.get("monto_total") or 0)
         for (u, emp, _r) in filas:
             uid = u.get("id")
             if emp and emp in enered_map:
@@ -3563,7 +3588,7 @@ async def admin_list_expedientes(
                 if k not in inv_map:
                     inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
                 inv_map[k]["conf"] += enered_map[emp]["count"]
-                inv_map[k]["imp"] += enered_map[emp].get("imp", 0) or 0
+                inv_map[k]["imp"] += enered_map[emp]["imp"]
 
     # DU 007 firma por periodo en su propia colección (declaraciones_du007) — no en
     # subsidio_declaraciones, que es la declaración única del DU 004. Antes la columna
@@ -3609,7 +3634,7 @@ async def admin_list_expedientes(
             "expediente_submitted_at": u.get(
                 "expediente_submitted_at_du007" if programa == "du007" else "expediente_submitted_at"),
             "ahorro_estimado": calc.get("subsidio_estimado", 0),
-            "ahorro_reconocido": round(float(inv["gal"]) * 1.5, 2),
+            "ahorro_reconocido": round(float(inv["gal"]) * 4.0, 2),  # S//gal del subsidio, mismo factor que en todo el resto
             "galones_confirmados": round(float(inv["gal"]), 2),
             "importe_confirmado": round(float(inv["imp"]), 2),
             "docs_count": docs_count,
@@ -3730,19 +3755,6 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     # subsidio), así que se calcula aquí según su fecha de emisión — igual que cualquier
     # otra factura — y solo se agrega al expediente que le corresponde según esa fecha.
     if u.get("empresa"):
-        from services.validador_facturas import periodo_du007 as _periodo_du007, PERIODO_INICIO as _P_INI, PERIODO_FIN as _P_FIN
-        from datetime import date as _date
-
-        def _programa_de_fecha(fecha_str):
-            try:
-                f = _date.fromisoformat(str(fecha_str)[:10])
-            except (ValueError, TypeError):
-                return "du004", None
-            n = _periodo_du007(f)
-            if n is not None:
-                return "du007", n
-            return "du004", None
-
         enered_invs = await db.invoices.find(
             {"empresa": u.get("empresa")},
             {"_id": 0}
