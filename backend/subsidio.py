@@ -4029,10 +4029,7 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
         prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         patch: dict = {}
         if f.get("fecha"):
-            try:
-                prog_fecha, _pf = _programa_de_fecha(f.get("fecha"))
-            except Exception:
-                prog_fecha = None
+            prog_fecha = _programa_estricto_por_fecha(f.get("fecha"))
             if prog_fecha in ("du004", "du007") and prog_fecha != prog:
                 prog = prog_fecha
                 patch["programa"] = prog
@@ -4924,6 +4921,24 @@ async def admin_delete_vehicle(
 _CAMPOS_COMPLETA = ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor", "placa")
 
 
+def _programa_estricto_por_fecha(fecha_str) -> Optional[str]:
+    """'du004' si la fecha cae en la ventana del DU 004, 'du007' si cae en alguno de sus tres
+    periodos, y None si no cae en NINGUNO (p. ej. un año mal tipeado como 2028). Solo con un
+    resultado claro se cambia de decreto; si es None, la factura se queda donde está y el
+    validador la rechaza como fuera de periodo de SU decreto, sin moverla."""
+    from services.validador_facturas import periodo_du007, PERIODO_INICIO, PERIODO_FIN
+    from datetime import date as _date
+    try:
+        f = _date.fromisoformat(str(fecha_str)[:10])
+    except (ValueError, TypeError):
+        return None
+    if periodo_du007(f) is not None:
+        return "du007"
+    if PERIODO_INICIO <= f <= PERIODO_FIN:
+        return "du004"
+    return None
+
+
 def _importe_por_placa(doc: dict) -> Optional[float]:
     """Importe de UNA fila = consumo de esa placa (galones × precio unitario). Una factura con
     varias placas va en varias filas con la misma serie; cada fila lleva su propio importe, no
@@ -4989,10 +5004,7 @@ async def _revalidar_consumo(u: dict, uids: list, doc: dict, excluir_id: Optiona
     # de setiembre DU 004. Si la fecha manda otro decreto, se reasigna en vez de dejarla
     # 'fuera de periodo' (y en draft) en el panel equivocado.
     if doc.get("fecha"):
-        try:
-            prog_fecha, _pf = _programa_de_fecha(doc.get("fecha"))
-        except Exception:
-            prog_fecha = None
+        prog_fecha = _programa_estricto_por_fecha(doc.get("fecha"))
         if prog_fecha in ("du004", "du007") and prog_fecha != prog:
             prog = prog_fecha
             patch["programa"] = prog
