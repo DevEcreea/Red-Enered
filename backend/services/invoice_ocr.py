@@ -31,7 +31,8 @@ Analiza la imagen de la factura adjunta y devuelve EXCLUSIVAMENTE un JSON válid
   "precio_unitario": número decimal (Precio por galón, sin IGV o con IGV según figure. Ej: 24.86),
   "importe_total": número decimal (Total a pagar, sin IGV aparte, solo el TOTAL final. Ej: 1540.50),
   "numero_documento": "Serie-Correlativo exacto (ej: F003-00000219)",
-  "confianza": número entre 0 y 1 (qué tan seguro estás de la extracción)
+  "confianza": número entre 0 y 1 (qué tan seguro estás de la extracción),
+  "items": [ {"producto": "...", "placa": "ABC-123 o null", "galones": número, "precio_unitario": número, "importe": número (total de esa línea con IGV)} ]  (UNA entrada por cada línea/ítem de la factura, en el orden en que aparecen)
 }
 
 REGLAS ESTRICTAS:
@@ -42,6 +43,12 @@ REGLAS ESTRICTAS:
 - galones y precio_unitario son números decimales con punto, sin unidades ni símbolos.
 - No confundas ruc_emisor (el grifo que emite) con ruc_cliente (el transportista que compra).
 - Si un dato no existe, devuelve null.
+- Si la factura tiene VARIAS líneas (ej. gasohol y diésel, o varias placas), lista TODAS en "items" y para los
+  campos de arriba (placa, producto, galones, precio_unitario) usa SOLO las líneas de DIÉSEL (Diesel B5 / B20 / DB5 / MAX-D / Biodiesel).
+  NO sumes galones de gasohol ni de otros productos. Si hay varias líneas de diésel con distintas placas, pon las placas separadas por coma.
+- La placa de cada línea suele estar en la columna "Placa" a la altura de esa línea; no la mezcles con la de otra línea.
+- Lee el AÑO de la fecha con cuidado y tal cual aparece impreso (no lo corrijas ni lo supongas).
+- La imagen puede ser una FOTO tomada con celular (inclinada, con sombra o brillo): lee igual con la mayor precisión posible.
 """
 
 
@@ -178,16 +185,36 @@ async def _extract_gemini(content: bytes, content_type: str) -> dict:
     from google import genai
     from google.genai import types as gtypes
     img, mime = _a_imagen_png(content, content_type)
+    import asyncio as _aio
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
-    modelo = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.5-flash")
-    resp = await client.aio.models.generate_content(
-        model=modelo,
-        contents=[gtypes.Part.from_bytes(data=img, mime_type=mime), OCR_PROMPT],
-        config=gtypes.GenerateContentConfig(temperature=0, response_mime_type="application/json",
-                                            system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."),
-    )
-    text = resp.text or ""
-    return {"extracted": _normalize_fields(_parsear_json(text)), "raw_response": text, "motor": f"gemini:{modelo}"}
+    # Google retira modelos y satura otros ("high demand" 503): probamos varios en orden, con un
+    # reintento corto cada uno. El primero es configurable (GEMINI_VISION_MODEL).
+    candidatos = [m.strip() for m in (os.environ.get("GEMINI_VISION_MODEL") or "").split(",") if m.strip()]
+    for m in ("gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest", "gemini-3.5-flash-lite"):
+        if m not in candidatos:
+            candidatos.append(m)
+    ultimo_error = None
+    for modelo in candidatos:
+        for intento in (1, 2):
+            try:
+                resp = await client.aio.models.generate_content(
+                    model=modelo,
+                    contents=[gtypes.Part.from_bytes(data=img, mime_type=mime), OCR_PROMPT],
+                    config=gtypes.GenerateContentConfig(temperature=0, response_mime_type="application/json",
+                                                        system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."),
+                )
+                text = resp.text or ""
+                return {"extracted": _normalize_fields(_parsear_json(text)), "raw_response": text, "motor": f"gemini:{modelo}"}
+            except Exception as e:
+                ultimo_error = e
+                msg = str(e)
+                transitorio = any(c in msg for c in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "timeout", "Timeout"))
+                logger.warning(f"Gemini {modelo} intento {intento} falló: {msg[:160]}")
+                if transitorio and intento == 1:
+                    await _aio.sleep(2)
+                    continue
+                break  # modelo retirado / no disponible → siguiente candidato
+    raise RuntimeError(f"Gemini sin respuesta en {len(candidatos)} modelos; último error: {ultimo_error}")
 
 
 async def extract_invoice_data(content: bytes, content_type: str, session_id: str) -> dict:
@@ -284,6 +311,15 @@ async def _extract_invoice_data_legacy(content: bytes, content_type: str, sessio
     }
 
 
+def _es_diesel(nombre) -> bool:
+    n = (nombre or "").upper().replace("É", "E")
+    if not n:
+        return False
+    if any(k in n for k in ("GASOHOL", "GASOLINA", "GLP", "GNV", "LUBRIC", "ACEITE", "PREMIUM G", "REGULAR")):
+        return False
+    return any(k in n for k in ("DIESEL", "DB5", "DB20", "MAX-D", "MAXD", "BIODIESEL", "B5", "B20", "S-50", "S50"))
+
+
 def _normalize_fields(p: dict) -> dict:
     """Normalize/sanitize the extracted fields."""
     def _to_float(v):
@@ -310,13 +346,58 @@ def _normalize_fields(p: dict) -> dict:
             return None
         return str(v).strip()
 
-    placa = _to_str(p.get("placa"))
-    if placa:
-        placa = placa.upper().replace(" ", "")
-        if "-" not in placa and len(placa) == 6:
-            placa = f"{placa[:3]}-{placa[3:]}"
+    def _placa(v):
+        v = _to_str(v)
+        if not v:
+            return None
+        partes = []
+        for pl in v.upper().replace(" ", "").split(","):
+            pl = pl.strip()
+            if "-" not in pl and len(pl) == 6:
+                pl = f"{pl[:3]}-{pl[3:]}"
+            if pl and pl not in partes:
+                partes.append(pl)
+        return ",".join(partes) or None
+
+    placa = _placa(p.get("placa"))
+
+    # Líneas de la factura (si el modelo las devolvió). Los campos principales se derivan SOLO de
+    # las líneas de diésel: una factura con gasohol + diésel no debe sumar el gasohol.
+    items = []
+    for it in (p.get("items") or []):
+        if not isinstance(it, dict):
+            continue
+        items.append({
+            "producto": _to_str(it.get("producto")),
+            "placa": _placa(it.get("placa")),
+            "galones": _to_float(it.get("galones")),
+            "precio_unitario": _to_float(it.get("precio_unitario")),
+            "importe": _to_float(it.get("importe")),
+            "es_diesel": _es_diesel(it.get("producto")),
+        })
+    galones = _to_float(p.get("galones"))
+    precio = _to_float(p.get("precio_unitario"))
+    producto = _to_str(p.get("producto"))
+    importe_diesel = None
+    diesel = [it for it in items if it["es_diesel"] and it["galones"]]
+    if diesel:
+        galones = round(sum(it["galones"] for it in diesel), 3)
+        placas_d = []
+        for it in diesel:
+            if it["placa"] and it["placa"] not in placas_d:
+                placas_d.append(it["placa"])
+        placa = ",".join(placas_d) or placa
+        precio = next((it["precio_unitario"] for it in diesel if it["precio_unitario"]), precio)
+        producto = next((it["producto"] for it in diesel if it["producto"]), producto)
+        if all(it["importe"] is not None for it in diesel):
+            importe_diesel = round(sum(it["importe"] for it in diesel), 2)
+    elif items and not any(it["es_diesel"] for it in items if it["producto"]):
+        # Hay líneas y ninguna es diésel (solo gasohol, GLP, lubricantes…): no hay consumo subsidiable.
+        galones, precio = None, None
 
     return {
+        "items": items,
+        "importe_diesel": importe_diesel,
         "fecha": _to_str(p.get("fecha")),
         "fecha_vencimiento": _to_str(p.get("fecha_vencimiento")),
         "hora": _to_str(p.get("hora")),
@@ -325,9 +406,9 @@ def _normalize_fields(p: dict) -> dict:
         "ruc_emisor": _to_str(p.get("ruc_emisor")),
         "ruc_cliente": _to_str(p.get("ruc_cliente")),
         "placa": placa,
-        "producto": _to_str(p.get("producto")),
-        "galones": _to_float(p.get("galones")),
-        "precio_unitario": _to_float(p.get("precio_unitario")),
+        "producto": producto,
+        "galones": galones,
+        "precio_unitario": precio,
         "importe_total": _to_float(p.get("importe_total")),
         "numero_documento": _to_str(p.get("numero_documento")),
         "confianza": _to_float(p.get("confianza")) or 0.0,

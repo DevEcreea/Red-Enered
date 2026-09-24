@@ -2397,81 +2397,92 @@ async def invoices_upload(
             except Exception:
                 pass
 
-        # Auto-match con flota del usuario
-        placa_match = None
-        if extracted.get("placa") and _np(extracted["placa"]) in placas_norm:
-            placa_match = extracted["placa"]
+        # Una factura con VARIAS placas de diésel se registra como una fila por placa, cada una
+        # con sus galones/importe (la serie se repite; el duplicado se controla por número+placa).
+        _extracted_base = dict(extracted)
+        for _var in _variantes_por_placa(_extracted_base):
+          extracted = {**_extracted_base, **_var}
+          if not _var and extracted.get("importe_diesel") and extracted.get("items") \
+                  and any(not it.get("es_diesel") for it in extracted["items"] if it.get("producto")):
+              # Gasohol + diésel en la misma factura: el importe del consumo es el de la línea de diésel.
+              extracted["importe_total"] = extracted["importe_diesel"]
 
-        doc = {
-            "id": str(uuid.uuid4()),
-            "user_id": user["id"],
-            "empresa": user.get("empresa"),
-            "empresa_id": user.get("empresa"),
-            "calc_id": user.get("calc_id"),
-            "factura_filename": f.filename,
-            "factura_storage_key": key,
-            "factura_content_type": content_type,
-            "factura_size": len(content),
-            "raw_ocr_response": raw_resp,
-            "ocr_ok": ocr_ok,
-            "ocr_error": ocr_error,
-            "placa_match": placa_match,  # placa que coincide con flota, si la hubo
-            "status": "draft",  # draft → confirmed
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "confirmed_at": None,
-            # Campos OCR
-            "fecha": extracted.get("fecha"),
-            "hora": extracted.get("hora"),
-            "estacion": extracted.get("estacion"),
-            "ciudad": normalize_city(extracted.get("ciudad")),
-            "ruc_emisor": extracted.get("ruc_emisor"),
-            "placa": extracted.get("placa"),
-            "producto": extracted.get("producto"),
-            "galones": extracted.get("galones"),
-            "precio_unitario": extracted.get("precio_unitario"),
-            "importe_total": extracted.get("importe_total"),
-            "numero_documento": extracted.get("numero_documento"),
-            "confianza": extracted.get("confianza", 0.0),
-            # Datos del grifo (OSINERGMIN) y trazabilidad de la extracción — los pide la ATU.
-            "serie": base.get("serie"), "numero": base.get("numero"),
-            "departamento": (_grifo or {}).get("departamento"),
-            "provincia": (_grifo or {}).get("provincia"),
-            "distrito": (_grifo or {}).get("distrito"),
-            "direccion_grifo": (_grifo or {}).get("direccion"),
-            "grifo_inscrito": bool((_grifo or {}).get("inscrito")),
-            "fuentes": base.get("fuentes") or {},
-            "origin": "individual",
-            "programa": programa,   # du004 | du007 — cada subsidio lleva su propio bucket
-        }
+          # Auto-match con flota del usuario
+          placa_match = None
+          if extracted.get("placa") and _np(extracted["placa"]) in placas_norm:
+              placa_match = extracted["placa"]
 
-        # ── Validación automática contra las reglas del decreto correspondiente
-        try:
-            _val = _validar(doc, placas_flota=placas_norm,
-                            categoria_por_placa=categoria_por_placa,
-                            numeros_existentes=numeros_existentes,
-                            programa=programa)
-            doc["validacion"] = _val
-            doc["validacion_estado"] = _val["estado"]          # CONFORME | OBSERVADA | RECHAZADA
-            doc["requiere_revision"] = _val["requiere_revision"]
-            if programa == "du007":
-                doc["periodo_du007"] = _val.get("periodo_du007")
-            # Evita que dos archivos de la MISMA carga se dupliquen entre sí.
-            if doc.get("numero_documento"):
-                numeros_existentes.add((str(doc.get("ruc_emisor") or "").strip(),
-                                        str(doc["numero_documento"]).strip().upper(),
-                                        _npl(doc.get("placa"))))
-        except Exception as _e:
-            logger.warning(f"Validación automática falló en {f.filename}: {_e}")
-            doc["validacion_estado"] = "OBSERVADA"
-            doc["requiere_revision"] = True
-        await db.consumos_subsidio.insert_one(doc)
-        results.append({
-            "id": doc["id"],
-            "filename": f.filename,
-            "ok": ocr_ok,
-            "error": ocr_error,
-            "data": {k: v for k, v in doc.items() if k != "_id" and k != "raw_ocr_response"},
-        })
+          doc = {
+              "id": str(uuid.uuid4()),
+              "user_id": user["id"],
+              "empresa": user.get("empresa"),
+              "empresa_id": user.get("empresa"),
+              "calc_id": user.get("calc_id"),
+              "factura_filename": f.filename,
+              "factura_storage_key": key,
+              "factura_content_type": content_type,
+              "factura_size": len(content),
+              "raw_ocr_response": raw_resp,
+              "ocr_ok": ocr_ok,
+              "ocr_error": ocr_error,
+              "placa_match": placa_match,  # placa que coincide con flota, si la hubo
+              "status": "draft",  # draft → confirmed
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "confirmed_at": None,
+              # Campos OCR
+              "fecha": extracted.get("fecha"),
+              "hora": extracted.get("hora"),
+              "estacion": extracted.get("estacion"),
+              "ciudad": normalize_city(extracted.get("ciudad")),
+              "ruc_emisor": extracted.get("ruc_emisor"),
+              "placa": extracted.get("placa"),
+              "producto": extracted.get("producto"),
+              "galones": extracted.get("galones"),
+              "precio_unitario": extracted.get("precio_unitario"),
+              "importe_total": extracted.get("importe_total"),
+              "numero_documento": extracted.get("numero_documento"),
+              "confianza": extracted.get("confianza", 0.0),
+              # Datos del grifo (OSINERGMIN) y trazabilidad de la extracción — los pide la ATU.
+              "serie": base.get("serie"), "numero": base.get("numero"),
+              "departamento": (_grifo or {}).get("departamento"),
+              "provincia": (_grifo or {}).get("provincia"),
+              "distrito": (_grifo or {}).get("distrito"),
+              "direccion_grifo": (_grifo or {}).get("direccion"),
+              "grifo_inscrito": bool((_grifo or {}).get("inscrito")),
+              "fuentes": base.get("fuentes") or {},
+              "origin": "individual",
+              "programa": programa,   # du004 | du007 — cada subsidio lleva su propio bucket
+              "items_ocr": extracted.get("items") or [],
+          }
+
+          # ── Validación automática contra las reglas del decreto correspondiente
+          try:
+              _val = _validar(doc, placas_flota=placas_norm,
+                              categoria_por_placa=categoria_por_placa,
+                              numeros_existentes=numeros_existentes,
+                              programa=programa)
+              doc["validacion"] = _val
+              doc["validacion_estado"] = _val["estado"]          # CONFORME | OBSERVADA | RECHAZADA
+              doc["requiere_revision"] = _val["requiere_revision"]
+              if programa == "du007":
+                  doc["periodo_du007"] = _val.get("periodo_du007")
+              # Evita que dos archivos de la MISMA carga se dupliquen entre sí.
+              if doc.get("numero_documento"):
+                  numeros_existentes.add((str(doc.get("ruc_emisor") or "").strip(),
+                                          str(doc["numero_documento"]).strip().upper(),
+                                          _npl(doc.get("placa"))))
+          except Exception as _e:
+              logger.warning(f"Validación automática falló en {f.filename}: {_e}")
+              doc["validacion_estado"] = "OBSERVADA"
+              doc["requiere_revision"] = True
+          await db.consumos_subsidio.insert_one(doc)
+          results.append({
+              "id": doc["id"],
+              "filename": f.filename,
+              "ok": ocr_ok,
+              "error": ocr_error,
+              "data": {k: v for k, v in doc.items() if k != "_id" and k != "raw_ocr_response"},
+          })
 
     # Mark expediente as verifying — en el campo del programa correspondiente, para no
     # pisar el estado del otro decreto (antes subir una factura del DU 007 marcaba
@@ -2746,6 +2757,34 @@ async def captura_info(token: str):
     c = await _captura_valida(token)
     return {"ok": True, "empresa": c.get("empresa"), "programa": c.get("programa"),
             "expires_at": c.get("expires_at"), "recibidas": c.get("recibidas", 0)}
+
+
+def _variantes_por_placa(extracted: dict) -> list:
+    """Si el OCR leyó varias líneas de diésel con placas distintas, devuelve una variante
+    (placa, galones, precio, importe, producto) por placa; si no, una sola variante vacía."""
+    items = [it for it in (extracted.get("items") or []) if isinstance(it, dict) and it.get("es_diesel") and it.get("galones")]
+    por_placa = {}
+    for it in items:
+        pl = it.get("placa")
+        if not pl:
+            return [{}]          # alguna línea sin placa: no podemos repartir con certeza
+        agg = por_placa.setdefault(pl, {"placa": pl, "galones": 0.0, "importe_total": 0.0, "precio_unitario": it.get("precio_unitario"), "producto": it.get("producto"), "_imp_ok": True})
+        agg["galones"] += float(it["galones"])
+        if it.get("importe") is None:
+            agg["_imp_ok"] = False
+        else:
+            agg["importe_total"] += float(it["importe"])
+    if len(por_placa) < 2:
+        return [{}]
+    out = []
+    for agg in por_placa.values():
+        v = {"placa": agg["placa"], "galones": round(agg["galones"], 3), "producto": agg["producto"], "precio_unitario": agg["precio_unitario"]}
+        if agg["_imp_ok"]:
+            v["importe_total"] = round(agg["importe_total"], 2)
+        elif agg["precio_unitario"]:
+            v["importe_total"] = round(agg["galones"] * agg["precio_unitario"], 2)
+        out.append(v)
+    return out
 
 
 async def _foto_a_pdf(f: UploadFile) -> UploadFile:
