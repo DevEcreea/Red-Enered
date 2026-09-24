@@ -21,10 +21,32 @@ export default function CapturaMovil() {
       .catch((e) => setErr(e?.response?.data?.detail || "Este enlace no es válido o ya venció. Genera un QR nuevo desde la computadora."));
   }, [token]);
 
-  const agregar = (e) => {
+  // Normaliza la foto en el propio celular: la reduce a máx. 2000 px y la convierte a JPEG
+  // (así un HEIC de iPhone o una foto de 5 MB llega ligera y en un formato que el lector entiende).
+  const normalizar = (file) => new Promise((resolve) => {
+    if (!file.type.startsWith("image/") && !/\.(heic|heif|jpg|jpeg|png|webp)$/i.test(file.name || "")) return resolve(file);
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const MAX = 2000;
+      const esc = Math.min(1, MAX / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * esc); c.height = Math.round(img.height * esc);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob((b) => {
+        URL.revokeObjectURL(url);
+        if (!b) return resolve(file);
+        resolve(new File([b], (file.name || "foto").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }));
+      }, "image/jpeg", 0.88);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+  const agregar = async (e) => {
     const fs = Array.from(e.target.files || []);
-    setFotos((p) => [...p, ...fs.map((f) => ({ file: f, url: URL.createObjectURL(f) }))]);
     e.target.value = "";
+    const listas = await Promise.all(fs.map(normalizar));
+    setFotos((p) => [...p, ...listas.map((f) => ({ file: f, url: URL.createObjectURL(f) }))]);
   };
   const quitar = (i) => setFotos((p) => p.filter((_, k) => k !== i));
 

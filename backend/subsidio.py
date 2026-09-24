@@ -2278,6 +2278,7 @@ class InvoiceUpdateIn(BaseModel):
 async def invoices_upload(
     files: List[UploadFile] = File(...),
     programa: str = Form("du004"),
+    permitir_imagenes: bool = False,
     user: dict = Depends(_require_subsidio),
 ):
     """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
@@ -2320,12 +2321,21 @@ async def invoices_upload(
             results.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
             continue
         content_type = f.content_type or "application/octet-stream"
-        # Las facturas de combustible SOLO se aceptan en PDF (el QR/XML del PDF es la fuente exacta).
-        if not (content_type in COMBUSTIBLE_MIME or content[:4] == b"%PDF"):
+        # Las facturas de combustible SOLO se aceptan en PDF (el QR/XML del PDF es la fuente exacta)…
+        # salvo en la captura desde el celular (permitir_imagenes): ahí llegan FOTOS y se leen con
+        # el QR de SUNAT impreso + visión. Antes esta puerta descartaba la foto sin leerla ni
+        # guardarla, y el cliente veía "sin número" y nada en su lista.
+        es_jpg = content[:3] == b"\xff\xd8\xff"
+        es_png = content[:8] == b"\x89PNG\r\n\x1a\n"
+        es_imagen = content_type.startswith("image/") or es_jpg or es_png
+        if not (content_type in COMBUSTIBLE_MIME or content[:4] == b"%PDF" or (permitir_imagenes and es_imagen)):
             results.append({"filename": f.filename, "ok": False,
                             "error": "Solo se aceptan facturas en PDF"})
             continue
-        content_type = "application/pdf"
+        if permitir_imagenes and es_imagen and content[:4] != b"%PDF":
+            content_type = content_type if content_type.startswith("image/") else ("image/png" if es_png else "image/jpeg")
+        else:
+            content_type = "application/pdf"
 
         # Save raw file
         key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
@@ -2756,7 +2766,7 @@ async def captura_fotos(token: str, files: List[UploadFile] = File(...)):
     u = await _heredar_ruc(u)
     if c.get("empresa"):
         u = {**u, "empresa": c["empresa"]}   # respeta la empresa activa al generar el QR
-    res = await invoices_upload(files=files, programa=c.get("programa") or "du004", user=u)
+    res = await invoices_upload(files=files, programa=c.get("programa") or "du004", permitir_imagenes=True, user=u)
     items = []
     for r in res.get("items", []):
         d = r.get("data") or {}
