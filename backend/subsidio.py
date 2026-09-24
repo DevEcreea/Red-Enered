@@ -3949,6 +3949,10 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
         por_estado[val["estado"]] = por_estado.get(val["estado"], 0) + 1
         if val["estado"] != f.get("validacion_estado"):
             cambiaron += 1
+        _imp = _importe_por_placa(f)
+        if _imp is not None:
+            patch["importe_total"] = _imp
+            f = {**f, "importe_total": _imp}
         patch.update({"validacion": val, "validacion_estado": val["estado"],
                       "requiere_revision": val["requiere_revision"],
                       "periodo_du007": val.get("periodo_du007") if prog == "du007" else None})
@@ -4823,6 +4827,28 @@ async def admin_delete_vehicle(
 _CAMPOS_COMPLETA = ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor", "placa")
 
 
+def _importe_por_placa(doc: dict) -> Optional[float]:
+    """Importe de UNA fila = consumo de esa placa (galones × precio unitario). Una factura con
+    varias placas va en varias filas con la misma serie; cada fila lleva su propio importe, no
+    el total de la factura repetido (eso multiplicaba el importe del expediente). Si el importe
+    guardado difiere más de 1 % del cálculo, se corrige; si no hay precio, se respeta el dado."""
+    try:
+        g = float(doc.get("galones") or 0)
+        p = float(doc.get("precio_unitario") or 0)
+    except (TypeError, ValueError):
+        return None
+    if g <= 0 or p <= 0:
+        return None
+    calc = round(g * p, 2)
+    try:
+        actual = float(doc.get("importe_total") or 0)
+    except (TypeError, ValueError):
+        actual = 0.0
+    if actual <= 0 or abs(actual - calc) > max(1.0, calc * 0.01):
+        return calc
+    return None
+
+
 def _completitud(o: dict) -> int:
     return sum(1 for k in _CAMPOS_COMPLETA if o.get(k))
 
@@ -4927,6 +4953,10 @@ async def admin_add_invoice(
         "confianza": 1.0,
         "programa": payload.programa or "du004",
     }
+    # Importe de la fila = consumo de esa placa (galones × precio), no el total de la factura.
+    _imp = _importe_por_placa(doc)
+    if _imp is not None:
+        doc["importe_total"] = _imp
     # Validar al crear (estado + periodo DU 007), igual que cuando sube/edita el cliente.
     try:
         uids_v = await _get_company_uids(u)
@@ -4972,6 +5002,9 @@ async def admin_update_invoice(
             own = await db.subsidio_vehicles.find_one({**_own_q(t_user, uids), "placa": placa})
             patch["placa_match"] = placa if own else None
         patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _imp = _importe_por_placa({**inv, **patch})
+        if _imp is not None:
+            patch["importe_total"] = _imp
         # Revalidar con los datos corregidos, como ya hace la edición del cliente. Se usa la
         # empresa de la propia factura (multi-empresa) para flota y duplicados.
         try:
