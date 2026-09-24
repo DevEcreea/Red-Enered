@@ -3906,34 +3906,96 @@ async def admin_revalidar_invoices(user_id: str, empresa: Optional[str] = None, 
     if not filas:
         return {"revisadas": 0, "cambiaron": 0, "por_estado": {}}
 
+    return await _revalidar_expediente(u, uids, filas, promover=True)
+
+
+async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool = True) -> dict:
+    """Revalida en bloque las facturas de un expediente con las MISMAS reglas que crear/editar
+    desde el admin: (1) reclasifica el decreto por fecha (julio → DU 004, setiembre → DU 007),
+    (2) entre copias iguales la primera cargada vale y solo las posteriores son duplicadas,
+    (3) si `promover`, los borradores completos, no nulos y no rechazados pasan a confirmados."""
     from services.validador_facturas import validar_factura as _validar_re
     placas, cats = await _flota_categorias(u, uids)
     _npr = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
-    vistos = {
-        (str(f.get("ruc_emisor") or "").strip(), str(f.get("numero_documento") or "").strip().upper(),
-         _npr(f.get("placa")))
-        for f in filas if f.get("numero_documento")
-    }
+    _clave = lambda f: (str(f.get("ruc_emisor") or "").strip(), str(f.get("numero_documento") or "").strip().upper(),
+                        _npr(f.get("placa")))
+    vistos = {_clave(f) for f in filas if f.get("numero_documento")}
+    # Copia válida de cada clave: la MÁS COMPLETA y, en empate, la más antigua; el resto duplicadas.
+    primera: dict = {}
+    for f in sorted(filas, key=lambda x: (-_completitud(x), str(x.get("created_at") or ""))):
+        if f.get("numero_documento"):
+            primera.setdefault(_clave(f), f["id"])
 
-    cambiaron = 0
+    cambiaron = promovidas = reclasificadas = 0
     por_estado = {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}
     for f in filas:
         prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
-        clave = (str(f.get("ruc_emisor") or "").strip(), str(f.get("numero_documento") or "").strip().upper(),
-                 _npr(f.get("placa")))
+        patch: dict = {}
+        if f.get("fecha"):
+            try:
+                prog_fecha, _pf = _programa_de_fecha(f.get("fecha"))
+            except Exception:
+                prog_fecha = None
+            if prog_fecha in ("du004", "du007") and prog_fecha != prog:
+                prog = prog_fecha
+                patch["programa"] = prog
+                reclasificadas += 1
+        clave = _clave(f)
         numeros_sin_esta = vistos - {clave}
-        val = _validar_re(f, placas_flota=placas, categoria_por_placa=cats,
+        if f.get("numero_documento") and primera.get(clave) != f["id"]:
+            numeros_sin_esta = numeros_sin_esta | {clave}   # es una copia posterior → duplicada
+        val = _validar_re({**f, "programa": prog}, placas_flota=placas, categoria_por_placa=cats,
                           numeros_existentes=numeros_sin_esta, programa=prog)
         por_estado[val["estado"]] = por_estado.get(val["estado"], 0) + 1
         if val["estado"] != f.get("validacion_estado"):
             cambiaron += 1
-        patch = {"validacion": val, "validacion_estado": val["estado"],
-                 "requiere_revision": val["requiere_revision"]}
-        if prog == "du007":
-            patch["periodo_du007"] = val.get("periodo_du007")
+        patch.update({"validacion": val, "validacion_estado": val["estado"],
+                      "requiere_revision": val["requiere_revision"],
+                      "periodo_du007": val.get("periodo_du007") if prog == "du007" else None})
+        if promover and f.get("status") == "draft" and not f.get("invalida") and val["estado"] != "RECHAZADA" \
+                and all(f.get(k) for k in ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor", "placa")):
+            patch.update({"status": "confirmed", "confirmed_at": datetime.now(timezone.utc).isoformat(),
+                          "confirmado_por": "admin_revalidar"})
+            promovidas += 1
         await db.consumos_subsidio.update_one({"id": f["id"]}, {"$set": patch})
 
-    return {"revisadas": len(filas), "cambiaron": cambiaron, "por_estado": por_estado}
+    return {"revisadas": len(filas), "cambiaron": cambiaron, "promovidas": promovidas,
+            "reclasificadas": reclasificadas, "por_estado": por_estado}
+
+
+@subsidio_router.post("/admin/subsidio/revalidar-todos")
+async def admin_revalidar_todos(programa: Optional[str] = None, promover: int = 1,
+                                _: dict = Depends(_require_admin_enered)):
+    """Corre la revalidación en bloque sobre TODAS las empresas con facturas de subsidio.
+    Para limpiar producción de una vez: estados viejos, decreto por fecha, duplicadas y
+    borradores completos (que pasan a confirmados si promover=1)."""
+    prog_match = {"programa": "du007"} if programa == "du007" else (
+        {"programa": {"$ne": "du007"}} if programa == "du004" else {})
+    uids_con_facturas = await db.consumos_subsidio.distinct("user_id", prog_match)
+    hechos: set = set()
+    total = {"empresas": 0, "revisadas": 0, "cambiaron": 0, "promovidas": 0, "reclasificadas": 0,
+             "por_estado": {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}, "errores": []}
+    for uid in uids_con_facturas:
+        if not uid or uid in hechos:
+            continue
+        u = await db.users.find_one({"id": uid}, {"_id": 0, "password_hash": 0})
+        if not u:
+            continue
+        try:
+            uids = await _get_company_uids(u)
+            hechos.update(uids)
+            filas = await db.consumos_subsidio.find({**_own_q(u, uids), **prog_match}, {"_id": 0}).to_list(5000)
+            if not filas:
+                continue
+            r = await _revalidar_expediente(u, uids, filas, promover=bool(promover))
+            total["empresas"] += 1
+            for k in ("revisadas", "cambiaron", "promovidas", "reclasificadas"):
+                total[k] += r[k]
+            for k, v in r["por_estado"].items():
+                total["por_estado"][k] = total["por_estado"].get(k, 0) + v
+        except Exception as e:
+            total["errores"].append({"user_id": uid, "error": str(e)[:120]})
+    return total
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}/invoices/zip")
@@ -4758,6 +4820,22 @@ async def admin_delete_vehicle(
     return {"ok": True}
 
 
+_CAMPOS_COMPLETA = ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor", "placa")
+
+
+def _completitud(o: dict) -> int:
+    return sum(1 for k in _CAMPOS_COMPLETA if o.get(k))
+
+
+def _copia_mejor(a: dict, b: dict) -> bool:
+    """¿La copia `a` debe considerarse la válida frente a `b`? Más completa gana; en empate,
+    la cargada primero."""
+    ca, cb = _completitud(a), _completitud(b)
+    if ca != cb:
+        return ca > cb
+    return str(a.get("created_at") or "") < str(b.get("created_at") or "")
+
+
 async def _revalidar_consumo(u: dict, uids: list, doc: dict, excluir_id: Optional[str] = None) -> dict:
     """Corre el validador sobre un consumo con los datos ACTUALES (flota y duplicados de hoy) y
     devuelve el patch de validación. Lo usan crear/editar desde el admin, que antes NO validaban:
@@ -4771,14 +4849,34 @@ async def _revalidar_consumo(u: dict, uids: list, doc: dict, excluir_id: Optiona
     if excluir_id:
         q = {**q, "id": {"$ne": excluir_id}}
     otras = await db.consumos_subsidio.find(
-        q, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(5000)
-    vistos = {(str(o.get("ruc_emisor") or "").strip(), str(o.get("numero_documento") or "").strip().upper(),
-               _np(o.get("placa"))) for o in otras if o.get("numero_documento")}
+        q, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1, "created_at": 1,
+            "fecha": 1, "galones": 1, "importe_total": 1}).to_list(5000)
+    _clave = lambda o: (str(o.get("ruc_emisor") or "").strip(), str(o.get("numero_documento") or "").strip().upper(),
+                        _np(o.get("placa")))
+    vistos = {_clave(o) for o in otras if o.get("numero_documento")}
+    # Entre copias iguales (mismo grifo + n° + placa) gana la MÁS COMPLETA (la que el admin
+    # terminó de llenar) y, en empate, la más antigua; solo las demás son duplicadas.
+    mia = _clave(doc)
+    if doc.get("numero_documento") and mia in vistos:
+        if not any(_copia_mejor(o, doc) for o in otras if _clave(o) == mia):
+            vistos.discard(mia)
     prog = doc.get("programa") if doc.get("programa") in ("du004", "du007") else "du004"
+    patch: dict = {}
+    # Clasificar por FECHA: una factura de julio no puede ser DU 007 (empieza el 16/08) ni una
+    # de setiembre DU 004. Si la fecha manda otro decreto, se reasigna en vez de dejarla
+    # 'fuera de periodo' (y en draft) en el panel equivocado.
+    if doc.get("fecha"):
+        try:
+            prog_fecha, _pf = _programa_de_fecha(doc.get("fecha"))
+        except Exception:
+            prog_fecha = None
+        if prog_fecha in ("du004", "du007") and prog_fecha != prog:
+            prog = prog_fecha
+            patch["programa"] = prog
+            doc = {**doc, "programa": prog}
     v = _validar_adm(doc, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos, programa=prog)
-    patch = {"validacion": v, "validacion_estado": v["estado"], "requiere_revision": v["requiere_revision"]}
-    if prog == "du007":
-        patch["periodo_du007"] = v.get("periodo_du007")
+    patch.update({"validacion": v, "validacion_estado": v["estado"], "requiere_revision": v["requiere_revision"]})
+    patch["periodo_du007"] = v.get("periodo_du007") if prog == "du007" else None
     return patch
 
 
@@ -4835,6 +4933,11 @@ async def admin_add_invoice(
         doc.update(await _revalidar_consumo(u, uids_v, doc))
     except Exception as _e:
         logger.warning(f"Validación al crear factura desde admin falló: {_e}")
+    if doc.get("validacion_estado") == "RECHAZADA":
+        # Rechazada por el validador (fuera de periodo, duplicada, placa ajena…): no se da por
+        # confirmada; queda en borrador con el motivo visible para que el admin la corrija.
+        doc["status"] = "draft"
+        doc.pop("confirmed_at", None)
     await db.consumos_subsidio.insert_one(doc)
     doc.pop("_id", None)
     return {"ok": True, "invoice": doc}
@@ -4887,7 +4990,11 @@ async def admin_update_invoice(
             patch["confirmed_at"] = datetime.now(timezone.utc).isoformat()
             patch["confirmado_por"] = "admin"
         await target_collection.update_one({"id": invoice_id}, {"$set": patch})
-        return {"ok": True, "source": "consumos_subsidio", "status": patch.get("status", inv.get("status"))}
+        return {"ok": True, "source": "consumos_subsidio",
+                "status": patch.get("status", inv.get("status")),
+                "validacion_estado": patch.get("validacion_estado", inv.get("validacion_estado")),
+                "motivos": (patch.get("validacion") or inv.get("validacion") or {}).get("motivos", []),
+                "programa": patch.get("programa", inv.get("programa") or "du004")}
 
     # --- 2. Si no está en consumos_subsidio, buscar en db.invoices ---
     inv_enered = await db.invoices.find_one({"id": invoice_id})

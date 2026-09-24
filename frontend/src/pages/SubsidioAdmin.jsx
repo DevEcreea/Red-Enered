@@ -1284,6 +1284,10 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
         estacion: invEstacion.trim(), ruc_emisor: invRuc.trim(), ciudad: invCiudad.trim(), programa,
       };
       let creadas = 0, actualizadas = 0, archivoAsociado = "";
+      const resultados = [];
+      const etiqueta = (r) => r.status === "confirmed" ? "CONFIRMADA" : (r.validacion_estado || "guardada");
+      const movida = (r) => (r && r.programa && r.programa !== programa)
+        ? ` · se movió al ${r.programa === "du007" ? "DU 007" : "DU 004"} por su fecha` : "";
       for (const c of consumos) {
         const payload = {
           ...header,
@@ -1297,12 +1301,17 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
           motivo_invalidez_otros: c.invalida && c.motivos_invalidez.includes("otros") ? c.motivo_invalidez_otros.trim() : "",
         };
         if (c.id) {
-          await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${c.id}`, payload);
+          const res = await api.put(`/admin/subsidio/expedientes/${user.id}/invoices/${c.id}`, payload);
           actualizadas++;
+          const r = res?.data || {};
+          resultados.push(`${payload.placa || "—"}: ${etiqueta(r)}${(r.motivos && r.motivos[0]) ? " — " + r.motivos[0] : ""}${movida(r)}`);
         } else {
           const res = await api.post(`/admin/subsidio/expedientes/${user.id}/invoices${qEmp}`, payload);
-          const nuevoId = res?.data?.invoice?.id;
+          const inv = res?.data?.invoice || {};
+          const nuevoId = inv.id;
           creadas++;
+          const m0 = inv.validacion && inv.validacion.motivos && inv.validacion.motivos[0];
+          resultados.push(`${payload.placa || "—"}: ${etiqueta(inv)}${m0 ? " — " + m0 : ""}${movida(inv)}`);
           if (nuevoId && invArchivoSel) {
             // El mismo documento del cliente se asocia a CADA consumo nuevo (una placa cubierta
             // por esa factura), así el visor muestra el PDF real en todas.
@@ -1312,9 +1321,10 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
         }
       }
 
-      alert(archivoAsociado
+      alert((archivoAsociado
         ? `Factura guardada (${creadas} nueva(s), ${actualizadas} actualizada(s)) y asociada al archivo "${archivoAsociado}".`
-        : `Factura guardada (${creadas} nueva(s), ${actualizadas} actualizada(s)).`);
+        : `Factura guardada (${creadas} nueva(s), ${actualizadas} actualizada(s)).`)
+        + (resultados.length ? `\n\nResultado:\n${resultados.join("\n")}` : ""));
       setShowInvoiceForm(false);
       await onRefresh();
     } catch (err) {
@@ -1943,10 +1953,27 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
                   ) : (
                     invoices.map((i) => (
                       <tr key={i.id} className="hover:bg-neutral-50/50" data-testid={`manual-invoice-row-${i.id}`}>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700" : i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                            {i.invalida ? "NO APLICA" : i.status === "confirmed" ? "CONF" : "DRAFT"}
-                          </span>
+                        <td className="px-3 py-2 whitespace-nowrap align-top">
+                          {(() => {
+                            // Antes solo decía DRAFT sin explicar por qué no se confirmaba. Ahora muestra el
+                            // veredicto del validador (rechazada/observada) y el motivo debajo.
+                            const val = i.validacion_estado || "";
+                            const motivos = (i.validacion && i.validacion.motivos) || [];
+                            let txt = "DRAFT", cls = "bg-amber-100 text-amber-700";
+                            if (i.invalida) { txt = "NO APLICA"; cls = "bg-red-100 text-red-700"; }
+                            else if (i.status === "confirmed") { txt = "CONF"; cls = "bg-emerald-100 text-emerald-700"; }
+                            else if (val === "RECHAZADA") { txt = "RECHAZADA"; cls = "bg-red-100 text-red-700"; }
+                            else if (val === "OBSERVADA") { txt = "OBSERVADA"; cls = "bg-amber-100 text-amber-700"; }
+                            const verMotivo = !i.invalida && i.status !== "confirmed" && motivos.length > 0;
+                            return (
+                              <>
+                                <span title={motivos.join("\n")} className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${cls}`}>{txt}</span>
+                                {verMotivo && (
+                                  <div className="text-[10px] text-red-600 max-w-[230px] whitespace-normal leading-tight mt-1">{motivos[0]}</div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2 font-mono font-bold text-neutral-900">{i.numero_documento || "—"}</td>
                         <td className="px-3 py-2 text-neutral-700">{i.fecha ? fmtDate(i.fecha) : "—"}</td>
