@@ -712,8 +712,18 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
   }), [invoices, fPlaca, fEstado, fMes, fProducto, fRuc, fEstacion, fDoc]);
   const hayFiltros = fPlaca || fEstado || fMes || fProducto || fRuc || fEstacion || fDoc;
 
-  const totGal = filtradas.reduce((a, i) => a + (Number(i.galones) || 0), 0);
-  const totImp = filtradas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
+  // Mismo criterio que el resumen superior (backend _expediente_stats): las NULAS nunca;
+  // DU 007 = todo lo no rechazado; DU 004 = confirmadas. Antes la tabla sumaba TODAS las
+  // filas (rechazadas y nulas incluidas) y no cuadraba con las tarjetas de arriba.
+  const esReconocida = (i) => !i.invalida && (programa === "du007"
+    ? (i.validacion_estado || "") !== "RECHAZADA"
+    : i.status === "confirmed");
+  const reconocidas = filtradas.filter(esReconocida);
+  const noRec = filtradas.filter((i) => !esReconocida(i));
+  const totGal = reconocidas.reduce((a, i) => a + (Number(i.galones) || 0), 0);
+  const totImp = reconocidas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
+  const noRecGal = noRec.reduce((a, i) => a + (Number(i.galones) || 0), 0);
+  const noRecImp = noRec.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
 
   const zipHref = () => {
     const p = new URLSearchParams({ t: dlToken, programa });
@@ -852,7 +862,12 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
         <tfoot>
           <tr className="bg-neutral-50 border-t-2 border-neutral-200 font-bold">
             <td className="px-3 py-2.5 text-neutral-500 uppercase text-[10px] tracking-widest" colSpan={4}>
-              Total · {filtradas.length} factura{filtradas.length === 1 ? "" : "s"}
+              Reconocido · {reconocidas.length} de {filtradas.length} factura{filtradas.length === 1 ? "" : "s"}
+              {noRec.length > 0 && (
+                <span className="block normal-case tracking-normal text-neutral-400 font-medium mt-0.5">
+                  No reconocido · {noRec.length} (rechazadas, nulas o sin confirmar): {num(noRecGal)} gal · S/ {num(noRecImp)}
+                </span>
+              )}
             </td>
             <td className="px-3 py-2.5 text-right text-brand">{num(totGal)} gal</td>
             <td className="px-3 py-2.5 text-right text-emerald-700">S/ {num(totImp)}</td>

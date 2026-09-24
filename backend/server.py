@@ -5320,7 +5320,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.12-constancia-apartado",
+        "version": "1.9.13-du007-sumas",
     }
 
 # ============================================================

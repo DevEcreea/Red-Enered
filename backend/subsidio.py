@@ -2703,13 +2703,17 @@ async def du007_estado(user: dict = Depends(_require_subsidio)):
     uids = await _get_company_uids(user)
     rows = await db.consumos_subsidio.find(
         {**_own_q(user, uids), "programa": "du007"},
-        {"_id": 0, "periodo_du007": 1, "galones": 1, "importe_total": 1, "validacion_estado": 1},
+        {"_id": 0, "periodo_du007": 1, "galones": 1, "importe_total": 1, "validacion_estado": 1, "invalida": 1},
     ).to_list(2000)
     periodos = {1: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0},
                 2: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0},
                 3: {"facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0}}
-    fuera_periodo = rechazadas = 0
+    fuera_periodo = rechazadas = nulas = 0
     for r in rows:
+        if r.get("invalida"):
+            # Marcada NULA por el admin: no cuenta ni suma.
+            nulas += 1
+            continue
         p = r.get("periodo_du007")
         if p not in periodos:
             # Fecha de emisión fuera de los 3 periodos: no se agrupa ni suma.
@@ -2729,7 +2733,7 @@ async def du007_estado(user: dict = Depends(_require_subsidio)):
     ).to_list(10)
     return {"periodos": [{"periodo": k, **{kk: round(vv, 2) if isinstance(vv, float) else vv
                                             for kk, vv in v.items()}} for k, v in periodos.items()],
-            "fuera_periodo": fuera_periodo, "rechazadas": rechazadas,
+            "fuera_periodo": fuera_periodo, "rechazadas": rechazadas, "nulas": nulas,
             "declaraciones": decls}
 
 
@@ -3531,7 +3535,7 @@ async def admin_list_expedientes(
     inv_agg = await db.consumos_subsidio.aggregate([
         {"$match": {"user_id": {"$in": uids}, **prog_match}},
         {"$group": {
-            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status", "val": "$validacion_estado"},
+            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status", "val": "$validacion_estado", "inv": "$invalida"},
             "count": {"$sum": 1},
             "gal": {"$sum": "$galones"},
             "imp": {"$sum": "$importe_total"}
@@ -3542,16 +3546,17 @@ async def admin_list_expedientes(
     for r in inv_agg:
         k = _emp_key(r["_id"]["u"], r["_id"].get("e"), base_de)
         status = r["_id"]["status"]
+        nula = bool(r["_id"].get("inv"))  # marcada NULA por el admin: nunca cuenta
         if k not in inv_map:
             inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
         if status == "draft":
             inv_map[k]["draft"] += r["count"]
-        elif status == "confirmed":
+        elif status == "confirmed" and not nula:
             inv_map[k]["conf"] += r["count"]
         # DU 007 no tiene paso de "Confirmar" (queda en draft para siempre): se cuenta como
         # "reconocido" todo lo que el validador no rechazó, igual criterio que el expediente
-        # y que /subsidio/du007/estado. DU 004 sigue exigiendo status=confirmed.
-        reconocida = (r["_id"].get("val") != "RECHAZADA") if programa == "du007" else (status == "confirmed")
+        # y que /subsidio/du007/estado. DU 004 sigue exigiendo status=confirmed. NULAS nunca.
+        reconocida = (not nula) and ((r["_id"].get("val") != "RECHAZADA") if programa == "du007" else (status == "confirmed"))
         if reconocida:
             inv_map[k]["gal"] += r.get("gal", 0) or 0
             inv_map[k]["imp"] += r.get("imp", 0) or 0
@@ -3658,10 +3663,12 @@ def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
     criterio que /subsidio/du007/estado usa para el cliente (todo lo que no sea
     RECHAZADA). Antes esto se computaba solo por status=confirmed y el DU 007 siempre
     mostraba S/ 0 arriba aunque la tabla de abajo sí sumara las facturas."""
+    # Las facturas marcadas NULAS (invalida) nunca cuentan, en ningún decreto: antes seguían
+    # sumando (con galones en 0 pero con su importe) y entraban en 'reconocidas'.
     if programa == "du007":
-        cuenta = lambda i: (i.get("validacion_estado") or "") != "RECHAZADA"
+        cuenta = lambda i: (not i.get("invalida")) and (i.get("validacion_estado") or "") != "RECHAZADA"
     else:
-        cuenta = lambda i: i.get("status") == "confirmed"
+        cuenta = lambda i: (not i.get("invalida")) and i.get("status") == "confirmed"
     return {
         "invoices_draft": sum(1 for i in invoices if i.get("status") == "draft"),
         "invoices_confirmed": sum(1 for i in invoices if cuenta(i)),
@@ -4751,6 +4758,30 @@ async def admin_delete_vehicle(
     return {"ok": True}
 
 
+async def _revalidar_consumo(u: dict, uids: list, doc: dict, excluir_id: Optional[str] = None) -> dict:
+    """Corre el validador sobre un consumo con los datos ACTUALES (flota y duplicados de hoy) y
+    devuelve el patch de validación. Lo usan crear/editar desde el admin, que antes NO validaban:
+    la factura se quedaba con el veredicto del día del OCR (p. ej. 'faltan datos') aunque el
+    admin ya la hubiera completado, y en DU 007 sin periodo asignado (el cliente la veía
+    'fuera de periodo' mientras el admin la contaba como reconocida)."""
+    from services.validador_facturas import validar_factura as _validar_adm
+    placas, cats = await _flota_categorias(u, uids)
+    _np = lambda x: _re.sub(r"[^A-Z0-9]", "", (x or "").upper())
+    q = _own_q(u, uids)
+    if excluir_id:
+        q = {**q, "id": {"$ne": excluir_id}}
+    otras = await db.consumos_subsidio.find(
+        q, {"_id": 0, "ruc_emisor": 1, "numero_documento": 1, "placa": 1}).to_list(5000)
+    vistos = {(str(o.get("ruc_emisor") or "").strip(), str(o.get("numero_documento") or "").strip().upper(),
+               _np(o.get("placa"))) for o in otras if o.get("numero_documento")}
+    prog = doc.get("programa") if doc.get("programa") in ("du004", "du007") else "du004"
+    v = _validar_adm(doc, placas_flota=placas, categoria_por_placa=cats, numeros_existentes=vistos, programa=prog)
+    patch = {"validacion": v, "validacion_estado": v["estado"], "requiere_revision": v["requiere_revision"]}
+    if prog == "du007":
+        patch["periodo_du007"] = v.get("periodo_du007")
+    return patch
+
+
 @subsidio_router.post("/admin/subsidio/expedientes/{user_id}/invoices")
 async def admin_add_invoice(
     user_id: str,
@@ -4798,6 +4829,12 @@ async def admin_add_invoice(
         "confianza": 1.0,
         "programa": payload.programa or "du004",
     }
+    # Validar al crear (estado + periodo DU 007), igual que cuando sube/edita el cliente.
+    try:
+        uids_v = await _get_company_uids(u)
+        doc.update(await _revalidar_consumo(u, uids_v, doc))
+    except Exception as _e:
+        logger.warning(f"Validación al crear factura desde admin falló: {_e}")
     await db.consumos_subsidio.insert_one(doc)
     doc.pop("_id", None)
     return {"ok": True, "invoice": doc}
@@ -4832,6 +4869,13 @@ async def admin_update_invoice(
             own = await db.subsidio_vehicles.find_one({**_own_q(t_user, uids), "placa": placa})
             patch["placa_match"] = placa if own else None
         patch["updated_at"] = datetime.now(timezone.utc).isoformat()
+        # Revalidar con los datos corregidos, como ya hace la edición del cliente. Se usa la
+        # empresa de la propia factura (multi-empresa) para flota y duplicados.
+        try:
+            u_v = {"id": user_id, "empresa": inv.get("empresa") or t_user.get("empresa")}
+            patch.update(await _revalidar_consumo(u_v, uids, {**inv, **patch}, excluir_id=invoice_id))
+        except Exception as _e:
+            logger.warning(f"Revalidación al editar factura desde admin falló: {_e}")
         await target_collection.update_one({"id": invoice_id}, {"$set": patch})
         return {"ok": True, "source": "consumos_subsidio"}
 
