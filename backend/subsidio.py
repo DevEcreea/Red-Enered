@@ -2278,7 +2278,6 @@ class InvoiceUpdateIn(BaseModel):
 async def invoices_upload(
     files: List[UploadFile] = File(...),
     programa: str = Form("du004"),
-    permitir_imagenes: bool = False,
     user: dict = Depends(_require_subsidio),
 ):
     """Recibe N facturas (imágenes o PDFs), las pasa por OCR Gemini Vision,
@@ -2321,21 +2320,13 @@ async def invoices_upload(
             results.append({"filename": f.filename, "ok": False, "error": "Archivo > 20MB"})
             continue
         content_type = f.content_type or "application/octet-stream"
-        # Las facturas de combustible SOLO se aceptan en PDF (el QR/XML del PDF es la fuente exacta)…
-        # salvo en la captura desde el celular (permitir_imagenes): ahí llegan FOTOS y se leen con
-        # el QR de SUNAT impreso + visión. Antes esta puerta descartaba la foto sin leerla ni
-        # guardarla, y el cliente veía "sin número" y nada en su lista.
-        es_jpg = content[:3] == b"\xff\xd8\xff"
-        es_png = content[:8] == b"\x89PNG\r\n\x1a\n"
-        es_imagen = content_type.startswith("image/") or es_jpg or es_png
-        if not (content_type in COMBUSTIBLE_MIME or content[:4] == b"%PDF" or (permitir_imagenes and es_imagen)):
+        # Las facturas de combustible SOLO se aceptan en PDF (el QR/XML del PDF es la fuente exacta).
+        # Las fotos del celular llegan ya convertidas a PDF por la captura móvil (ver captura_fotos).
+        if not (content_type in COMBUSTIBLE_MIME or content[:4] == b"%PDF"):
             results.append({"filename": f.filename, "ok": False,
                             "error": "Solo se aceptan facturas en PDF"})
             continue
-        if permitir_imagenes and es_imagen and content[:4] != b"%PDF":
-            content_type = content_type if content_type.startswith("image/") else ("image/png" if es_png else "image/jpeg")
-        else:
-            content_type = "application/pdf"
+        content_type = "application/pdf"
 
         # Save raw file
         key = _subsidio_key(user["id"], "factura_subsidio", None, f.filename or "factura")
@@ -2751,6 +2742,27 @@ async def captura_info(token: str):
             "expires_at": c.get("expires_at"), "recibidas": c.get("recibidas", 0)}
 
 
+async def _foto_a_pdf(f: UploadFile) -> UploadFile:
+    """Si el archivo es una imagen (JPG/PNG/WEBP/HEIC…), la envuelve en un PDF de una página con la
+    imagen a tamaño completo. Si ya es PDF u otra cosa, lo devuelve tal cual."""
+    import io as _io
+    from starlette.datastructures import UploadFile as _UF, Headers as _H
+    content = await f.read()
+    if content[:4] == b"%PDF":
+        return _UF(file=_io.BytesIO(content), filename=f.filename, headers=_H({"content-type": "application/pdf"}))
+    try:
+        from PIL import Image as _Img, ImageOps as _Ops
+        img = _Img.open(_io.BytesIO(content))
+        img = _Ops.exif_transpose(img).convert("RGB")   # respeta la orientación de la cámara
+        buf = _io.BytesIO()
+        img.save(buf, format="PDF", resolution=150.0)
+        nombre = (f.filename or "foto").rsplit(".", 1)[0] + ".pdf"
+        return _UF(file=_io.BytesIO(buf.getvalue()), filename=nombre, headers=_H({"content-type": "application/pdf"}))
+    except Exception as _e:
+        logger.warning(f"No se pudo convertir la foto a PDF ({f.filename}): {_e}")
+        return _UF(file=_io.BytesIO(content), filename=f.filename, headers=_H({"content-type": f.content_type or "application/octet-stream"}))
+
+
 @subsidio_router.post("/captura/{token}/fotos")
 async def captura_fotos(token: str, files: List[UploadFile] = File(...)):
     """Público: recibe las fotos tomadas desde el celular y las procesa en nombre del
@@ -2766,7 +2778,11 @@ async def captura_fotos(token: str, files: List[UploadFile] = File(...)):
     u = await _heredar_ruc(u)
     if c.get("empresa"):
         u = {**u, "empresa": c["empresa"]}   # respeta la empresa activa al generar el QR
-    res = await invoices_upload(files=files, programa=c.get("programa") or "du004", permitir_imagenes=True, user=u)
+    # Cada FOTO se convierte a un PDF de una página (la plataforma trabaja solo con PDF: visor,
+    # ZIP para la ATU, lector de QR). El pipeline luego lee el QR de SUNAT impreso y, si hace
+    # falta, usa visión sobre la página.
+    files = [await _foto_a_pdf(f) for f in files]
+    res = await invoices_upload(files=files, programa=c.get("programa") or "du004", user=u)
     items = []
     for r in res.get("items", []):
         d = r.get("data") or {}
