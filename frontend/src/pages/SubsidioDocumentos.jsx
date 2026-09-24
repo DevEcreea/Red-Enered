@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 import ConstanciaApartado from "../components/ConstanciaApartado";
+import QrSubidaCelular from "../components/QrSubidaCelular";
 
 // --- Factura subida: muestra lo que ENERED leyó del comprobante y su validación ---
 const ESTADO_FACTURA = {
@@ -838,6 +839,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
             {uploading ? (<><Loader2 className="w-4 h-4 animate-spin" /> Procesando {uploadProgress.done}/{uploadProgress.total}…</>) : (<><Upload className="w-4 h-4" /> {items.length === 0 ? "Subir facturas" : "Adjuntar más"}</>)}
             <input ref={fileRef} type="file" hidden multiple accept="application/pdf,.pdf" onChange={handleUpload} disabled={uploading} data-testid="combustible-upload-input" />
           </label>
+          <QrSubidaCelular programa="du004" onNuevas={async () => { await load(); onAnyChange?.(); }} />
         </div>
         {uploading && uploadProgress.total > 0 && (
           <div className="mt-3 h-2 bg-neutral-100 rounded-full overflow-hidden"><div className="h-full bg-brand transition-all" style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} /></div>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import QrSubidaCelular from "../components/QrSubidaCelular";
 import { useAuth } from "../context/AuthContext";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 import {
@@ -162,6 +163,7 @@ export default function SubsidioDU007() {
                 {subiendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 {subiendo ? "Leyendo facturas…" : "Subir facturas (PDF)"}
               </button>
+              <QrSubidaCelular programa="du007" onNuevas={load} />
             </div>
             {aviso && (
               <div className={`mt-3 text-sm rounded-lg px-4 py-2.5 font-semibold border ${

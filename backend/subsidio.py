@@ -2696,6 +2696,103 @@ def _combustible_to_subsidio(r: dict) -> dict:
         "_origen": "combustible"
     }
 
+# ============================================================
+# Captura desde el celular (QR): el cliente escanea un QR en la PC, abre una página
+# móvil SIN login (el enlace temporal lo autoriza), toma fotos de sus facturas y
+# entran al MISMO pipeline de OCR/validación que la carga normal, como borradores.
+# ============================================================
+CAPTURA_TTL_MIN = 20
+
+
+def _ahora_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _captura_valida(token: str) -> dict:
+    c = await db.capturas_movil.find_one({"token": token}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Enlace de captura no válido")
+    if c.get("estado") != "abierta" or str(c.get("expires_at") or "") < _ahora_iso():
+        raise HTTPException(status_code=410, detail="Este enlace ya venció. Genera un QR nuevo desde la computadora.")
+    return c
+
+
+@subsidio_router.post("/subsidio/captura/sesion")
+async def captura_crear(payload: Optional[dict] = None, user: dict = Depends(_require_subsidio)):
+    """Crea un enlace temporal de captura (para el QR) ligado a la empresa activa y al decreto."""
+    import secrets as _sec
+    from datetime import timedelta as _td
+    programa = (payload or {}).get("programa") or "du004"
+    programa = programa if programa in ("du004", "du007") else "du004"
+    token = _sec.token_urlsafe(6)
+    now = datetime.now(timezone.utc)
+    doc = {"token": token, "user_id": user["id"], "empresa": user.get("empresa"), "programa": programa,
+           "created_at": now.isoformat(), "expires_at": (now + _td(minutes=CAPTURA_TTL_MIN)).isoformat(),
+           "estado": "abierta", "recibidas": 0, "items": []}
+    await db.capturas_movil.insert_one(doc)
+    return {"token": token, "programa": programa, "expires_at": doc["expires_at"], "ttl_min": CAPTURA_TTL_MIN}
+
+
+@subsidio_router.get("/captura/{token}")
+async def captura_info(token: str):
+    """Público: datos mínimos para la página móvil (sin exponer nada sensible)."""
+    c = await _captura_valida(token)
+    return {"ok": True, "empresa": c.get("empresa"), "programa": c.get("programa"),
+            "expires_at": c.get("expires_at"), "recibidas": c.get("recibidas", 0)}
+
+
+@subsidio_router.post("/captura/{token}/fotos")
+async def captura_fotos(token: str, files: List[UploadFile] = File(...)):
+    """Público: recibe las fotos tomadas desde el celular y las procesa en nombre del
+    cliente dueño del enlace, con el mismo OCR y validador de la carga normal."""
+    c = await _captura_valida(token)
+    if not files:
+        raise HTTPException(status_code=400, detail="Sin fotos")
+    if len(files) > 20:
+        raise HTTPException(status_code=400, detail="Máximo 20 fotos por envío")
+    u = await db.users.find_one({"id": c["user_id"]}, {"_id": 0, "password_hash": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    u = await _heredar_ruc(u)
+    if c.get("empresa"):
+        u = {**u, "empresa": c["empresa"]}   # respeta la empresa activa al generar el QR
+    res = await invoices_upload(files=files, programa=c.get("programa") or "du004", user=u)
+    items = []
+    for r in res.get("items", []):
+        d = r.get("data") or {}
+        items.append({"id": r.get("id"), "archivo": r.get("filename"), "ok": bool(r.get("ok")),
+                      "numero": d.get("numero_documento"), "placa": d.get("placa"),
+                      "galones": d.get("galones"), "importe": d.get("importe_total"),
+                      "estado": d.get("validacion_estado"), "fecha": d.get("fecha"),
+                      "recibida_at": _ahora_iso()})
+    await db.capturas_movil.update_one(
+        {"token": token},
+        {"$inc": {"recibidas": len(items)}, "$push": {"items": {"$each": items}}, "$set": {"ultima_at": _ahora_iso()}})
+    return {"ok": True, "procesadas": len(items), "items": items}
+
+
+@subsidio_router.get("/subsidio/captura/{token}/estado")
+async def captura_estado(token: str, user: dict = Depends(_require_subsidio)):
+    """La PC consulta cuántas fotos llegaron y qué se leyó (para refrescar su lista)."""
+    c = await db.capturas_movil.find_one({"token": token}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Enlace no válido")
+    uids = await _get_company_uids(user)
+    if c.get("user_id") not in uids:
+        raise HTTPException(status_code=403, detail="Este enlace no es de tu empresa")
+    vencido = str(c.get("expires_at") or "") < _ahora_iso()
+    return {"recibidas": c.get("recibidas", 0), "items": c.get("items", []), "estado": c.get("estado"),
+            "expires_at": c.get("expires_at"), "vencido": vencido}
+
+
+@subsidio_router.post("/subsidio/captura/{token}/cerrar")
+async def captura_cerrar(token: str, user: dict = Depends(_require_subsidio)):
+    uids = await _get_company_uids(user)
+    await db.capturas_movil.update_one({"token": token, "user_id": {"$in": uids}},
+                                       {"$set": {"estado": "cerrada", "cerrada_at": _ahora_iso()}})
+    return {"ok": True}
+
+
 @subsidio_router.get("/subsidio/du007/estado")
 async def du007_estado(user: dict = Depends(_require_subsidio)):
     """Estado del DU 007 del cliente: facturas por periodo (conteo, galones, monto) y

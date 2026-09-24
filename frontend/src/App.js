@@ -61,6 +61,7 @@ import SubsidioAdmin from "./pages/SubsidioAdmin";
 import Bitacora from "./pages/Bitacora";
 import ConductorApp from "./pages/ConductorApp";
 import Privacidad from "./pages/Privacidad";
+import CapturaMovil from "./pages/CapturaMovil";
 import { useAuth } from "./context/AuthContext";
 import ConstanciaModal from "./components/ConstanciaModal";
 
@@ -182,6 +183,7 @@ function App() {
           <Route path="/admin/atu" element={<Shell roles={["admin_enered"]}><AdminConexionATU /></Shell>} />
           <Route path="/admin/sire" element={<Shell roles={["admin_enered"]}><AdminSire /></Shell>} />
           <Route path="/privacidad" element={<Privacidad />} />
+          <Route path="/captura/:token" element={<CapturaMovil />} />
           <Route path="*" element={<RootRedirect />} />
         </Routes>
       </BrowserRouter>
