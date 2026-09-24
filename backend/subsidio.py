@@ -4876,8 +4876,18 @@ async def admin_update_invoice(
             patch.update(await _revalidar_consumo(u_v, uids, {**inv, **patch}, excluir_id=invoice_id))
         except Exception as _e:
             logger.warning(f"Revalidación al editar factura desde admin falló: {_e}")
+        # Si el admin completó una factura que estaba en borrador, pasa a CONFIRMADA. Antes se
+        # quedaba en draft para siempre (solo el cliente confirmaba) y no contaba en el expediente
+        # aunque tuviera todos los datos. No se confirma si es nula o si el validador la rechazó.
+        futuro = {**inv, **patch}
+        completa = all(futuro.get(k) for k in ("fecha", "numero_documento", "galones", "importe_total", "ruc_emisor", "placa"))
+        if (inv.get("status") == "draft" and completa and not futuro.get("invalida")
+                and futuro.get("validacion_estado") != "RECHAZADA"):
+            patch["status"] = "confirmed"
+            patch["confirmed_at"] = datetime.now(timezone.utc).isoformat()
+            patch["confirmado_por"] = "admin"
         await target_collection.update_one({"id": invoice_id}, {"$set": patch})
-        return {"ok": True, "source": "consumos_subsidio"}
+        return {"ok": True, "source": "consumos_subsidio", "status": patch.get("status", inv.get("status"))}
 
     # --- 2. Si no está en consumos_subsidio, buscar en db.invoices ---
     inv_enered = await db.invoices.find_one({"id": invoice_id})

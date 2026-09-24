@@ -1123,16 +1123,22 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
   // Auto-fetch Razón Social from SUNAT. Usa /ruc/{ruc} (json.pe) — el endpoint viejo
   // /sunat/ruc (decolecta.com) está devolviendo 401 del proveedor, así que se reemplaza
   // por el mismo que ya usa la libreta de Contactos de Viajes, que sí funciona.
+  // La razón social se completa SOLA desde el RUC y queda bloqueada (el RUC manda). Solo si
+  // SUNAT no devuelve nada se desbloquea para escribirla a mano.
+  const [rucBusqueda, setRucBusqueda] = useState("idle"); // idle | buscando | ok | no_encontrado
   useEffect(() => {
     const ruc = invRuc.trim();
-    if (ruc.length === 11) {
-      api.get(`/ruc/${ruc}`).then(res => {
-        if (res.data && res.data.razon_social) {
-          setInvEstacion(res.data.razon_social);
-        }
-      }).catch(() => {});
-    }
+    if (ruc.length !== 11) { setRucBusqueda("idle"); return; }
+    let vivo = true;
+    setRucBusqueda("buscando");
+    api.get(`/ruc/${ruc}`).then(res => {
+      if (!vivo) return;
+      if (res.data && res.data.razon_social) { setInvEstacion(res.data.razon_social); setRucBusqueda("ok"); }
+      else setRucBusqueda("no_encontrado");
+    }).catch(() => { if (vivo) setRucBusqueda("no_encontrado"); });
+    return () => { vivo = false; };
   }, [invRuc]);
+  const razonBloqueada = rucBusqueda !== "no_encontrado";
 
   const saveRepresentante = async (e) => {
     e.preventDefault();
@@ -1604,25 +1610,33 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
                         />
                       </div>
                       <div className="space-y-1">
+                        <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={invRuc}
+                          onChange={(e) => setInvRuc(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                          placeholder="Ej. 20601234567"
+                          maxLength="11"
+                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                          data-testid="inv-ruc"
+                        />
+                        <p className="text-[10px] text-neutral-400">Escribe el RUC y la razón social se completa sola.</p>
+                      </div>
+                      <div className="space-y-1">
                         <label className="text-xs font-bold text-neutral-600">Proveedor (Razón Social)</label>
                         <input
                           type="text"
                           value={invEstacion}
                           onChange={(e) => setInvEstacion(e.target.value)}
-                          placeholder="Ej. GRIFO PRIMAX S.A."
-                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
+                          readOnly={razonBloqueada}
+                          placeholder={rucBusqueda === "buscando" ? "Buscando en SUNAT…" : "Se completa con el RUC"}
+                          className={`w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm ${razonBloqueada ? "bg-neutral-100 text-neutral-700 cursor-not-allowed" : ""}`}
+                          data-testid="inv-razon"
                         />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-neutral-600">RUC Proveedor</label>
-                        <input
-                          type="text"
-                          value={invRuc}
-                          onChange={(e) => setInvRuc(e.target.value)}
-                          placeholder="Ej. 20601234567"
-                          maxLength="11"
-                          className="w-full h-10 px-3 border border-neutral-300 rounded-lg text-sm"
-                        />
+                        {rucBusqueda === "no_encontrado" && (
+                          <p className="text-[10px] text-amber-700">RUC no encontrado en SUNAT: revisa el número o escribe la razón social a mano.</p>
+                        )}
                       </div>
                     </div>
 
