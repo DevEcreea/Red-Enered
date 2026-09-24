@@ -63,7 +63,24 @@ def _emergent_key() -> str:
 
 
 def _pdf_first_page_to_png_bytes(pdf_bytes: bytes) -> Optional[bytes]:
-    """Convert first page of PDF to PNG bytes. Returns None if pdf2image not available."""
+    """Primera página del PDF → PNG. Usa PyMuPDF (sin dependencias del sistema, funciona en Render)
+    y solo si falla cae a pdf2image (necesita poppler). Rasteriza a ~2000 px en el lado largo para
+    que una foto de celular envuelta en PDF llegue nítida al modelo de visión."""
+    try:
+        try:
+            import pymupdf
+        except ImportError:  # versiones antiguas
+            import fitz as pymupdf
+        with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
+            if doc.page_count == 0:
+                return None
+            page = doc[0]
+            lado = max(page.rect.width, page.rect.height) or 1
+            zoom = max(1.0, min(4.0, 2000.0 / lado))
+            # JPEG: una foto de celular en PNG pasa fácil de 5 MB (límite de los modelos de visión)
+            return page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False).tobytes("jpeg", jpg_quality=92)
+    except Exception as e:
+        logger.warning(f"PDF→PNG con PyMuPDF falló ({e}); intento con pdf2image")
     try:
         from pdf2image import convert_from_bytes
         images = convert_from_bytes(pdf_bytes, dpi=200, first_page=1, last_page=1)
@@ -96,8 +113,99 @@ def _normalize_to_image(content: bytes, content_type: str) -> tuple[bytes, str]:
     return content, "image/png"
 
 
+def _proveedor_vision() -> str:
+    """Motor de visión disponible según la clave configurada: 'claude' (ANTHROPIC_API_KEY),
+    'gemini' (GOOGLE_API_KEY / GEMINI_API_KEY) o 'legacy' (EMERGENT_LLM_KEY con el SDK viejo)."""
+    _ensure_load_dotenv()
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "claude"
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        return "gemini"
+    return "legacy"
+
+
+def _a_imagen_png(content: bytes, content_type: str) -> tuple[bytes, str]:
+    """Cualquier entrada (PDF o imagen) → bytes de imagen + mime, para mandarla al modelo."""
+    ct = (content_type or "").lower()
+    if "pdf" in ct or content[:4] == b"%PDF":
+        img = _pdf_first_page_to_png_bytes(content)
+        if not img:
+            raise RuntimeError("No se pudo convertir el PDF a imagen.")
+        return img, ("image/jpeg" if img[:3] == b"\xff\xd8\xff" else "image/png")
+    return _normalize_to_image(content, content_type)
+
+
+def _parsear_json(text: str) -> dict:
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.lower().startswith("json"):
+            cleaned = cleaned[4:].strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        import re as _re
+        m = _re.search(r"\{.*\}", cleaned, _re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                pass
+    return {}
+
+
+async def _extract_claude(content: bytes, content_type: str) -> dict:
+    """Lectura con Claude (Anthropic) — modelo de visión actual, entrada imagen base64."""
+    import base64
+    from anthropic import AsyncAnthropic
+    img, mime = _a_imagen_png(content, content_type)
+    modelo = os.environ.get("ANTHROPIC_VISION_MODEL", "claude-sonnet-5")
+    async with AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"]) as client:
+      resp = await client.messages.create(
+        model=modelo, max_tokens=1200,
+        system="Eres un OCR estructurado de facturas peruanas de combustible. Respondes SOLO con un objeto JSON válido, sin markdown ni texto adicional.",
+        messages=[{"role": "user", "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(img).decode()}},
+            {"type": "text", "text": OCR_PROMPT},
+        ]}],
+    )
+    text = "".join(getattr(b, "text", "") for b in resp.content)
+    return {"extracted": _normalize_fields(_parsear_json(text)), "raw_response": text, "motor": f"claude:{modelo}"}
+
+
+async def _extract_gemini(content: bytes, content_type: str) -> dict:
+    """Lectura con Gemini actual (SDK google-genai)."""
+    from google import genai
+    from google.genai import types as gtypes
+    img, mime = _a_imagen_png(content, content_type)
+    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"))
+    modelo = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.5-flash")
+    resp = await client.aio.models.generate_content(
+        model=modelo,
+        contents=[gtypes.Part.from_bytes(data=img, mime_type=mime), OCR_PROMPT],
+        config=gtypes.GenerateContentConfig(temperature=0, response_mime_type="application/json",
+                                            system_instruction="Eres un OCR estructurado. Solo devuelves JSON válido sin markdown."),
+    )
+    text = resp.text or ""
+    return {"extracted": _normalize_fields(_parsear_json(text)), "raw_response": text, "motor": f"gemini:{modelo}"}
+
+
 async def extract_invoice_data(content: bytes, content_type: str, session_id: str) -> dict:
-    """Main entry point. Returns dict with extracted fields + raw response."""
+    """Main entry point. Returns dict with extracted fields + raw response.
+    Elige el motor por la clave disponible: Claude (ANTHROPIC_API_KEY), Gemini actual
+    (GOOGLE_API_KEY/GEMINI_API_KEY) o, si no hay ninguna, el camino antiguo (EMERGENT_LLM_KEY)."""
+    prov = _proveedor_vision()
+    if prov in ("claude", "gemini"):
+        try:
+            return await (_extract_claude if prov == "claude" else _extract_gemini)(content, content_type)
+        except Exception as e:
+            logger.warning(f"OCR {prov} falló: {e}")
+            return {"extracted": _normalize_fields({}), "raw_response": f"{prov}: {e}", "motor": prov}
+    return await _extract_invoice_data_legacy(content, content_type, session_id)
+
+
+async def _extract_invoice_data_legacy(content: bytes, content_type: str, session_id: str) -> dict:
+    """Camino original (google.generativeai + gemini-1.5-flash + EMERGENT_LLM_KEY)."""
     import google.generativeai as genai
     import os
     import tempfile

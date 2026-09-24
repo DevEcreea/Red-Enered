@@ -85,6 +85,24 @@ def extraer_de_xml(contenido: bytes) -> Optional[dict]:
 
 
 # ─────────────────────────────── QR del PDF ───────────────────────────────
+def _variantes_foto(img, ImageOps, ImageFilter):
+    """Genera versiones de una foto para maximizar la lectura del QR: original, mitad, gris
+    con autocontraste, nítida, ampliada ×2, binarizada, y giros de ±5°/90°. Se prueban en
+    orden de coste (las baratas primero) y se corta en la primera que lea."""
+    w, h = img.size
+    yield img
+    if max(w, h) > 1800:
+        yield img.resize((w // 2, h // 2))
+    g = ImageOps.autocontrast(ImageOps.grayscale(img), cutoff=2)
+    yield g
+    yield g.filter(ImageFilter.UnsharpMask(radius=2, percent=180, threshold=3))
+    if max(w, h) < 2600:
+        yield g.resize((w * 2, h * 2), Image.LANCZOS)
+    yield g.point(lambda x: 255 if x > 140 else 0)
+    for ang in (-5, 5, 90, -90, 180):
+        yield g.rotate(ang, expand=True, fillcolor=255)
+
+
 def _qr_de_pdf(contenido: bytes) -> Optional[str]:
     """Lee el QR: primero de las imágenes embebidas (rápido y exacto), luego rasterizando."""
     try:
@@ -100,18 +118,17 @@ def _qr_de_pdf(contenido: bytes) -> Optional[str]:
                 return r.text
         return None
 
-    # Foto o imagen (JPG/PNG/WEBP): se lee el QR directo de la imagen.
+    # Foto o imagen (JPG/PNG/WEBP): se lee el QR directo de la imagen, probando varias
+    # "limpiezas" típicas de foto de celular (grises, contraste, nitidez, ampliación, giros,
+    # binarizado). Una foto ligeramente torcida, borrosa o con poca luz suele necesitar alguna.
     if not contenido[:5].startswith(b"%PDF"):
         try:
+            from PIL import ImageOps, ImageFilter
             img = Image.open(io.BytesIO(contenido))
             img.load()
-            txt = _leer(img.convert("RGB"))
-            if txt:
-                return txt
-            # Fotos grandes: reintenta a mitad de tamaño (mejora el enfoque del QR)
-            w, h = img.size
-            if max(w, h) > 1800:
-                txt = _leer(img.convert("RGB").resize((w // 2, h // 2)))
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            for v in _variantes_foto(img, ImageOps, ImageFilter):
+                txt = _leer(v)
                 if txt:
                     return txt
         except Exception:

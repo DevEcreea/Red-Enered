@@ -163,6 +163,14 @@ export default function CapturaMovil() {
                           {r.estado && <span className={`ml-auto px-1.5 py-0.5 rounded text-[10px] font-bold ${chip(r.estado)}`}>{r.estado}</span>}
                         </div>
                         <div className="text-xs text-neutral-500">{r.placa || "sin placa"} · {r.galones ?? "—"} gal · {r.fecha || "sin fecha"}</div>
+                        {(() => {
+                          const faltan = [!r.numero && "número", !r.fecha && "fecha", !r.placa && "placa", (r.galones == null) && "galones", (r.importe == null) && "importe"].filter(Boolean);
+                          return faltan.length > 0 ? (
+                            <div className="mt-1 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                              No se pudo leer: <b>{faltan.join(", ")}</b>. Toma otra foto más cerca, sin sombra y con toda la factura, o corrígelo luego en la computadora.
+                            </div>
+                          ) : null;
+                        })()}
                       </div>
                     </li>
                   ))}

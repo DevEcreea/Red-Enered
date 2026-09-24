@@ -2362,6 +2362,12 @@ async def invoices_upload(
             raw_resp = ocr["raw_response"]
             ocr_ok = True
             ocr_error = None
+            # El motor de visión no lanza: si devolvió vacío y reporta el fallo en raw_response,
+            # lo registramos como error para que el admin vea POR QUÉ no se leyó nada.
+            _prov_err = str(raw_resp or "").strip()
+            if not any(extracted.get(k) for k in ("numero_documento", "galones", "importe_total", "placa")) \
+                    and _prov_err[:8].lower() in ("claude: ", "gemini: ", "legacy: "):
+                ocr_ok, ocr_error = False, _prov_err[:200]
         except Exception as e:
             logger.warning(f"OCR error en {f.filename}: {e}")
             extracted, raw_resp, ocr_ok, ocr_error = {}, "", False, str(e)[:200]
