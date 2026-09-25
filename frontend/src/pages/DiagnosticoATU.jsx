@@ -139,12 +139,18 @@ function Resultado({ data }) {
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Placa", "Cat.", "TUC", "¿La ATU la acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Placa", "Cat.", "Permiso", "TUC", "¿La ATU la acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
             <tbody>
               {data.unidades.map((u, i) => (
                 <tr key={i} style={{ borderBottom: "1px solid #F3F4F6", background: u.aceptada ? "#fff" : "#FFFBEB" }}>
                   <td style={{ ...td, fontWeight: 800, color: "#1D4ED8", letterSpacing: ".03em" }}>{u.placa}</td>
                   <td style={td}>{u.categoria || "—"}</td>
+                  <td style={td} title={u.permiso_aplica === true ? "Tipo de permiso que aplica al subsidio" : u.permiso_aplica === false ? "Tipo de permiso que NO aplica al subsidio" : "Tipo de permiso no clasificado"}>
+                    {u.permiso
+                      ? <Badge color={u.permiso_aplica === true ? "#065F46" : u.permiso_aplica === false ? "#991B1B" : "#92400E"}
+                               bg={u.permiso_aplica === true ? "#ECFDF5" : u.permiso_aplica === false ? "#FEF2F2" : "#FFFBEB"}>{u.permiso}</Badge>
+                      : "—"}
+                  </td>
                   <td style={{ ...td, fontWeight: 700, color: u.tuc ? "#111827" : "#9CA3AF" }}>{u.tuc || "—"}</td>
                   <td style={td}>
                     {u.aceptada

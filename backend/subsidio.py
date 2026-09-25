@@ -930,11 +930,21 @@ async def _mtc_autorizacion(ruc: str) -> Optional[dict]:
         return {"encontrada": False, "habilitado": False,
                 "verificado_en": datetime.now(timezone.utc).isoformat(),
                 "fuente": "MTC · DGTT (consulta pública)"}
-    mejor = next((a for a in auts if a.get("habilitado") and not _mtc_vencida(a.get("vigente_hasta"))), auts[0])
+    import mtc as _mtc
+    # Rige la autorización ACTIVA cuyo tipo de permiso APLICA al subsidio; si no hay, la
+    # activa que haya; si no, la primera.
+    activas = [a for a in auts if _mtc.autorizacion_activa(a)]
+    mejor = (next((a for a in activas if a.get("permiso_aplica") is True), None)
+             or next((a for a in activas if a.get("permiso_aplica") is None), None)
+             or (activas[0] if activas else auts[0]))
     vig = mejor.get("vigente_hasta")
     return {
         "encontrada": True,
         "codigo": mejor.get("codigo") or "",
+        "tipo_permiso": mejor.get("tipo_permiso") or _mtc.tipo_permiso(mejor.get("codigo")),
+        "permiso_aplica": mejor.get("permiso_aplica", _mtc.permiso_aplica(mejor.get("codigo"))),
+        "permisos": [{"codigo": a.get("codigo"), "tipo": a.get("tipo_permiso"), "aplica": a.get("permiso_aplica"),
+                      "activo": _mtc.autorizacion_activa(a), "unidades": a.get("total_unidades", 0)} for a in auts],
         "razon_social": mejor.get("razon_social") or "",
         "modalidad": mejor.get("modalidad") or "",
         "estado": mejor.get("estado") or "",
@@ -968,24 +978,30 @@ async def _mtc_habilitaciones(ruc: str) -> Optional[dict]:
         except Exception:
             return False
 
+    import mtc as _mtc
     out = {}
-    for a in data.get("autorizaciones", []):
-        vig = a.get("vigente_hasta")
-        for v in a.get("vehiculos", []):
-            pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
-            if not pn or pn in out:
-                continue
+    # Una fila por placa, regida por la autorización activa que APLICA al subsidio (si la
+    # misma placa está en un permiso que aplica y en otro que no, manda el que aplica).
+    for v in _mtc.unidades_para_subsidio(data):
+        pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+        if not pn or pn in out:
+            continue
+        vig = v.get("vigente_hasta")
+        if True:
             out[pn] = {
                 "placa": v.get("placa"),
                 "categoria": (v.get("categoria") or "").upper(),
-                "constancia": v.get("constancia") or a.get("codigo") or "",
+                "constancia": v.get("constancia") or v.get("autorizacion") or "",
                 "anio": v.get("anio") or "",
                 "chasis": v.get("chasis") or "",
                 "ejes": v.get("ejes") or "",
                 "vigencia": vig,
                 "vencida": _vencida(vig),
-                "habilitado": bool(a.get("habilitado")) and not _vencida(vig),
-                "razon_social": a.get("razon_social") or "",
+                "habilitado": bool(v.get("autorizacion_activa")),
+                "autorizacion": v.get("autorizacion") or "",
+                "permiso": v.get("permiso") or "",
+                "permiso_aplica": v.get("permiso_aplica"),
+                "razon_social": v.get("razon_social") or "",
                 "verificado_en": datetime.now(timezone.utc).isoformat(),
                 "fuente": "MTC · DGTT (consulta pública)",
             }
@@ -2106,19 +2122,22 @@ async def importar_unidades_diagnostico(user: dict = Depends(_require_subsidio))
     # variantes N2C2, M2C3…); remolques (O1…O4) y M1 se omiten para no confundir al cliente.
     from services.validador_facturas import clase_base_categoria as _clase_base
     encontradas, vistas, omitidas = [], set(), []
-    for a in (m.get("autorizaciones") or []):
-        for v in (a.get("vehiculos") or []):
-            placa = (v.get("placa") or "").upper().strip()
-            pn = placa.replace("-", "").replace(" ", "")
-            if not pn or pn in vistas:
-                continue
-            vistas.add(pn)
-            cat_raw = (v.get("categoria") or "").upper()
-            cat = _clase_base(cat_raw)
-            if cat not in ("M2", "M3", "N1", "N2", "N3"):
-                omitidas.append({"placa": placa, "categoria": cat_raw or "—"})
-                continue
-            encontradas.append({"placa": placa, "categoria": cat})
+    for v in _mtc.unidades_para_subsidio(m):
+        placa = (v.get("placa") or "").upper().strip()
+        pn = placa.replace("-", "").replace(" ", "")
+        if not pn or pn in vistas:
+            continue
+        vistas.add(pn)
+        cat_raw = (v.get("categoria") or "").upper()
+        cat = _clase_base(cat_raw)
+        # Placas de un permiso que NO aplica al subsidio (MPW, PNT, PNW, CON, TRA, ESC) se omiten.
+        if v.get("permiso_aplica") is False:
+            omitidas.append({"placa": placa, "categoria": cat_raw or "—", "motivo": f"permiso {v.get('permiso')} no aplica"})
+            continue
+        if cat not in ("M2", "M3", "N1", "N2", "N3"):
+            omitidas.append({"placa": placa, "categoria": cat_raw or "—"})
+            continue
+        encontradas.append({"placa": placa, "categoria": cat, "permiso": v.get("permiso") or ""})
 
     uids = await _get_company_uids(user)
     existentes = {

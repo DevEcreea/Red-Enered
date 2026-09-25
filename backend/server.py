@@ -5320,7 +5320,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.20-du007-admin-kpis",
+        "version": "1.9.21-mtc-permisos",
     }
 
 # ============================================================
@@ -7510,10 +7510,10 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
     mtc_vehiculos = []
     try:
         m = await _mtc.consultar("ruc", ruc)
-        for a in m.get("autorizaciones", []):
-            for v in a.get("vehiculos", []):
-                if v.get("placa"):
-                    mtc_vehiculos.append((v, a))
+        # Una fila por placa, regida por la autorización activa que APLICA al subsidio.
+        for v in _mtc.unidades_para_subsidio(m):
+            mtc_vehiculos.append((v, {"vigente_hasta": v.get("vigente_hasta"), "codigo": v.get("autorizacion"),
+                                      "permiso": v.get("permiso"), "permiso_aplica": v.get("permiso_aplica")}))
     except Exception:
         pass
 
@@ -7527,8 +7527,15 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
         vig = a.get("vigente_hasta")
         # La ATU no da un motivo por placa (estadoValidacionAutorizacionNombre viene vacío),
         # así que usamos el mismo motivo salvo que la autorización esté vencida en el MTC.
-        if aceptada:
+        permiso_ok = a.get("permiso_aplica") is not False
+        if aceptada and not permiso_ok:
+            # La ATU la acepta, pero el tipo de permiso del MTC no aplica al subsidio.
+            aceptada = False
+            motivo = f"Permiso {a.get('permiso') or ''} del MTC no aplica al subsidio (solo CNG, MRP, URV, ERG, INT)"
+        elif aceptada:
             motivo = None
+        elif not permiso_ok:
+            motivo = f"Permiso {a.get('permiso') or ''} del MTC no aplica al subsidio (solo CNG, MRP, URV, ERG, INT)"
         elif _vencida(vig):
             motivo = f"Autorización vencida ({vig})"
         else:
@@ -7540,6 +7547,7 @@ async def atu_analisis(ruc: str, user: dict = Depends(get_current_user)):
             "aceptada": aceptada,
             "motivo": motivo,
             "numero_autorizacion": (au.get("numero_autorizacion") if au else None) or a.get("codigo") or v.get("constancia"),
+            "permiso": a.get("permiso") or "", "permiso_aplica": a.get("permiso_aplica"),
             "vigencia": vig,
         })
     # Placas que la ATU tiene pero no aparecen en el MTC (raras)
@@ -8090,25 +8098,25 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
         razon = ""
         mtc_unidades = []
         permiso_mtc = False
-        vistas = set()
         try:
             m = await _mtc.consultar("ruc", ruc)
             for a in m.get("autorizaciones", []):
                 if not razon:
                     razon = a.get("razon_social", "") or ""
-                if a.get("habilitado"):
+                # "Tiene permiso MTC" = alguna autorización activa cuyo tipo APLICA al subsidio
+                # (CNG, MRP, URV, ERG, INT). Un permiso activo de otro tipo (MPW, PNT…) no cuenta.
+                if _mtc.autorizacion_activa(a) and a.get("permiso_aplica") is True:
                     permiso_mtc = True
-                for v in a.get("vehiculos", []):
-                    pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
-                    if not pn or pn in vistas:
-                        continue
-                    vistas.add(pn)
-                    mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
-                                         "vigencia": a.get("vigente_hasta"),
-                                         "numero_autorizacion": a.get("codigo") or v.get("constancia"),
-                                         # Constancia de habilitación del MTC por unidad: es el "TUC"
-                                         # que muestra el padrón ATU (formato 13M25000323E).
-                                         "constancia": v.get("constancia")})
+            # Una fila por placa, regida por la autorización que corresponde (activa y que aplica
+            # primero). Antes se tomaba la primera autorización donde apareciera la placa.
+            for v in _mtc.unidades_para_subsidio(m):
+                mtc_unidades.append({"placa": v["placa"], "categoria": (v.get("categoria") or "").upper(),
+                                     "vigencia": v.get("vigente_hasta"),
+                                     "numero_autorizacion": v.get("autorizacion") or v.get("constancia"),
+                                     "permiso": v.get("permiso") or "", "permiso_aplica": v.get("permiso_aplica"),
+                                     # Constancia de habilitación del MTC por unidad: es el "TUC"
+                                     # que muestra el padrón ATU (formato 13M25000323E).
+                                     "constancia": v.get("constancia")})
         except Exception:
             pass
         return razon, mtc_unidades, permiso_mtc
@@ -8171,11 +8179,15 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
         # (N2, M2…) para decidir el subsidio. Solo M1* y O* quedan fuera (no tienen tope).
         cat = clase_base_categoria(u["categoria"])
         cat_ok = cat in _TOPES_GALONES
+        permiso_ok = u.get("permiso_aplica") is not False   # False = tipo de permiso que no aplica
         # Solo M2, M3, N1, N2, N3 reciben subsidio. Otras categorías (O4, etc.) no califican.
-        cumple = cat_ok and bool(au) and au.get("tuc_estado") == "ok"
+        cumple = cat_ok and permiso_ok and bool(au) and au.get("tuc_estado") == "ok"
         vig = u.get("vigencia")
         if cumple:
             estado, motivo = "aceptada", None
+        elif not permiso_ok:
+            estado = "permiso_no_aplica"
+            motivo = f"Permiso {u.get('permiso') or ''} del MTC no aplica al subsidio (solo CNG, MRP, URV, ERG, INT)".replace("  ", " ")
         elif not cat_ok:
             estado = "no_subsidiable"
             motivo = (f"Categoría {cat} no recibe subsidio (solo M2, M3, N1, N2, N3)"
@@ -8191,6 +8203,7 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
             estado, motivo = "no_aceptada", "No figura habilitada en la ATU (regularizable)"
         unidades.append({
             "placa": u["placa"], "categoria": cat, "cumple": cumple, "estado": estado,
+            "permiso": u.get("permiso") or "", "permiso_aplica": u.get("permiso_aplica"),
             # TUC: el que reporta la ATU si respondió; si no, la constancia MTC de la
             # unidad (es el mismo número que el padrón ATU muestra como "TUC").
             "tuc": (au.get("tuc") if au else None) or u.get("constancia"),
@@ -8198,7 +8211,7 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
             "vigencia": vig, "numero_autorizacion": u.get("numero_autorizacion"),
         })
     # Orden: aceptadas primero, luego por verificar, luego el resto.
-    _peso = {"aceptada": 0, "por_verificar": 1, "vencida": 2, "no_aceptada": 3, "no_subsidiable": 4}
+    _peso = {"aceptada": 0, "por_verificar": 1, "vencida": 2, "no_aceptada": 3, "permiso_no_aplica": 4, "no_subsidiable": 5}
     unidades.sort(key=lambda x: (_peso.get(x["estado"], 9), x.get("placa") or ""))
 
     # 4) Subsidio máximo por categoría (solo categorías con tope). Las demás no aplican.
@@ -8208,6 +8221,10 @@ async def subsidio_resumen(ruc: str, refresh: int = 0):
     for u in mtc_unidades:
         cb = clase_base_categoria(u["categoria"])
         tope = _TOPES_GALONES.get(cb)
+        if u.get("permiso_aplica") is False:
+            cat = f"permiso {u.get('permiso') or '?'}"
+            no_aplican[cat] = no_aplican.get(cat, 0) + 1
+            continue
         if not tope:
             cat = cb or "(sin categoría)"
             no_aplican[cat] = no_aplican.get(cat, 0) + 1

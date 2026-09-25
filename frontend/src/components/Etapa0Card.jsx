@@ -294,15 +294,19 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
           {verPlacas && (
             <div className="e0k-tabla">
               <table>
-                <thead><tr>{["Placa", "Cat.", "TUC", "¿Acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Placa", "Cat.", "Permiso", "TUC", "¿Acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                 <tbody>
                   {unidades.map((u, i) => (
                     <tr key={i}>
                       <td className="pl">{u.placa}</td>
                       <td>{u.categoria || "—"}</td>
+                      <td title={u.permiso_aplica === true ? "Tipo de permiso que aplica al subsidio" : u.permiso_aplica === false ? "Tipo de permiso que NO aplica al subsidio" : "Tipo de permiso no clasificado"}>
+                        {u.permiso ? <span className={`st ${u.permiso_aplica === true ? "ok" : u.permiso_aplica === false ? "no" : "wa"}`}>{u.permiso}</span> : "—"}
+                      </td>
                       <td>{u.tuc || "—"}</td>
                       <td>{u.cumple ? <span className="st ok"><CheckCircle2 /> Aceptada</span>
                         : u.estado === "por_verificar" ? <span className="st wa"><AlertTriangle /> Por verificar</span>
+                        : u.estado === "permiso_no_aplica" ? <span className="st no"><XCircle /> Permiso no aplica</span>
                         : <span className="st no"><XCircle /> No aceptada</span>}</td>
                       <td className="mo">{u.cumple ? "—" : u.motivo}</td>
                       <td>{u.vigencia || "—"}</td>
@@ -403,15 +407,19 @@ export default function Etapa0Card({ onResumen, ruc: rucProp, solo }) {
           {verPlacas7 && (
             <div className="e0k-tabla">
               <table>
-                <thead><tr>{["Placa", "Cat.", "TUC", "¿Acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Placa", "Cat.", "Permiso", "TUC", "¿Acepta?", "Motivo", "Vigencia MTC"].map((h) => <th key={h}>{h}</th>)}</tr></thead>
                 <tbody>
                   {unidades007.map((u, i) => (
                     <tr key={i}>
                       <td className="pl">{u.placa}</td>
                       <td>{u.categoria || "—"}</td>
+                      <td title={u.permiso_aplica === true ? "Tipo de permiso que aplica al subsidio" : u.permiso_aplica === false ? "Tipo de permiso que NO aplica al subsidio" : "Tipo de permiso no clasificado"}>
+                        {u.permiso ? <span className={`st ${u.permiso_aplica === true ? "ok" : u.permiso_aplica === false ? "no" : "wa"}`}>{u.permiso}</span> : "—"}
+                      </td>
                       <td>{u.tuc || "—"}</td>
                       <td>{u.cumple ? <span className="st ok"><CheckCircle2 /> Aceptada</span>
                         : u.estado === "por_verificar" ? <span className="st wa"><AlertTriangle /> Por verificar</span>
+                        : u.estado === "permiso_no_aplica" ? <span className="st no"><XCircle /> Permiso no aplica</span>
                         : <span className="st no"><XCircle /> No aceptada</span>}</td>
                       <td className="mo">{u.cumple ? "—" : u.motivo}</td>
                       <td>{u.vigencia || "—"}</td>

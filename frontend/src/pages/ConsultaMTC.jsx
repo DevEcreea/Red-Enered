@@ -130,6 +130,14 @@ function Autorizacion({ a }) {
           <div style={{ fontSize: 13, color: "#6b7280", marginTop: 6, display: "flex", flexWrap: "wrap", gap: "4px 18px" }}>
             <span><Hash style={ic} /> RUC {a.ruc}</span>
             {a.modalidad && <span>{a.modalidad}</span>}
+            {a.tipo_permiso && (
+              <span style={{ padding: "1px 8px", borderRadius: 999, fontWeight: 800, fontSize: 12,
+                background: a.permiso_aplica === true ? "#ECFDF5" : a.permiso_aplica === false ? "#FEF2F2" : "#FFFBEB",
+                color: a.permiso_aplica === true ? "#065F46" : a.permiso_aplica === false ? "#991B1B" : "#92400E" }}
+                title="Tipo de permiso según las iniciales del código de la autorización">
+                Permiso {a.tipo_permiso} · {a.permiso_aplica === true ? "aplica al subsidio" : a.permiso_aplica === false ? "NO aplica al subsidio" : "no clasificado"}
+              </span>
+            )}
             {a.direccion && <span><MapPin style={ic} /> {a.direccion}</span>}
           </div>
         </div>

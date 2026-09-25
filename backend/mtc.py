@@ -37,6 +37,70 @@ class MtcError(Exception):
     pass
 
 
+# Tipo de permiso = iniciales al final del código de la autorización (ej. 15121884CNG → CNG).
+# Regla de negocio (Giuliana, 25/09/2026): solo las placas de un permiso que APLICA cuentan
+# para el subsidio; una empresa puede tener un permiso que aplica y otro que no, y rige el
+# que está activo (habilitado y vigente).
+PERMISOS_APLICAN = {"CNG", "MRP", "URV", "ERG", "INT"}
+PERMISOS_NO_APLICAN = {"MPW", "PNT", "PNW", "CON", "C0N", "TRA", "ESC"}
+
+
+def tipo_permiso(codigo: str) -> str:
+    m = re.search(r"([A-Z0-9]{3})\s*$", (codigo or "").strip().upper())
+    t = m.group(1) if m else ""
+    return t if re.search(r"[A-Z]", t) else ""
+
+
+def permiso_aplica(codigo: str):
+    """True = aplica al subsidio · False = no aplica · None = tipo no clasificado."""
+    t = tipo_permiso(codigo)
+    if t in PERMISOS_APLICAN:
+        return True
+    if t in PERMISOS_NO_APLICAN:
+        return False
+    return None
+
+
+def _vencida(vig) -> bool:
+    import datetime as _dt
+    m = re.match(r"(\d{2})/(\d{2})/(\d{4})", str(vig or ""))
+    if not m:
+        return False
+    try:
+        return _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1))) < _dt.date.today()
+    except Exception:
+        return False
+
+
+def autorizacion_activa(a: dict) -> bool:
+    return bool(a.get("habilitado")) and not _vencida(a.get("vigente_hasta"))
+
+
+def unidades_para_subsidio(data: dict) -> list:
+    """Una fila por PLACA (sin repetir) con la autorización que la rige:
+      1º permisos activos que aplican · 2º activos no clasificados · 3º activos que no aplican ·
+      luego los vencidos/no habilitados en el mismo orden.
+    Cada fila trae `permiso`, `permiso_aplica` (True/False/None) y `autorizacion` (código)."""
+    auts = list((data or {}).get("autorizaciones") or [])
+
+    def _peso(a):
+        ap = a.get("permiso_aplica")
+        return (0 if autorizacion_activa(a) else 1, 0 if ap is True else (1 if ap is None else 2), -int(a.get("total_unidades") or 0))
+    auts.sort(key=_peso)
+    out, vistas = [], set()
+    for a in auts:
+        for v in a.get("vehiculos", []) or []:
+            pn = (v.get("placa") or "").replace("-", "").replace(" ", "").upper()
+            if not pn or pn in vistas:
+                continue
+            vistas.add(pn)
+            out.append({**v, "autorizacion": a.get("codigo") or "", "permiso": a.get("tipo_permiso") or tipo_permiso(a.get("codigo")),
+                        "permiso_aplica": a.get("permiso_aplica", permiso_aplica(a.get("codigo"))),
+                        "autorizacion_activa": autorizacion_activa(a), "vigente_hasta": a.get("vigente_hasta"),
+                        "modalidad": a.get("modalidad") or "", "razon_social": a.get("razon_social") or ""})
+    return out
+
+
 def _clean(fragment: str) -> str:
     txt = re.sub(r"<[^>]+>", "", fragment or "")
     txt = _html.unescape(txt)
@@ -71,26 +135,45 @@ def _parse_detalle(html_text: str) -> dict:
     html_text = re.sub(r"<script.*?</script>", "", html_text, flags=re.S)
     info: dict = {}
     vehiculos = []
+    # Posiciones por defecto (tabla estándar); se reemplazan por las de la cabecera real.
+    cols = {"placa": 1, "constancia": 2, "categoria": 3, "chasis": 4, "anio": 5, "ejes": 6, "carga_util": 7, "peso_seco": 8}
+    _nombres = {"placa": "placa", "constancia": "constancia", "categor": "categoria", "chasis": "chasis",
+                "fabric": "anio", "ejes": "ejes", "carga": "carga_util", "peso": "peso_seco"}
     for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", html_text, re.S):
-        cells = [_clean(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
-        cells = [c for c in cells if c != ""]
+        raw = [_clean(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
+        cells = [c for c in raw if c != ""]
         if not cells:
             continue
         # fila clave: valor  (ej. "Estado: | Habilitado")
         if len(cells) == 2 and cells[0].endswith(":"):
             info[cells[0][:-1].strip()] = cells[1]
-        # fila de vehículo: empieza con número de ítem y tiene 8+ columnas
-        elif len(cells) >= 8 and re.fullmatch(r"\d+", cells[0]):
+            continue
+        # cabecera de la tabla de unidades: mapea cada columna por su nombre
+        if len(cells) >= 6 and not re.fullmatch(r"\d+", cells[0]) and any("placa" in c.lower() for c in cells):
+            for idx, c in enumerate(raw):
+                cl = c.lower()
+                for clave, campo in _nombres.items():
+                    if clave in cl:
+                        cols[campo] = idx
+                        break
+            continue
+        # fila de vehículo: empieza con número de ítem. Se leen las celdas SIN descartar las
+        # vacías (una autorización sin N° Constancia dejaba la columna vacía y corría todo:
+        # el chasis quedaba como categoría y la unidad salía "no subsidiable").
+        if len(raw) >= 7 and re.fullmatch(r"\d+", raw[0].strip()):
+            def _col(campo):
+                i = cols.get(campo)
+                return raw[i] if i is not None and i < len(raw) else ""
             vehiculos.append({
-                "item": cells[0],
-                "placa": cells[1],
-                "constancia": cells[2],
-                "categoria": cells[3],
-                "chasis": cells[4] if len(cells) > 4 else "",
-                "anio": cells[5] if len(cells) > 5 else "",
-                "ejes": cells[6] if len(cells) > 6 else "",
-                "carga_util": cells[7] if len(cells) > 7 else "",
-                "peso_seco": cells[8] if len(cells) > 8 else "",
+                "item": raw[0].strip(),
+                "placa": _col("placa"),
+                "constancia": _col("constancia"),
+                "categoria": _col("categoria"),
+                "chasis": _col("chasis"),
+                "anio": _col("anio"),
+                "ejes": _col("ejes"),
+                "carga_util": _col("carga_util"),
+                "peso_seco": _col("peso_seco"),
             })
 
     razon = info.get("Razón Social", "") or info.get("Razon Social", "")
@@ -101,6 +184,8 @@ def _parse_detalle(html_text: str) -> dict:
     vigente = info.get("Vigente Hasta", "")
     return {
         "codigo": codigo.strip(),
+        "tipo_permiso": tipo_permiso(codigo),
+        "permiso_aplica": permiso_aplica(codigo),
         "razon_social": nombre.strip(),
         "ruc": info.get("Número de R.U.C.", "") or info.get("Numero de R.U.C.", ""),
         "direccion": info.get("Dirección", "") or info.get("Direccion", ""),
@@ -156,8 +241,11 @@ async def _consultar_via(proxy: Optional[str], tipo: str, valor: str, opc: str) 
             if (nombre and nombre != "-") or det.get("vehiculos"):
                 autorizaciones.append(det)
 
-    # ordenar: habilitadas primero, luego por más unidades
-    autorizaciones.sort(key=lambda a: (not a["habilitado"], -a["total_unidades"]))
+    # ordenar: activas (habilitadas y vigentes) primero, entre ellas las que APLICAN al
+    # subsidio, luego por más unidades
+    autorizaciones.sort(key=lambda a: (not autorizacion_activa(a),
+                                       0 if a.get("permiso_aplica") is True else (1 if a.get("permiso_aplica") is None else 2),
+                                       -a["total_unidades"]))
     return {
         "tipo": tipo,
         "valor": valor,
