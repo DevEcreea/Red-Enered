@@ -4081,8 +4081,16 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     # placas se guarda en varias filas con el total repetido: sumarlo tal cual multiplicaba el
     # importe del expediente (S/ 960 mil en 5.9 mil galones). Se corrige al leer, guardando el
     # total original en importe_factura, y la revalidación lo persiste.
+    # Razón social del grifo por RUC (padrón OSINERGMIN local y, si no está, SUNAT con caché):
+    # muchas filas guardaron como "estación" la DIRECCIÓN que leyó el OCR. Se corrige al mostrar
+    # (sin tocar la BD); "Revalidar todas" lo deja persistido.
+    _rs_por_ruc = await _razones_sociales_por_ruc(invoices)
     _reparto = _repartir_importes_por_placa(invoices)
     for i in invoices:
+        _rs = _rs_por_ruc.get(str(i.get("ruc_emisor") or "").strip())
+        if _rs and (i.get("estacion") or "").strip() != _rs:
+            i["estacion_ocr"] = i.get("estacion")
+            i["estacion"] = _rs
         if _veredicto_desactualizado(i):
             i["validacion_desactualizado"] = True
         _imp = _importe_por_placa(i)
@@ -4213,19 +4221,7 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
     _reparto = _repartir_importes_por_placa(filas)
     # Razón social del grifo por RUC (padrón local primero, SUNAT si no está): corrige filas
     # donde el OCR guardó la dirección impresa como "estación". Una consulta por RUC distinto.
-    _rs_por_ruc: dict = {}
-    _rucs = [r for r in {str(f.get("ruc_emisor") or "").strip() for f in filas} if len(r) == 11 and r.isdigit()][:40]
-    from services.padron_grifos import buscar_por_ruc as _bpr
-    for _r in _rucs:
-        try:
-            _g = await _bpr(db, _r)
-            _rs = ((_g or {}).get("razon_social") or "").strip() if (_g or {}).get("inscrito") else ""
-            if not _rs:
-                _rs = (((await _sunat_ficha(_r)) or {}).get("nombre") or "").strip()
-            if _rs:
-                _rs_por_ruc[_r] = _rs
-        except Exception:
-            pass
+    _rs_por_ruc = await _razones_sociales_por_ruc(filas)
     for f in filas:
         prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         patch: dict = {}
@@ -5171,6 +5167,28 @@ def _importe_por_placa(doc: dict) -> Optional[float]:
     if actual <= 0 or abs(actual - calc) > max(1.0, calc * 0.01):
         return calc
     return None
+
+
+async def _razones_sociales_por_ruc(filas: list, max_rucs: int = 40) -> dict:
+    """{ruc_emisor: razón social} para los RUC de emisor presentes en `filas`: padrón OSINERGMIN
+    (colección local, rápido) y, si el RUC no está, ficha SUNAT (con caché en memoria y timeout
+    corto para no frenar la pantalla). Devuelve solo los RUC con nombre conocido."""
+    import asyncio as _aio
+    from services.padron_grifos import buscar_por_ruc as _bpr
+    rucs = [r for r in {str(f.get("ruc_emisor") or "").strip() for f in filas} if len(r) == 11 and r.isdigit()][:max_rucs]
+    out = {}
+    for r in rucs:
+        try:
+            g = await _bpr(db, r)
+            rs = ((g or {}).get("razon_social") or "").strip() if (g or {}).get("inscrito") else ""
+            if not rs:
+                ficha = await _aio.wait_for(_sunat_ficha(r), timeout=4)
+                rs = ((ficha or {}).get("nombre") or "").strip()
+            if rs:
+                out[r] = rs
+        except Exception:
+            continue
+    return out
 
 
 def _repartir_importes_por_placa(filas: list) -> dict:
