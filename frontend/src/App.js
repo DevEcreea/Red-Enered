@@ -66,6 +66,7 @@ import Privacidad from "./pages/Privacidad";
 import CapturaMovil from "./pages/CapturaMovil";
 import { useAuth } from "./context/AuthContext";
 import ConstanciaModal from "./components/ConstanciaModal";
+import FirmaObligatoriaModal from "./components/FirmaObligatoriaModal";
 
 function Shell({ children, roles }) {
   return (
@@ -124,6 +125,7 @@ function App() {
       <BrowserRouter>
         <Toaster richColors position="top-right" />
         <ConstanciaModal />
+        <FirmaObligatoriaModal />
         <ErrorBoundary>
         <Routes>
           <Route path="/login" element={<Login />} />

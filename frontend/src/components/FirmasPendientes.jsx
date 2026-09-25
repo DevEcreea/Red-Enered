@@ -8,8 +8,10 @@ import { api } from "../lib/api";
    y lo lleva a la pantalla correcta. `actual` = decreto de la página donde se muestra. */
 export function rutaFirmaPendiente(f) {
   if (!f) return null;
-  if (f.du004?.pendiente || !f.constancia) return "/subsidio/documentos";
+  // Primero la página de la DJ pendiente (la constancia se acepta en cualquiera de las dos).
+  if (f.du004?.pendiente) return "/subsidio/documentos";
   if ((f.du007?.periodos_pendientes || []).length > 0) return "/subsidio/du007";
+  if (!f.constancia) return "/subsidio/documentos";
   return null;
 }
 
