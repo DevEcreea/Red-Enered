@@ -1255,7 +1255,10 @@ function TabEditar({ user, vehicles, invoices, documents = [], programa = "du004
       else setRucBusqueda("no_encontrado");
     }).catch(() => { if (vivo) setRucBusqueda("no_encontrado"); });
     return () => { vivo = false; };
-  }, [invRuc]);
+  // También al abrir otra factura con el MISMO RUC: antes el efecto no se volvía a correr y el
+  // campo se quedaba con lo guardado (a veces la dirección del grifo leída por el OCR).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invRuc, editingInvoice?.id]);
   const razonBloqueada = rucBusqueda !== "no_encontrado";
 
   const saveRepresentante = async (e) => {

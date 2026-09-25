@@ -2412,7 +2412,14 @@ async def invoices_upload(
                 _grifo = await _grifo_por_ruc(extracted["ruc_emisor"],
                                               extracted.get("estacion") or base.get("razon_social_emisor"))
                 if _grifo and _grifo.get("inscrito"):
-                    extracted.setdefault("estacion", _grifo.get("razon_social"))
+                    # La razón social del padrón OSINERGMIN/SUNAT es exacta; lo que el OCR pone en
+                    # "estacion" muchas veces es la DIRECCIÓN impresa del grifo ("CARRETERA
+                    # PANAMERICANA NORTE…"). Se guarda lo del OCR aparte y manda el padrón.
+                    _rs = (_grifo.get("razon_social_sunat") or _grifo.get("razon_social") or "").strip()
+                    if _rs:
+                        if extracted.get("estacion") and extracted["estacion"] != _rs:
+                            extracted["estacion_ocr"] = extracted["estacion"]
+                        extracted["estacion"] = _rs
                     if not extracted.get("ciudad"):
                         extracted["ciudad"] = _grifo.get("distrito")
             except Exception:
@@ -4204,9 +4211,30 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
     cambiaron = promovidas = reclasificadas = 0
     por_estado = {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}
     _reparto = _repartir_importes_por_placa(filas)
+    # Razón social del grifo por RUC (padrón local primero, SUNAT si no está): corrige filas
+    # donde el OCR guardó la dirección impresa como "estación". Una consulta por RUC distinto.
+    _rs_por_ruc: dict = {}
+    _rucs = [r for r in {str(f.get("ruc_emisor") or "").strip() for f in filas} if len(r) == 11 and r.isdigit()][:40]
+    from services.padron_grifos import buscar_por_ruc as _bpr
+    for _r in _rucs:
+        try:
+            _g = await _bpr(db, _r)
+            _rs = ((_g or {}).get("razon_social") or "").strip() if (_g or {}).get("inscrito") else ""
+            if not _rs:
+                _rs = (((await _sunat_ficha(_r)) or {}).get("nombre") or "").strip()
+            if _rs:
+                _rs_por_ruc[_r] = _rs
+        except Exception:
+            pass
     for f in filas:
         prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         patch: dict = {}
+        _rs = _rs_por_ruc.get(str(f.get("ruc_emisor") or "").strip())
+        if _rs and (f.get("estacion") or "").strip() != _rs:
+            if f.get("estacion"):
+                patch["estacion_ocr"] = f.get("estacion")
+            patch["estacion"] = _rs
+            f = {**f, "estacion": _rs}
         if f.get("id") in _reparto:
             patch.update(_reparto[f["id"]])
             f = {**f, **_reparto[f["id"]]}
