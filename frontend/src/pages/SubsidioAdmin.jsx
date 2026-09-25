@@ -869,6 +869,12 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
                       title={i.invalida ? "Marcada como nula por el admin" : (i.validacion?.motivos || []).join(" · ") || (i.validacion_estado ? "" : "Sin revalidar: nunca pasó por el validador")}>
                       {i.invalida ? "NO APLICA" : i.validacion_estado || "SIN REVALIDAR"}
                     </span>
+                    {i.validacion_desactualizado && (
+                      <span className="ml-1 px-1 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold"
+                        title="El veredicto se calculó cuando faltaban datos (fecha, número…) que ya fueron completados; por eso no tiene periodo o dice que falta algo que ya está. Pulsa 'Revalidar todas' para actualizarlo.">
+                        DESACTUALIZADA
+                      </span>
+                    )}
                     {!i.invalida && [1, 2, 3].includes(i.periodo_du007) && (
                       <span className="ml-1 px-1 py-0.5 rounded bg-brand/10 text-brand text-[10px] font-bold" title={`Periodo ${i.periodo_du007} del DU 007`}>P{i.periodo_du007}</span>
                     )}
@@ -1038,7 +1044,7 @@ const PERIODOS_DU007 = {
 function ResumenPeriodosDU007({ stats, onVerFacturas }) {
   const sin = stats.sin_periodo || { facturas: 0, galones: 0, importe: 0 };
   const alertas = [];
-  if (stats.sin_revalidar > 0) alertas.push(`${stats.sin_revalidar} sin revalidar (nunca pasaron por el validador: no tienen estado ni periodo)`);
+  if (stats.sin_revalidar > 0) alertas.push(`${stats.sin_revalidar} con veredicto pendiente o desactualizado (${stats.veredicto_desactualizado || 0} se validaron cuando aún faltaban datos como la fecha; por eso salen sin periodo o rechazadas)`);
   if (sin.facturas > 0) alertas.push(`${sin.facturas} reconocida${sin.facturas === 1 ? "" : "s"} sin periodo (${num(sin.galones)} gal · S/ ${num(sin.importe)}) — cuentan en los totales de arriba pero no en ningún periodo`);
   if (stats.reconocidas_sin_galones > 0) alertas.push(`${stats.reconocidas_sin_galones} reconocida${stats.reconocidas_sin_galones === 1 ? "" : "s"} sin galones (no suman)`);
   return (

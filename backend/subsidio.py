@@ -1318,6 +1318,8 @@ async def _enganchar_pdf(user: dict, uids: list, content: bytes, filename: str, 
             if val:
                 await db.consumos_subsidio.update_many({"id": {"$in": ids}, "$or": [{camp: {"$in": [None, "", 0]}}, {camp: {"$exists": False}}]}, {"$set": {camp: val}})
         await db.consumos_subsidio.update_many({"id": {"$in": ids}}, {"$set": upd})
+        for _i in ids:
+            await _revalidar_tras_cambio(_i)
         ids_set = set(ids)
         if num:
             por_num[_sn_comprobante(num)] = [c for c in (por_num.get(_sn_comprobante(num)) or []) if c["id"] not in ids_set]
@@ -3854,6 +3856,33 @@ def _es_reconocida(i: dict, programa: Optional[str]) -> bool:
     return i.get("status") == "confirmed"
 
 
+_CAMPOS_FALTA = (("fecha", "fecha"), ("numero_documento", "N° de comprobante"), ("galones", "galones"),
+                 ("importe_total", "importe total"), ("ruc_emisor", "RUC del grifo"))
+
+
+def _veredicto_desactualizado(i: dict) -> bool:
+    """El veredicto guardado se calculó con datos que YA cambiaron: (a) dice que falta un dato
+    que hoy sí está (la relectura del QR o una edición lo completó después), o (b) es DU 007 con
+    fecha dentro de un periodo pero sin periodo asignado. Ese veredicto no vale: hay que revalidar."""
+    if i.get("invalida") or not i.get("validacion_estado"):
+        return False
+    v = i.get("validacion") or {}
+    m = " ".join(v.get("motivos") or [])
+    if m.startswith("Falta:") or "Falta: " in m:
+        for campo, clave in _CAMPOS_FALTA:
+            if clave in m and i.get(campo):
+                return True
+    if i.get("programa") == "du007" and i.get("fecha") and not i.get("periodo_du007"):
+        try:
+            from services.validador_facturas import periodo_du007 as _p7
+            from datetime import date as _d
+            if _p7(_d.fromisoformat(str(i["fecha"])[:10])) is not None:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
     """KPIs de facturas del expediente. Todas las cifras salen del MISMO conjunto de filas y
     la MISMA regla (`_es_reconocida`) que la tabla de facturas del admin, para que lo de
@@ -3876,7 +3905,10 @@ def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
         "soles_por_galon": SUBSIDIO_SOLES_POR_GALON,
         "nulas": sum(1 for i in invoices if i.get("invalida")),
         "rechazadas": sum(1 for i in invoices if not i.get("invalida") and (i.get("validacion_estado") or "") == "RECHAZADA"),
-        "sin_revalidar": sum(1 for i in invoices if not i.get("invalida") and not i.get("validacion_estado")),
+        # Sin revalidar = nunca validadas + validadas con datos que después cambiaron (veredicto viejo).
+        "sin_revalidar": sum(1 for i in invoices if not i.get("invalida")
+                             and (not i.get("validacion_estado") or i.get("validacion_desactualizado"))),
+        "veredicto_desactualizado": sum(1 for i in invoices if i.get("validacion_desactualizado")),
         "reconocidas_sin_galones": sum(1 for i in rec if not i.get("galones")),
     }
     if programa == "du007":
@@ -4044,6 +4076,8 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     # total original en importe_factura, y la revalidación lo persiste.
     _reparto = _repartir_importes_por_placa(invoices)
     for i in invoices:
+        if _veredicto_desactualizado(i):
+            i["validacion_desactualizado"] = True
         _imp = _importe_por_placa(i)
         if _imp is not None:
             i["importe_factura"] = i.get("importe_total")
@@ -4481,6 +4515,7 @@ async def admin_invoices_releer_qr(empresa: Optional[str] = None, dry: int = 1, 
             completadas += 1
             if not dry:
                 await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {**upd, "importe_fuente": "QR (relectura)"}})
+                await _revalidar_tras_cambio(d["id"])
             continue
         if not (mismo_num and mismo_ruc):
             detalle.append({"id": d["id"], "empresa": d.get("empresa"), "comprobante": d.get("numero_documento"),
@@ -4497,6 +4532,7 @@ async def admin_invoices_releer_qr(empresa: Optional[str] = None, dry: int = 1, 
         completadas += 1
         if not dry:
             await db.consumos_subsidio.update_one({"id": d["id"]}, {"$set": {**upd, "importe_fuente": "QR (relectura)"}})
+            await _revalidar_tras_cambio(d["id"])
     return {"ok": True, "dry": bool(dry), "pendientes": pendientes, "revisadas": revisadas,
             "completadas": completadas, "detalle": detalle[:200]}
 
@@ -5154,6 +5190,26 @@ def _copia_mejor(a: dict, b: dict) -> bool:
     if ca != cb:
         return ca > cb
     return str(a.get("created_at") or "") < str(b.get("created_at") or "")
+
+
+async def _revalidar_tras_cambio(doc_id: str) -> None:
+    """Después de que un proceso en bloque (relectura de QR, carga masiva…) complete datos de un
+    consumo, vuelve a correr el validador y guarda el veredicto nuevo. Antes esos procesos
+    llenaban fecha/número/importe pero dejaban el veredicto viejo ("Falta: fecha…", sin periodo)."""
+    try:
+        doc = await db.consumos_subsidio.find_one({"id": doc_id}, {"_id": 0})
+        if not doc:
+            return
+        u = await db.users.find_one({"id": doc.get("user_id")}, {"_id": 0, "password_hash": 0})
+        if not u:
+            return
+        u = _usuario_en_empresa(u, doc.get("empresa"))
+        uids = await _get_company_uids(u)
+        patch = await _revalidar_consumo(u, uids, doc, excluir_id=doc_id)
+        if patch:
+            await db.consumos_subsidio.update_one({"id": doc_id}, {"$set": patch})
+    except Exception as _e:
+        logger.warning(f"Revalidar tras cambio falló para {doc_id}: {_e}")
 
 
 async def _revalidar_consumo(u: dict, uids: list, doc: dict, excluir_id: Optional[str] = None) -> dict:
