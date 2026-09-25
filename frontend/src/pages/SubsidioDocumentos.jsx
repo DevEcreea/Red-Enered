@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, Upload, CheckCircle2, AlertTriangle, AlertCircle, Trash2, Plus, Building2, Truck, Fuel, Banknote, FileText, Save, ScanLine, ShieldCheck, Send, Lock } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -123,6 +123,11 @@ export default function SubsidioDocumentos() {
     return () => clearInterval(interval);
   }, []);
   const [activeEtapa, setActiveEtapa] = useState("empresa");
+  // ?etapa=declaracion (viene del emergente de firma obligatoria / aviso rojo): abre esa etapa
+  // directamente y también si la URL cambia estando ya en la página.
+  const locEtapa = useLocation();
+  const etapaUrl = new URLSearchParams(locEtapa.search).get("etapa");
+  useEffect(() => { if (etapaUrl) setActiveEtapa(etapaUrl); }, [locEtapa.search]); // eslint-disable-line react-hooks/exhaustive-deps
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [createdDeclaracion, setCreatedDeclaracion] = useState(null);
 
@@ -134,7 +139,8 @@ export default function SubsidioDocumentos() {
       // lo reporta por onResumen → evita pedir el resumen dos veces en la primera carga.
       // Auto-jump to first incomplete stage on first load (salvo entrada solo-RUC → queda en Etapa 0)
       if (loading && user?.acceso_etapa0 !== true) {
-        const next = pickNextEtapa(data);
+        const pedida = new URLSearchParams(window.location.search).get("etapa");
+        const next = pedida || pickNextEtapa(data);
         if (next) setActiveEtapa(next);
       }
     } catch (err) {

@@ -19,8 +19,13 @@ export default function FirmaObligatoriaModal() {
   const navigate = useNavigate();
   const [firmas, setFirmas] = useState(null);
 
-  const esSubsidio = !!user && !user.es_guest && !user._admin_id && !user._impersonando && user.role !== "admin_enered"
-    && (user.role === "cliente_subsidio" || user.tipo_cliente === "subsidio" || !!user.servicios?.subsidio);
+  // Admin impersonando una empresa: también lo ve (para comprobar lo que ve el cliente), pero
+  // puede cerrarlo con "Continuar como admin" (queda cerrado el resto de la sesión del navegador).
+  const impersonando = (() => { try { return !!localStorage.getItem("enered_impersonate"); } catch (_) { return false; } })();
+  const esAdmin = !!user && (user.role === "admin_enered" || !!user._admin_id || !!user._impersonando);
+  const [cerradoAdmin, setCerradoAdmin] = useState(() => { try { return sessionStorage.getItem("firma_obligatoria_admin_ok") === "1"; } catch (_) { return false; } });
+  const esSubsidio = !!user && !user.es_guest && (impersonando || !esAdmin)
+    && (user.role === "cliente_subsidio" || user.tipo_cliente === "subsidio" || !!user.servicios?.subsidio || impersonando);
   const enPublica = RUTAS_PUBLICAS.includes(loc.pathname) || loc.pathname.startsWith("/captura/");
   const enFirma = RUTAS_FIRMA.some((r) => loc.pathname.startsWith(r));
 
@@ -32,7 +37,7 @@ export default function FirmaObligatoriaModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esSubsidio, enPublica, loc.pathname]);
 
-  if (!esSubsidio || enPublica || enFirma || !firmas) return null;
+  if (!esSubsidio || enPublica || enFirma || !firmas || (esAdmin && cerradoAdmin)) return null;
   const items = [];
   if (firmas.du004?.pendiente) items.push(`Declaración jurada DU 004 (${firmas.du004.facturas} factura${firmas.du004.facturas === 1 ? "" : "s"} cargada${firmas.du004.facturas === 1 ? "" : "s"})`);
   for (const p of (firmas.du007?.periodos_pendientes || [])) items.push(`Declaración jurada DU 007 · Periodo ${p}`);
@@ -62,6 +67,12 @@ export default function FirmaObligatoriaModal() {
           Firmar ahora <ArrowRight className="w-4 h-4" />
         </button>
         <p className="text-[11px] text-neutral-400 mt-3 text-center">Podrás seguir usando la plataforma en cuanto firmes.</p>
+        {esAdmin && (
+          <button onClick={() => { try { sessionStorage.setItem("firma_obligatoria_admin_ok", "1"); } catch (_) {} setCerradoAdmin(true); }}
+            className="mt-2 w-full text-xs text-neutral-500 underline hover:text-neutral-800" data-testid="firma-obligatoria-admin">
+            Soy admin de ENERED: continuar sin firmar (el cliente NO ve este botón)
+          </button>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { useLocation } from "react-router-dom";
 import QrSubidaCelular from "../components/QrSubidaCelular";
 import FirmasPendientes from "../components/FirmasPendientes";
 import ConstanciaApartado from "../components/ConstanciaApartado";
@@ -30,7 +31,12 @@ const PERIODOS_INFO = {
 export default function SubsidioDU007() {
   const { user } = useAuth();
   const esGuest = !!user?.es_guest;
-  const [etapa, setEtapa] = useState("combustible");
+  const [etapa, setEtapa] = useState(() => new URLSearchParams(window.location.search).get("etapa") || "combustible");
+  const locEtapa = useLocation();
+  useEffect(() => {
+    const e = new URLSearchParams(locEtapa.search).get("etapa");
+    if (e) setEtapa(e);
+  }, [locEtapa.search]);
   const [items, setItems] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [estado, setEstado] = useState(null);   // { periodos, declaraciones }

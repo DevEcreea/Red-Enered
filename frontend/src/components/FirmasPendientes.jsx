@@ -9,9 +9,9 @@ import { api } from "../lib/api";
 export function rutaFirmaPendiente(f) {
   if (!f) return null;
   // Primero la página de la DJ pendiente (la constancia se acepta en cualquiera de las dos).
-  if (f.du004?.pendiente) return "/subsidio/documentos";
-  if ((f.du007?.periodos_pendientes || []).length > 0) return "/subsidio/du007";
-  if (!f.constancia) return "/subsidio/documentos";
+  if (f.du004?.pendiente) return "/subsidio/documentos?etapa=declaracion";
+  if ((f.du007?.periodos_pendientes || []).length > 0) return "/subsidio/du007?etapa=declaracion";
+  if (!f.constancia) return "/subsidio/documentos?etapa=declaracion";
   return null;
 }
 
@@ -26,7 +26,8 @@ export default function FirmasPendientes({ actual, onCargado }) {
   }, []);
   if (!f) return null;
   const items = [];
-  if (!f.constancia) items.push({ k: "constancia", txt: "Constancia de términos del servicio", to: "/subsidio/documentos" });
+  const aquiTo = actual === "du007" ? "/subsidio/du007" : "/subsidio/documentos";
+  if (!f.constancia) items.push({ k: "constancia", txt: "Constancia de términos del servicio", to: aquiTo });
   if (f.du004?.pendiente) items.push({ k: "du004", txt: `Declaración jurada DU 004 (${f.du004.facturas} factura${f.du004.facturas === 1 ? "" : "s"} cargada${f.du004.facturas === 1 ? "" : "s"})`, to: "/subsidio/documentos" });
   for (const p of (f.du007?.periodos_pendientes || [])) items.push({ k: `du007_p${p}`, txt: `Declaración jurada DU 007 · Periodo ${p}`, to: "/subsidio/du007" });
   if (items.length === 0) return null;
@@ -43,9 +44,10 @@ export default function FirmasPendientes({ actual, onCargado }) {
             return (
               <li key={it.k} className="flex items-center gap-2 flex-wrap">
                 <span>• {it.txt}</span>
-                {aqui
-                  ? <span className="text-xs font-bold text-red-700">→ fírmala aquí, en la etapa de Declaración</span>
-                  : <button onClick={() => navigate(it.to)} className="text-xs font-bold underline text-red-700 hover:text-red-900">Ir a firmar →</button>}
+                <button onClick={() => navigate(`${it.to}?etapa=declaracion&t=${Date.now()}`)}
+                  className="text-xs font-bold underline text-red-700 hover:text-red-900">
+                  {aqui ? "Ir a la etapa de Declaración →" : "Ir a firmar →"}
+                </button>
               </li>
             );
           })}
