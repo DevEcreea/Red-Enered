@@ -3700,34 +3700,29 @@ async def admin_list_expedientes(
     # du007 — incluye las facturas previas al DU 007, que no llevan el campo `programa`.
     prog_match = {"programa": "du007"} if programa == "du007" else {"programa": {"$ne": "du007"}}
 
-    inv_agg = await db.consumos_subsidio.aggregate([
-        {"$match": {"user_id": {"$in": uids}, **prog_match}},
-        {"$group": {
-            "_id": {"u": "$user_id", "e": "$empresa", "status": "$status", "val": "$validacion_estado", "inv": "$invalida"},
-            "count": {"$sum": 1},
-            "gal": {"$sum": "$galones"},
-            "imp": {"$sum": "$importe_total"}
-        }}
-    ]).to_list(10000)
+    # Se leen las filas (no un $group en Mongo) para aplicar EXACTAMENTE la misma regla de
+    # 'reconocida' y la misma corrección de importe por placa que el detalle del expediente:
+    # antes el listado sumaba el importe guardado y no cuadraba con el detalle/tabla.
+    inv_rows = await db.consumos_subsidio.find(
+        {"user_id": {"$in": uids}, **prog_match},
+        {"_id": 0, "user_id": 1, "empresa": 1, "status": 1, "validacion_estado": 1, "invalida": 1,
+         "galones": 1, "precio_unitario": 1, "importe_total": 1},
+    ).to_list(50000)
 
     inv_map = {}
-    for r in inv_agg:
-        k = _emp_key(r["_id"]["u"], r["_id"].get("e"), base_de)
-        status = r["_id"]["status"]
-        nula = bool(r["_id"].get("inv"))  # marcada NULA por el admin: nunca cuenta
+    for r in inv_rows:
+        k = _emp_key(r.get("user_id"), r.get("empresa"), base_de)
         if k not in inv_map:
             inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
-        if status == "draft":
-            inv_map[k]["draft"] += r["count"]
-        elif status == "confirmed" and not nula:
-            inv_map[k]["conf"] += r["count"]
-        # DU 007 no tiene paso de "Confirmar" (queda en draft para siempre): se cuenta como
-        # "reconocido" todo lo que el validador no rechazó, igual criterio que el expediente
-        # y que /subsidio/du007/estado. DU 004 sigue exigiendo status=confirmed. NULAS nunca.
-        reconocida = (not nula) and ((r["_id"].get("val") != "RECHAZADA") if programa == "du007" else (status == "confirmed"))
-        if reconocida:
-            inv_map[k]["gal"] += r.get("gal", 0) or 0
-            inv_map[k]["imp"] += r.get("imp", 0) or 0
+        nula = bool(r.get("invalida"))
+        if r.get("status") == "draft":
+            inv_map[k]["draft"] += 1
+        elif r.get("status") == "confirmed" and not nula:
+            inv_map[k]["conf"] += 1
+        if _es_reconocida(r, programa):
+            _imp = _importe_por_placa(r)
+            inv_map[k]["gal"] += float(r.get("galones") or 0)
+            inv_map[k]["imp"] += float(_imp if _imp is not None else (r.get("importe_total") or 0))
 
     # Facturas de Red-Enered (db.invoices) por empresa, SIN contar el espejo de las que
     # ya están en consumos_subsidio (mismo id): antes se sumaban dos veces y la lista
@@ -3807,7 +3802,8 @@ async def admin_list_expedientes(
             "expediente_submitted_at": u.get(
                 "expediente_submitted_at_du007" if programa == "du007" else "expediente_submitted_at"),
             "ahorro_estimado": calc.get("subsidio_estimado", 0),
-            "ahorro_reconocido": round(float(inv["gal"]) * 4.0, 2),  # S//gal del subsidio, mismo factor que en todo el resto
+            "ahorro_reconocido": round(float(inv["gal"]) * SUBSIDIO_SOLES_POR_GALON, 2),  # = subsidio estimado
+            "subsidio_estimado": round(float(inv["gal"]) * SUBSIDIO_SOLES_POR_GALON, 2),
             "galones_confirmados": round(float(inv["gal"]), 2),
             "importe_confirmado": round(float(inv["imp"]), 2),
             "docs_count": docs_count,
@@ -3822,27 +3818,67 @@ async def admin_list_expedientes(
 
 
 
-def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
-    """KPIs de facturas del expediente (tarjetas 'Galones confirm.' / 'Ahorro recalculado').
-    DU 004: 'confirmado' = el cliente revisó los datos OCR y le dio 'Confirmar facturas'
-    (status=confirmed) — se mantiene igual, es un paso real de su flujo.
-    DU 007: esa página no tiene paso de 'Confirmar' (las facturas quedan en status=draft
-    para siempre); 'reconocido' es lo que el validador ya acepta como válido — igual
-    criterio que /subsidio/du007/estado usa para el cliente (todo lo que no sea
-    RECHAZADA). Antes esto se computaba solo por status=confirmed y el DU 007 siempre
-    mostraba S/ 0 arriba aunque la tabla de abajo sí sumara las facturas."""
-    # Las facturas marcadas NULAS (invalida) nunca cuentan, en ningún decreto: antes seguían
-    # sumando (con galones en 0 pero con su importe) y entraban en 'reconocidas'.
+SUBSIDIO_SOLES_POR_GALON = 4.0   # S/ por galón reconocido (DU 004 y DU 007, mismo factor)
+
+
+def _es_reconocida(i: dict, programa: Optional[str]) -> bool:
+    """Criterio ÚNICO de 'reconocida' (lo usan listado, detalle, KPIs y la tabla del admin):
+    las NULAS nunca; DU 007 = todo lo que el validador no rechazó (esa página no tiene paso
+    de 'Confirmar'); DU 004 = status=confirmed."""
+    if i.get("invalida"):
+        return False
     if programa == "du007":
-        cuenta = lambda i: (not i.get("invalida")) and (i.get("validacion_estado") or "") != "RECHAZADA"
-    else:
-        cuenta = lambda i: (not i.get("invalida")) and i.get("status") == "confirmed"
-    return {
+        return (i.get("validacion_estado") or "") != "RECHAZADA"
+    return i.get("status") == "confirmed"
+
+
+def _expediente_stats(invoices: list[dict], programa: Optional[str]) -> dict:
+    """KPIs de facturas del expediente. Todas las cifras salen del MISMO conjunto de filas y
+    la MISMA regla (`_es_reconocida`) que la tabla de facturas del admin, para que lo de
+    arriba cuadre con lo de abajo:
+      · galones_confirmados / importe_confirmado: suma de las reconocidas (= pie de la tabla)
+      · subsidio_estimado: galones reconocidos × S/ 4 (lo que antes se llamaba 'Ahorro
+        recalculado' y se confundía con el importe facturado)
+      · DU 007: desglose por periodo (1, 2, 3) y 'sin_periodo' (facturas que nunca pasaron
+        por el validador nuevo o cuya fecha no cae en ningún periodo) + nulas / rechazadas."""
+    rec = [i for i in invoices if _es_reconocida(i, programa)]
+    gal = round(sum(float(i.get("galones") or 0) for i in rec), 2)
+    imp = round(sum(float(i.get("importe_total") or 0) for i in rec), 2)
+    out = {
         "invoices_draft": sum(1 for i in invoices if i.get("status") == "draft"),
-        "invoices_confirmed": sum(1 for i in invoices if cuenta(i)),
-        "galones_confirmados": round(sum((i.get("galones") or 0) for i in invoices if cuenta(i)), 2),
-        "importe_confirmado": round(sum((i.get("importe_total") or 0) for i in invoices if cuenta(i)), 2),
+        "invoices_confirmed": len(rec),
+        "invoices_total": len(invoices),
+        "galones_confirmados": gal,
+        "importe_confirmado": imp,
+        "subsidio_estimado": round(gal * SUBSIDIO_SOLES_POR_GALON, 2),
+        "soles_por_galon": SUBSIDIO_SOLES_POR_GALON,
+        "nulas": sum(1 for i in invoices if i.get("invalida")),
+        "rechazadas": sum(1 for i in invoices if not i.get("invalida") and (i.get("validacion_estado") or "") == "RECHAZADA"),
+        "sin_revalidar": sum(1 for i in invoices if not i.get("invalida") and not i.get("validacion_estado")),
+        "reconocidas_sin_galones": sum(1 for i in rec if not i.get("galones")),
     }
+    if programa == "du007":
+        per = {k: {"periodo": k, "facturas": 0, "galones": 0.0, "importe": 0.0, "conformes": 0, "observadas": 0}
+               for k in (1, 2, 3)}
+        sin = {"facturas": 0, "galones": 0.0, "importe": 0.0}
+        for i in rec:
+            p = i.get("periodo_du007")
+            dest = per.get(p) if p in per else sin
+            dest["facturas"] += 1
+            dest["galones"] += float(i.get("galones") or 0)
+            dest["importe"] += float(i.get("importe_total") or 0)
+            if dest is not sin:
+                if i.get("validacion_estado") == "CONFORME":
+                    dest["conformes"] += 1
+                elif i.get("validacion_estado") == "OBSERVADA":
+                    dest["observadas"] += 1
+        for d in list(per.values()) + [sin]:
+            d["galones"] = round(d["galones"], 2)
+            d["importe"] = round(d["importe"], 2)
+            d["subsidio"] = round(d["galones"] * SUBSIDIO_SOLES_POR_GALON, 2)
+        out["periodos"] = [per[1], per[2], per[3]]
+        out["sin_periodo"] = sin
+    return out
 
 
 @subsidio_router.get("/admin/subsidio/expedientes/{user_id}")
@@ -3979,6 +4015,17 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
             
     # sort all by fecha descending
     invoices.sort(key=lambda x: x.get("fecha") or "", reverse=True)
+
+    # Importe de cada fila = consumo de ESA placa (galones × precio). Una factura con varias
+    # placas se guarda en varias filas con el total repetido: sumarlo tal cual multiplicaba el
+    # importe del expediente (S/ 960 mil en 5.9 mil galones). Se corrige al leer, guardando el
+    # total original en importe_factura, y la revalidación lo persiste.
+    for i in invoices:
+        _imp = _importe_por_placa(i)
+        if _imp is not None:
+            i["importe_factura"] = i.get("importe_total")
+            i["importe_total"] = _imp
+            i["importe_corregido"] = True
 
     # Etiquetas legibles
     for d in docs:

@@ -69,8 +69,12 @@ export default function SubsidioAdmin({ programa = "du004" }) {
     const total = items.length;
     const submitted = items.filter(i => i.expediente_status === "submitted").length;
     const ahorroEst = items.reduce((s, i) => s + (i.ahorro_estimado || 0), 0);
-    const ahorroRec = items.reduce((s, i) => s + ((i.galones_confirmados || 0) * 4), 0);
-    return { total, submitted, ahorroEst, ahorroRec };
+    const galones = items.reduce((s, i) => s + (i.galones_confirmados || 0), 0);
+    const importe = items.reduce((s, i) => s + (i.importe_confirmado || 0), 0);
+    // Subsidio = galones reconocidos × S/ 4 (mismo factor del backend). Antes se llamaba
+    // "Ahorro recalculado" y se confundía con el importe facturado de la tabla.
+    const subsidio = items.reduce((s, i) => s + (i.subsidio_estimado ?? (i.galones_confirmados || 0) * 4), 0);
+    return { total, submitted, ahorroEst, galones, importe, subsidio };
   }, [items]);
 
   const num = (v) => Number(v || 0).toLocaleString("es-PE", { maximumFractionDigits: 2 });
@@ -112,8 +116,10 @@ export default function SubsidioAdmin({ programa = "du004" }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Kpi label="Empresas" value={stats.total} />
             <Kpi label="Enviadas ATU" value={stats.submitted} color="emerald" />
-            <Kpi label="Ahorro est." value={`S/ ${num(stats.ahorroEst)}`} color="violet" />
-            <Kpi label="Ahorro recalculado" value={`S/ ${num(stats.ahorroRec)}`} color="emerald" />
+            <Kpi label="Galones reconocidos" value={num(stats.galones)} color="violet" />
+            <Kpi label="Importe reconocido" value={`S/ ${num(stats.importe)}`} />
+            <Kpi label="Subsidio (S/ 4 × gal)" value={`S/ ${num(stats.subsidio)}`} color="emerald" />
+            <Kpi label="Ahorro est. (diagnóstico)" value={`S/ ${num(stats.ahorroEst)}`} />
           </div>
         </div>
 
@@ -164,9 +170,10 @@ export default function SubsidioAdmin({ programa = "du004" }) {
                 <th className="text-right px-4 py-3">Docs</th>
                 <th className="text-right px-4 py-3">Flota</th>
                 <th className="text-right px-4 py-3">Facturas</th>
-                <th className="text-right px-4 py-3">Galones</th>
-                <th className="text-right px-4 py-3">Ahorro est.</th>
-                <th className="text-right px-4 py-3">Ahorro rec.</th>
+                <th className="text-right px-4 py-3" title="Galones de facturas reconocidas (no nulas, no rechazadas)">Galones rec.</th>
+                <th className="text-right px-4 py-3" title="Importe facturado de las reconocidas (una factura con varias placas cuenta cada placa con su consumo)">Importe rec.</th>
+                <th className="text-right px-4 py-3" title="Galones reconocidos × S/ 4">Subsidio est.</th>
+                <th className="text-right px-4 py-3" title="Estimado del diagnóstico inicial (calculadora)">Ahorro diag.</th>
                 <th className="text-center px-4 py-3">DJ</th>
                 <th className="px-2 py-3" />
               </tr>
@@ -207,8 +214,9 @@ export default function SubsidioAdmin({ programa = "du004" }) {
                       {it.invoices.draft > 0 && <span className="text-amber-600 ml-1">+{it.invoices.draft}d</span>}
                     </td>
                     <td className="px-4 py-3 text-right">{num(it.galones_confirmados)}</td>
-                    <td className="px-4 py-3 text-right text-violet-700 font-bold">S/ {num(it.ahorro_estimado)}</td>
-                    <td className="px-4 py-3 text-right text-emerald-700 font-bold">S/ {num(it.galones_confirmados * 4)}</td>
+                    <td className="px-4 py-3 text-right">S/ {num(it.importe_confirmado)}</td>
+                    <td className="px-4 py-3 text-right text-emerald-700 font-bold">S/ {num(it.subsidio_estimado ?? it.galones_confirmados * 4)}</td>
+                    <td className="px-4 py-3 text-right text-violet-700">S/ {num(it.ahorro_estimado)}</td>
                     <td className="px-4 py-3 text-center">
                       {it.declaracion_firmada ? <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" /> : <Clock className="w-4 h-4 text-neutral-300 inline" />}
                     </td>
@@ -356,8 +364,10 @@ function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <span className={`px-3 py-1.5 rounded-full text-xs font-bold border ${badge.color}`}>{badge.label}</span>
-            <Kpi label="Ahorro recalculado" value={`S/ ${num(stats.galones_confirmados * 4)}`} color="emerald" />
-            <Kpi label="Galones confirm." value={num(stats.galones_confirmados)} color="violet" />
+            <Kpi label="Facturas reconocidas" value={`${stats.invoices_confirmed} / ${stats.invoices_total ?? invoices.length}`} />
+            <Kpi label="Galones reconocidos" value={num(stats.galones_confirmados)} color="violet" />
+            <Kpi label="Importe reconocido" value={`S/ ${num(stats.importe_confirmado)}`} />
+            <Kpi label="Subsidio (S/ 4 × gal)" value={`S/ ${num(stats.subsidio_estimado ?? stats.galones_confirmados * 4)}`} color="emerald" />
             <button
               onClick={migrateToPlatform}
               className="px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-bold rounded-lg transition-colors shadow-sm"
@@ -366,6 +376,12 @@ function ExpedienteDetalle({ userId, empresa, programa = "du004", onBack }) {
             </button>
           </div>
         </div>
+
+        {/* DU 007: se presenta POR PERIODO → el mismo desglose que ve el cliente, con la misma
+            regla de las tarjetas de arriba y del pie de la tabla de facturas. */}
+        {programa === "du007" && stats.periodos && (
+          <ResumenPeriodosDU007 stats={stats} onVerFacturas={() => setTab("facturas")} />
+        )}
 
         {/* Control de etapas DU 004 (solo admin_enered) */}
         <StageController
@@ -690,6 +706,8 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
   const [fRuc, setFRuc] = useState("");
   const [fEstacion, setFEstacion] = useState("");
   const [fDoc, setFDoc] = useState("");
+  const [fPeriodo, setFPeriodo] = useState("");  // DU 007: 1 | 2 | 3 | "sin"
+  const [fVal, setFVal] = useState("");          // rec | norec | CONFORME | OBSERVADA | RECHAZADA
 
   const unicos = (campo) => [...new Set((invoices || []).map((i) => i[campo]).filter(Boolean))].sort();
   const placas = useMemo(() => unicos("placa"), [invoices]);
@@ -699,8 +717,19 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
     () => [...new Set((invoices || []).map((i) => (i.fecha || "").slice(0, 7)).filter(Boolean))].sort(),
     [invoices]);
 
+  // Mismo criterio que el resumen superior (backend _es_reconocida): las NULAS nunca;
+  // DU 007 = todo lo no rechazado; DU 004 = confirmadas.
+  const esReconocida = (i) => !i.invalida && (programa === "du007"
+    ? (i.validacion_estado || "") !== "RECHAZADA"
+    : i.status === "confirmed");
+
   const filtradas = useMemo(() => (invoices || []).filter((i) => {
     if (fPlaca && i.placa !== fPlaca) return false;
+    if (fPeriodo === "sin") { if (i.invalida || [1, 2, 3].includes(i.periodo_du007)) return false; }
+    else if (fPeriodo && String(i.periodo_du007) !== fPeriodo) return false;
+    if (fVal === "rec") { if (!esReconocida(i)) return false; }
+    else if (fVal === "norec") { if (esReconocida(i)) return false; }
+    else if (fVal && ((i.validacion_estado || "") !== fVal || i.invalida)) return false;
     if (fEstado === "invalida") { if (!i.invalida) return false; }
     else if (fEstado && (i.status !== fEstado || i.invalida)) return false;
     if (fMes && (i.fecha || "").slice(0, 7) !== fMes) return false;
@@ -709,21 +738,17 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
     if (fEstacion && !(i.estacion || "").toLowerCase().includes(fEstacion.toLowerCase())) return false;
     if (fDoc && !(i.numero_documento || "").toLowerCase().includes(fDoc.toLowerCase())) return false;
     return true;
-  }), [invoices, fPlaca, fEstado, fMes, fProducto, fRuc, fEstacion, fDoc]);
-  const hayFiltros = fPlaca || fEstado || fMes || fProducto || fRuc || fEstacion || fDoc;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [invoices, fPlaca, fEstado, fMes, fProducto, fRuc, fEstacion, fDoc, fPeriodo, fVal, programa]);
+  const hayFiltros = fPlaca || fEstado || fMes || fProducto || fRuc || fEstacion || fDoc || fPeriodo || fVal;
 
-  // Mismo criterio que el resumen superior (backend _expediente_stats): las NULAS nunca;
-  // DU 007 = todo lo no rechazado; DU 004 = confirmadas. Antes la tabla sumaba TODAS las
-  // filas (rechazadas y nulas incluidas) y no cuadraba con las tarjetas de arriba.
-  const esReconocida = (i) => !i.invalida && (programa === "du007"
-    ? (i.validacion_estado || "") !== "RECHAZADA"
-    : i.status === "confirmed");
   const reconocidas = filtradas.filter(esReconocida);
   const noRec = filtradas.filter((i) => !esReconocida(i));
   const totGal = reconocidas.reduce((a, i) => a + (Number(i.galones) || 0), 0);
   const totImp = reconocidas.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
   const noRecGal = noRec.reduce((a, i) => a + (Number(i.galones) || 0), 0);
   const noRecImp = noRec.reduce((a, i) => a + (Number(i.importe_total) || 0), 0);
+  const totSub = totGal * 4;   // subsidio estimado = galones reconocidos × S/ 4 (igual que las tarjetas)
 
   const zipHref = () => {
     const p = new URLSearchParams({ t: dlToken, programa });
@@ -745,7 +770,7 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
     <div className="space-y-3">
       <div className="flex items-center justify-end gap-3">
         {hayFiltros && (
-          <button onClick={() => { setFPlaca(""); setFEstado(""); setFMes(""); setFProducto(""); setFRuc(""); setFEstacion(""); setFDoc(""); }}
+          <button onClick={() => { setFPlaca(""); setFEstado(""); setFMes(""); setFProducto(""); setFRuc(""); setFEstacion(""); setFDoc(""); setFPeriodo(""); setFVal(""); }}
             className="text-xs font-bold text-neutral-500 hover:text-neutral-700">✕ Limpiar filtros</button>
         )}
         <button onClick={revalidar} disabled={revalidando}
@@ -767,9 +792,17 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
             <th className="text-left px-3 py-2">Estado
               <select value={fEstado} onChange={(e) => setFEstado(e.target.value)} className={`${hSel} ${fEstado ? activo : ""}`}>
                 <option value="">Todos</option>
-                <option value="confirmed">CONF</option>
-                <option value="draft">DRAFT</option>
+                {programa !== "du007" && <option value="confirmed">CONF</option>}
+                {programa !== "du007" && <option value="draft">DRAFT</option>}
                 <option value="invalida">NO APLICA</option>
+              </select>
+              <select value={fVal} onChange={(e) => setFVal(e.target.value)} className={`${hSel} ${fVal ? activo : ""}`} title="Validación">
+                <option value="">Validación: todas</option>
+                <option value="rec">Reconocidas</option>
+                <option value="norec">No reconocidas</option>
+                <option value="CONFORME">CONFORME</option>
+                <option value="OBSERVADA">OBSERVADA</option>
+                <option value="RECHAZADA">RECHAZADA</option>
               </select>
             </th>
             <th className="text-left px-3 py-2">Fecha
@@ -777,6 +810,15 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
                 <option value="">Todas</option>
                 {meses.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
+              {programa === "du007" && (
+                <select value={fPeriodo} onChange={(e) => setFPeriodo(e.target.value)} className={`${hSel} ${fPeriodo ? activo : ""}`} title="Periodo DU 007">
+                  <option value="">Periodo: todos</option>
+                  <option value="1">Periodo 1</option>
+                  <option value="2">Periodo 2</option>
+                  <option value="3">Periodo 3</option>
+                  <option value="sin">Sin periodo</option>
+                </select>
+              )}
             </th>
             <th className="text-left px-3 py-2">Placa
               <select value={fPlaca} onChange={(e) => setFPlaca(e.target.value)} className={`${hSel} ${fPlaca ? activo : ""}`}>
@@ -814,16 +856,36 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
         <tbody className="divide-y divide-neutral-100">
           {filtradas.map((i) => (
             <tr key={i.id} data-testid={`invoice-row-${i.id}`}>
-              <td className="px-3 py-1.5">
-                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700" : i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  {i.invalida ? "NO APLICA" : i.status === "confirmed" ? "CONF" : "DRAFT"}
-                </span>
+              <td className="px-3 py-1.5 whitespace-nowrap">
+                {programa === "du007" ? (
+                  // DU 007 no tiene paso de "Confirmar": lo que importa es el veredicto del validador
+                  // (es lo que suma arriba) y a qué periodo cayó. Antes decía CONF/DRAFT y no ayudaba.
+                  <>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700"
+                      : i.validacion_estado === "CONFORME" ? "bg-emerald-100 text-emerald-700"
+                      : i.validacion_estado === "OBSERVADA" ? "bg-amber-100 text-amber-700"
+                      : i.validacion_estado === "RECHAZADA" ? "bg-red-100 text-red-700"
+                      : "bg-neutral-200 text-neutral-600"}`}
+                      title={i.invalida ? "Marcada como nula por el admin" : (i.validacion?.motivos || []).join(" · ") || (i.validacion_estado ? "" : "Sin revalidar: nunca pasó por el validador")}>
+                      {i.invalida ? "NO APLICA" : i.validacion_estado || "SIN REVALIDAR"}
+                    </span>
+                    {!i.invalida && [1, 2, 3].includes(i.periodo_du007) && (
+                      <span className="ml-1 px-1 py-0.5 rounded bg-brand/10 text-brand text-[10px] font-bold" title={`Periodo ${i.periodo_du007} del DU 007`}>P{i.periodo_du007}</span>
+                    )}
+                  </>
+                ) : (
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${i.invalida ? "bg-red-100 text-red-700" : i.status === "confirmed" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                    {i.invalida ? "NO APLICA" : i.status === "confirmed" ? "CONF" : "DRAFT"}
+                  </span>
+                )}
               </td>
               <td className="px-3 py-1.5">{i.fecha || "—"}</td>
               <td className="px-3 py-1.5 font-mono">{i.placa || "—"}</td>
               <td className="px-3 py-1.5">{i.producto || "—"}</td>
               <td className="px-3 py-1.5 text-right">{i.galones ?? "—"}</td>
-              <td className="px-3 py-1.5 text-right font-bold">{i.importe_total ? `S/ ${num(i.importe_total)}` : "—"}</td>
+              <td className="px-3 py-1.5 text-right font-bold" title={i.importe_corregido ? `Consumo de esta placa (galones × precio). Total de la factura: S/ ${num(i.importe_factura)}` : undefined}>
+                {i.importe_total ? `S/ ${num(i.importe_total)}` : "—"}{i.importe_corregido && <span className="text-neutral-400 font-normal" title="Importe repartido por placa">*</span>}
+              </td>
               <td className="px-3 py-1.5 font-mono">{i.ruc_emisor || "—"}</td>
               <td className="px-3 py-1.5 truncate max-w-[120px]" title={i.estacion}>{i.estacion || "—"}</td>
               <td className="px-3 py-1.5 font-mono">{i.numero_documento || "—"}</td>
@@ -862,7 +924,10 @@ function TabFacturas({ invoices, onDelete, userId, empresa, programa = "du004", 
         <tfoot>
           <tr className="bg-neutral-50 border-t-2 border-neutral-200 font-bold">
             <td className="px-3 py-2.5 text-neutral-500 uppercase text-[10px] tracking-widest" colSpan={4}>
-              Reconocido · {reconocidas.length} de {filtradas.length} factura{filtradas.length === 1 ? "" : "s"}
+              Reconocido · {reconocidas.length} de {filtradas.length} factura{filtradas.length === 1 ? "" : "s"}{hayFiltros ? " (filtradas)" : ""}
+              <span className="block normal-case tracking-normal text-emerald-700 font-bold mt-0.5">
+                Subsidio estimado (S/ 4 × gal): S/ {num(totSub)}
+              </span>
               {noRec.length > 0 && (
                 <span className="block normal-case tracking-normal text-neutral-400 font-medium mt-0.5">
                   No reconocido · {noRec.length} (rechazadas, nulas o sin confirmar): {num(noRecGal)} gal · S/ {num(noRecImp)}
@@ -966,6 +1031,53 @@ function StageController({ currentStage, updatedAt, isSubmitted, onChange, savin
 }
 
 /* ====== UI helpers ====== */
+const PERIODOS_DU007 = {
+  1: "16 ago – 15 set", 2: "16 set – 15 oct", 3: "16 oct – 15 nov",
+};
+
+function ResumenPeriodosDU007({ stats, onVerFacturas }) {
+  const sin = stats.sin_periodo || { facturas: 0, galones: 0, importe: 0 };
+  const alertas = [];
+  if (stats.sin_revalidar > 0) alertas.push(`${stats.sin_revalidar} sin revalidar (nunca pasaron por el validador: no tienen estado ni periodo)`);
+  if (sin.facturas > 0) alertas.push(`${sin.facturas} reconocida${sin.facturas === 1 ? "" : "s"} sin periodo (${num(sin.galones)} gal · S/ ${num(sin.importe)}) — cuentan en los totales de arriba pero no en ningún periodo`);
+  if (stats.reconocidas_sin_galones > 0) alertas.push(`${stats.reconocidas_sin_galones} reconocida${stats.reconocidas_sin_galones === 1 ? "" : "s"} sin galones (no suman)`);
+  return (
+    <div className="mt-5" data-testid="du007-periodos">
+      <div className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-2">Reconocido por periodo · DU 007</div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {stats.periodos.map((p) => (
+          <div key={p.periodo} className="border border-neutral-200 rounded-xl p-3 bg-neutral-50/60" data-testid={`du007-periodo-${p.periodo}`}>
+            <div className="text-[11px] font-bold text-brand">PERIODO {p.periodo} <span className="text-neutral-400 font-medium">· {PERIODOS_DU007[p.periodo]}</span></div>
+            <div className="mt-1 text-sm text-neutral-800">
+              <b>{p.facturas}</b> factura{p.facturas === 1 ? "" : "s"} · <b>{num(p.galones)}</b> gal · S/ {num(p.importe)}
+            </div>
+            <div className="text-xs text-neutral-500 mt-0.5">
+              Subsidio <b className="text-emerald-700">S/ {num(p.subsidio)}</b>
+              {p.facturas > 0 && <> · {p.conformes} conforme{p.conformes === 1 ? "" : "s"}{p.observadas > 0 && <>, {p.observadas} observada{p.observadas === 1 ? "" : "s"}</>}</>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {(alertas.length > 0 || stats.nulas > 0 || stats.rechazadas > 0) && (
+        <div className="mt-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
+          {alertas.map((a, i) => (
+            <button key={i} type="button" onClick={onVerFacturas} className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-left hover:bg-amber-100">
+              ⚠ {a} · <u>ver facturas y revalidar</u>
+            </button>
+          ))}
+          {(stats.nulas > 0 || stats.rechazadas > 0) && (
+            <span className="text-neutral-500 self-center">
+              No reconocidas: {stats.rechazadas > 0 && <>{stats.rechazadas} rechazada{stats.rechazadas === 1 ? "" : "s"}</>}
+              {stats.rechazadas > 0 && stats.nulas > 0 && " · "}
+              {stats.nulas > 0 && <>{stats.nulas} nula{stats.nulas === 1 ? "" : "s"}</>}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Kpi({ label, value, color = "neutral" }) {
   const palette = {
     neutral: "bg-neutral-50 border-neutral-200 text-neutral-900",
