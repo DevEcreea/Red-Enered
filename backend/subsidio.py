@@ -3724,12 +3724,15 @@ async def admin_list_expedientes(
     # antes el listado sumaba el importe guardado y no cuadraba con el detalle/tabla.
     inv_rows = await db.consumos_subsidio.find(
         {"user_id": {"$in": uids}, **prog_match},
-        {"_id": 0, "user_id": 1, "empresa": 1, "status": 1, "validacion_estado": 1, "invalida": 1,
-         "galones": 1, "precio_unitario": 1, "importe_total": 1},
+        {"_id": 0, "id": 1, "user_id": 1, "empresa": 1, "status": 1, "validacion_estado": 1, "invalida": 1,
+         "galones": 1, "precio_unitario": 1, "importe_total": 1, "numero_documento": 1, "ruc_emisor": 1},
     ).to_list(50000)
 
+    _reparto = _repartir_importes_por_placa(inv_rows)
     inv_map = {}
     for r in inv_rows:
+        if r.get("id") in _reparto:
+            r = {**r, **_reparto[r["id"]]}
         k = _emp_key(r.get("user_id"), r.get("empresa"), base_de)
         if k not in inv_map:
             inv_map[k] = {"draft": 0, "conf": 0, "gal": 0, "imp": 0}
@@ -4039,11 +4042,15 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
     # placas se guarda en varias filas con el total repetido: sumarlo tal cual multiplicaba el
     # importe del expediente (S/ 960 mil en 5.9 mil galones). Se corrige al leer, guardando el
     # total original en importe_factura, y la revalidación lo persiste.
+    _reparto = _repartir_importes_por_placa(invoices)
     for i in invoices:
         _imp = _importe_por_placa(i)
         if _imp is not None:
             i["importe_factura"] = i.get("importe_total")
             i["importe_total"] = _imp
+            i["importe_corregido"] = True
+        elif i.get("id") in _reparto:
+            i.update(_reparto[i["id"]])
             i["importe_corregido"] = True
 
     # Etiquetas legibles
@@ -4162,9 +4169,13 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
 
     cambiaron = promovidas = reclasificadas = 0
     por_estado = {"CONFORME": 0, "OBSERVADA": 0, "RECHAZADA": 0}
+    _reparto = _repartir_importes_por_placa(filas)
     for f in filas:
         prog = f.get("programa") if f.get("programa") in ("du004", "du007") else "du004"
         patch: dict = {}
+        if f.get("id") in _reparto:
+            patch.update(_reparto[f["id"]])
+            f = {**f, **_reparto[f["id"]]}
         if f.get("fecha"):
             prog_fecha = _programa_estricto_por_fecha(f.get("fecha"))
             if prog_fecha in ("du004", "du007") and prog_fecha != prog:
@@ -5096,6 +5107,40 @@ def _importe_por_placa(doc: dict) -> Optional[float]:
     if actual <= 0 or abs(actual - calc) > max(1.0, calc * 0.01):
         return calc
     return None
+
+
+def _repartir_importes_por_placa(filas: list) -> dict:
+    """Facturas con VARIAS placas cargadas como varias filas (misma serie) donde cada fila trae el
+    TOTAL de la factura repetido y sin precio unitario (CASALI: S/ 20,661 en 14 filas → S/ 289 mil
+    de un solo comprobante). Si ≥2 filas del mismo comprobante comparten el mismo importe y no
+    tienen precio, se reparte ese importe en proporción a los galones de cada fila.
+    Devuelve {id: {"importe_total", "precio_unitario", "importe_factura"}} solo para las filas
+    a corregir (las que ya tienen precio las corrige _importe_por_placa)."""
+    grupos: dict = {}
+    for f in filas:
+        try:
+            g = float(f.get("galones") or 0)
+            imp = float(f.get("importe_total") or 0)
+            precio = float(f.get("precio_unitario") or 0)
+        except (TypeError, ValueError):
+            continue
+        num = str(f.get("numero_documento") or "").strip().upper()
+        if not num or g <= 0 or imp <= 0 or precio > 0 or not f.get("id"):
+            continue
+        k = (str(f.get("ruc_emisor") or "").strip(), num, round(imp, 2))
+        grupos.setdefault(k, []).append((f["id"], g))
+    out = {}
+    for (_, _, total), miembros in grupos.items():
+        if len(miembros) < 2:
+            continue
+        suma_gal = sum(g for _, g in miembros)
+        if suma_gal <= 0:
+            continue
+        precio = total / suma_gal
+        for fid, g in miembros:
+            out[fid] = {"importe_total": round(total * g / suma_gal, 2), "precio_unitario": round(precio, 4),
+                        "importe_factura": total}
+    return out
 
 
 def _completitud(o: dict) -> int:
