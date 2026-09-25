@@ -41,7 +41,7 @@ class MtcError(Exception):
 # Regla de negocio (Giuliana, 25/09/2026): solo las placas de un permiso que APLICA cuentan
 # para el subsidio; una empresa puede tener un permiso que aplica y otro que no, y rige el
 # que está activo (habilitado y vigente).
-PERMISOS_APLICAN = {"CNG", "MRP", "URV", "ERG", "INT"}
+PERMISOS_APLICAN = {"CNG", "MRP", "URV", "ERG", "INT", "CIR"}   # CIR: confirmado por Giuliana (25/09/2026) que aplica
 PERMISOS_NO_APLICAN = {"MPW", "PNT", "PNW", "CON", "C0N", "TRA", "ESC"}
 
 
