@@ -1783,17 +1783,15 @@ async def aceptar_declaracion(
     if existing:
         return {"ok": True, "declaracion": existing, "already": True}
 
-    # Validar que hayan terminado etapas 1, 2 y 3
-    drafts_pendientes = await db.consumos_subsidio.count_documents(
-        {**_own_q(user, uids), "status": "draft"}
+    # Validar etapas 1, 2 y 3. Orden nuevo (Giuliana, 25/09/2026): la constancia y la DJ se
+    # firman ANTES de "Enviar reporte" — el envío exige ambas firmas — así que aquí basta con
+    # tener facturas cargadas (borrador o confirmadas). Antes exigía confirmadas y sin borradores,
+    # lo que haría imposible firmar antes de enviar.
+    cargadas = await db.consumos_subsidio.count_documents(
+        {**_own_q(user, uids), "status": {"$in": ["draft", "confirmed"]}, "invalida": {"$ne": True}}
     )
-    confirmadas = await db.consumos_subsidio.count_documents(
-        {**_own_q(user, uids), "status": "confirmed"}
-    )
-    if drafts_pendientes > 0:
-        raise HTTPException(status_code=400, detail="Aún tienes facturas en borrador. Confírmalas antes de firmar la declaración.")
-    if confirmadas == 0:
-        raise HTTPException(status_code=400, detail="Debes subir y confirmar al menos una factura de combustible.")
+    if cargadas == 0:
+        raise HTTPException(status_code=400, detail="Debes cargar al menos una factura de combustible antes de firmar la declaración.")
 
     # Verificar docs empresa + flota subidos
     docs = await db.subsidio_documents.find(_own_q(user, uids), {"_id": 0}).to_list(1000)
@@ -1849,6 +1847,14 @@ async def aceptar_declaracion(
     )
     rec_out = {k: v for k, v in record.items() if k != "_id"}
     return {"ok": True, "declaracion": rec_out, "expediente_status": "submitted"}
+
+
+@subsidio_router.get("/subsidio/firmas")
+async def get_firmas(user: dict = Depends(_require_subsidio)):
+    """¿Qué firmas tiene el cliente para poder 'Enviar reporte'? (constancia + declaración)."""
+    uids = await _get_company_uids(user)
+    f = await _firmas_para_enviar(user, uids)
+    return {**f, "listo": f["constancia"] and f["declaracion"]}
 
 
 @subsidio_router.get("/subsidio/declaracion")
@@ -2651,12 +2657,38 @@ async def invoices_delete(invoice_id: str, user: dict = Depends(_require_subsidi
     return {"ok": True}
 
 
+async def _firmas_para_enviar(user: dict, uids: list) -> dict:
+    """Estado de las dos firmas que exige 'Enviar reporte': la Constancia de términos del servicio
+    (por usuario, versión vigente) y la Declaración jurada de veracidad (por empresa)."""
+    from server import CONSTANCIA_VERSION as _CV
+    constancia = (user.get("constancia_aceptada") or {}).get("version") == _CV
+    if not constancia and user.get("id"):
+        # el objeto `user` puede venir del contexto de impersonación/empresa: releer al usuario real
+        _u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "constancia_aceptada": 1})
+        constancia = ((_u or {}).get("constancia_aceptada") or {}).get("version") == _CV
+    declaracion = bool(await db.subsidio_declaraciones.find_one(_own_q(user, uids), {"_id": 1}))
+    return {"constancia": constancia, "declaracion": declaracion}
+
+
 @subsidio_router.post("/subsidio/invoices/confirm")
 async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     """Confirma TODAS las facturas en draft del usuario → status=confirmed.
-    Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed."""
+    Crea las facturas correspondientes en db.invoices y marca expediente_status=confirmed.
+    Candado (Giuliana, 25/09/2026): NO se envía el reporte sin la Constancia de términos del
+    servicio aceptada y la Declaración jurada de veracidad firmada — si algo sale mal ante la
+    ATU, la responsabilidad quedó declarada por el cliente. El admin que impersona no está
+    sujeto (actúa a sabiendas)."""
     now = datetime.now(timezone.utc).isoformat()
     uids = await _get_company_uids(user)
+    if not user.get("_admin_id"):
+        firmas = await _firmas_para_enviar(user, uids)
+        if not (firmas["constancia"] and firmas["declaracion"]):
+            faltan = [n for n, ok in (("la Constancia de términos del servicio", firmas["constancia"]),
+                                      ("la Declaración jurada de veracidad", firmas["declaracion"])) if not ok]
+            raise HTTPException(status_code=409, detail={
+                "codigo": "firmas_pendientes", **firmas,
+                "message": "Antes de enviar tu reporte debes firmar " + " y ".join(faltan) + ".",
+            })
     drafts = await db.consumos_subsidio.find({**_own_q(user, uids), "status": "draft"}).to_list(1000)
 
     for d in drafts:

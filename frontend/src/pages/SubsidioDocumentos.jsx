@@ -344,7 +344,8 @@ export default function SubsidioDocumentos() {
           <FlotaEtapa items={checklist.flota} vehicles={vehicles} onChange={load} />
         )}
         {activeEtapa === "combustible" && (
-          <CombustibleEtapa onAnyChange={load} confirmedCountFromDashboard={data?.invoices?.confirmed ?? 0} />
+          <CombustibleEtapa onAnyChange={load} confirmedCountFromDashboard={data?.invoices?.confirmed ?? 0}
+            data={data} totals={totals} />
         )}
         {activeEtapa === "declaracion" && (
           <DeclaracionEtapa
@@ -407,16 +408,18 @@ function calcTotals(data) {
   const empresaTot = c.empresa.length + 1;
   const flotaDone = c.flota.filter((x) => x.uploaded).length;
   const flotaTot = Math.max(c.flota.length, 1);
-  // Combustible: contamos facturas confirmadas (drafts aún no se aceptan como completos)
+  // Combustible: cuenta facturas CARGADAS (borrador o confirmada). La constancia y la DJ se
+  // firman ANTES de "Enviar reporte" (el envío exige ambas), así que un borrador ya habilita la Etapa 4.
   const confirmedCount = data?.invoices?.confirmed ?? 0;
-  const combDone = confirmedCount > 0 ? 1 : 0;
+  const cargadasCount = confirmedCount + (data?.invoices?.draft ?? 0);
+  const combDone = cargadasCount > 0 ? 1 : 0;
   const combTot = 1;
   const declDone = data.declaracion ? 1 : 0;
 
   const byEtapa = {
     empresa: { done: empresaDone, total: empresaTot, pct: pct(empresaDone, empresaTot) },
     flota: { done: flotaDone, total: flotaTot, pct: pct(flotaDone, flotaTot) },
-    combustible: { done: combDone, total: combTot, pct: combDone * 100, confirmedCount },
+    combustible: { done: combDone, total: combTot, pct: combDone * 100, confirmedCount, cargadasCount },
     declaracion: { done: declDone, total: 1, pct: declDone * 100 },
   };
   const done = empresaDone + flotaDone + combDone + declDone;
@@ -719,7 +722,10 @@ function FlotaEtapa({ items, vehicles, onChange }) {
 /* ============================================================ */
 /* Etapa 3 — Combustible: OCR inline (upload + draft preview + confirm) */
 /* ============================================================ */
-function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
+function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard, data, totals }) {
+  // Candado: "Enviar reporte" exige la Constancia de términos del servicio y la Declaración
+  // jurada de veracidad firmadas. Si faltan, se abre aquí mismo la Etapa 4 para firmarlas.
+  const [firmasModal, setFirmasModal] = useState(null); // null | {constancia, declaracion}
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -801,11 +807,16 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
     if (dirty.length > 0 && !window.confirm("Hay cambios sin guardar. ¿Confirmar de todos modos?")) return;
     setConfirming(true);
     try {
+      // 1) ¿Ya firmó la constancia y la declaración jurada? Si no, se firman antes de enviar.
+      const { data: firmas } = await api.get("/subsidio/firmas").catch(() => ({ data: null }));
+      if (firmas && !firmas.listo) { setFirmasModal(firmas); return; }
       await api.post("/subsidio/invoices/confirm");
       await load(); onAnyChange?.();
-      setSuccess(`✅ Confirmaste ${items.length} factura(s). Pueden cargar más o continúa a la declaración jurada.`);
+      setSuccess(`✅ Reporte enviado: ${items.length} factura(s) registrada(s). Puedes adjuntar más facturas cuando quieras.`);
     } catch (e) {
-      setError(e?.response?.data?.detail || "Error al confirmar");
+      const d = e?.response?.data?.detail;
+      if (d && typeof d === "object" && d.codigo === "firmas_pendientes") { setFirmasModal(d); return; }
+      setError(typeof d === "string" ? d : (d?.message || "Error al confirmar"));
     } finally { setConfirming(false); }
   };
 
@@ -903,6 +914,39 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
           Enviar reporte ({items.length})
         </button>
       </div>
+
+      {firmasModal && (
+        <div className="fixed inset-0 z-[80] bg-black/50 flex items-start justify-center p-4 overflow-y-auto" data-testid="firmas-modal">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl my-6">
+            <div className="p-5 border-b border-neutral-200 flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Antes de enviar tu reporte</div>
+                <h3 className="font-cabinet text-xl font-bold mt-1">Firma pendiente</h3>
+                <p className="text-sm text-neutral-600 mt-1">
+                  Para registrar tus facturas ante ENERED debes tener firmadas
+                  {!firmasModal.constancia && <> la <b>Constancia de términos del servicio</b></>}
+                  {!firmasModal.constancia && !firmasModal.declaracion && " y"}
+                  {!firmasModal.declaracion && <> la <b>Declaración jurada de veracidad</b></>}.
+                  Fírmalas aquí y el reporte se enviará solo.
+                </p>
+              </div>
+              <button onClick={() => setFirmasModal(null)} className="text-neutral-400 hover:text-neutral-700 text-xl leading-none" aria-label="Cerrar">×</button>
+            </div>
+            <div className="p-5">
+              {data && totals ? (
+                <DeclaracionEtapa data={data} totals={totals} embebida
+                  onAccepted={async () => { setFirmasModal(null); onAnyChange?.(); await enviarReporte(); }}
+                  onConstancia={async (ok) => {
+                    // Si solo faltaba la constancia (la DJ ya estaba), al aceptarla se envía el reporte.
+                    if (ok && firmasModal?.declaracion) { setFirmasModal(null); await enviarReporte(); }
+                  }} />
+              ) : (
+                <p className="text-sm text-neutral-600">Ve a la <b>Etapa 4 · Declaración jurada y términos del servicio</b>, fírmalas y vuelve a "Enviar reporte".</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -910,7 +954,7 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard }) {
 /* ============================================================ */
 /* Etapa 4 — Declaración jurada                                  */
 /* ============================================================ */
-function DeclaracionEtapa({ data, totals, onAccepted }) {
+function DeclaracionEtapa({ data, totals, onAccepted, onConstancia, embebida = false }) {
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -918,7 +962,8 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
 
   // Términos del servicio: la Constancia se acepta en su apartado (ConstanciaApartado);
   // aquí solo guardamos si ya está aceptada para condicionar el firmado de la DJ.
-  const [constanciaOk, setConstanciaOk] = useState(false);
+  const [constanciaOk, setConstanciaOkRaw] = useState(false);
+  const setConstanciaOk = (ok) => { setConstanciaOkRaw(ok); onConstancia?.(ok); };
 
   const empresa = data.user?.empresa || "[RAZÓN SOCIAL]";
   // Representante legal: primero el registrado en SUNAT (ficha de la empresa), luego el contacto
@@ -933,7 +978,7 @@ function DeclaracionEtapa({ data, totals, onAccepted }) {
   const missingList = [
     !empresaOk && `Etapa 1 · Empresa (${totals.byEtapa.empresa.done}/${totals.byEtapa.empresa.total})`,
     !flotaOk && `Etapa 2 · Flota (${totals.byEtapa.flota.done}/${totals.byEtapa.flota.total})`,
-    !combOk && `Etapa 3 · al menos 1 factura confirmada`,
+    !combOk && `Etapa 3 · al menos 1 factura cargada`,
     !constanciaOk && `Aceptar la constancia de términos del servicio (arriba)`,
   ].filter(Boolean);
 
