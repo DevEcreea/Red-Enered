@@ -6,6 +6,7 @@ import { useAuth } from "../context/AuthContext";
 import ValidacionPendiente from "../components/ValidacionPendiente";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 import ConstanciaApartado from "../components/ConstanciaApartado";
+import FirmasPendientes from "../components/FirmasPendientes";
 import QrSubidaCelular from "../components/QrSubidaCelular";
 
 // --- Factura subida: muestra lo que ENERED leyó del comprobante y su validación ---
@@ -198,6 +199,7 @@ export default function SubsidioDocumentos() {
   return (
     <div className="space-y-6" data-testid="subsidio-documentos">
       <ValidacionPendiente contexto="los indicadores de tu flota" />
+      <FirmasPendientes actual="du004" />
       {/* HEADER */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="flex items-start justify-between flex-wrap gap-4 mb-6">

@@ -1,3 +1,4 @@
+import { api } from "../lib/api";
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -22,7 +23,14 @@ export default function Login() {
       // Clientes de subsidio (por rol o por tipo de cliente de su empresa): la primera
       // vista es SIEMPRE el expediente DU-004, para que completen sus datos.
       if (u?.role === "cliente_subsidio" || u?.tipo_cliente === "subsidio") {
-        navigate("/subsidio/documentos");
+        // Si el DU 004 ya está firmado pero falta la DJ del DU 007, se aterriza en el DU 007
+        // (son dos declaraciones distintas; antes siempre caía en el 004 y el 007 quedaba sin firmar).
+        let destino = "/subsidio/documentos";
+        try {
+          const { data: f } = await api.get("/subsidio/firmas");
+          if (f?.constancia && !f?.du004?.pendiente && (f?.du007?.periodos_pendientes || []).length > 0) destino = "/subsidio/du007";
+        } catch (_) { /* sin datos → DU 004 */ }
+        navigate(destino);
       } else {
         navigate("/dashboard");
       }

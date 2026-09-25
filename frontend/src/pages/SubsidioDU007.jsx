@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import QrSubidaCelular from "../components/QrSubidaCelular";
+import FirmasPendientes from "../components/FirmasPendientes";
+import ConstanciaApartado from "../components/ConstanciaApartado";
 import { useAuth } from "../context/AuthContext";
 import ComprobantesTabla, { CargaMasiva } from "../components/ComprobantesTabla";
 import {
@@ -75,7 +77,13 @@ export default function SubsidioDU007() {
     }
   };
 
+  // Constancia de términos del servicio: obligatoria antes de firmar la DJ de cualquier periodo
+  // (mismo respaldo legal que en el DU 004). El backend también lo exige (409 firmas_pendientes).
+  const [constanciaOk, setConstanciaOk] = useState(false);
+  const [firmasKey, setFirmasKey] = useState(0);
+
   const firmar = async (periodo) => {
+    if (!constanciaOk) { alert("Primero acepta la Constancia de términos del servicio (arriba)."); return; }
     if (!window.confirm(
       `Vas a firmar la declaración jurada del PERIODO ${periodo} del DU 007.\n\n` +
       "Declaras que los consumos presentados son exactos y corresponden a unidades M2/M3/N1/N2/N3 " +
@@ -85,8 +93,10 @@ export default function SubsidioDU007() {
       const { data } = await api.post("/subsidio/du007/declaracion", { periodo });
       alert(`✅ Declaración del periodo ${periodo} firmada (${data.facturas_incluidas} facturas incluidas).`);
       await load();
+      setFirmasKey((k) => k + 1);
     } catch (e) {
-      alert(e?.response?.data?.detail || "No se pudo firmar la declaración.");
+      const d = e?.response?.data?.detail;
+      alert(typeof d === "string" ? d : (d?.message || "No se pudo firmar la declaración."));
     }
   };
 
@@ -112,6 +122,7 @@ export default function SubsidioDU007() {
 
   return (
     <div className="space-y-5">
+      {!esGuest && <FirmasPendientes key={firmasKey} actual="du007" />}
       {/* Encabezado + las 2 etapas */}
       <div className="bg-white border border-neutral-200 rounded-2xl p-6 shadow-sm">
         <div className="text-[11px] font-bold uppercase tracking-widest text-brand mb-1">Asistente de subsidio · DU 007-2026</div>
@@ -216,10 +227,12 @@ export default function SubsidioDU007() {
 
       {/* ETAPA 2 · Declaración: una por periodo */}
       {etapa === "declaracion" && (esGuest ? <BloquGuest titulo="Declaración jurada" /> : (
+        <>
+        <ConstanciaApartado onEstado={setConstanciaOk} />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {(estado?.periodos || []).map((p) => {
             const firmada = declaradaEl(p.periodo);
-            const puede = p.facturas > 0 && !firmada;
+            const puede = p.facturas > 0 && !firmada && constanciaOk;
             return (
               <div key={p.periodo} className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm flex flex-col">
                 <div className="text-[11px] font-bold uppercase tracking-widest text-brand">Periodo {p.periodo}</div>
@@ -240,7 +253,7 @@ export default function SubsidioDU007() {
                     <button onClick={() => firmar(p.periodo)} disabled={!puede}
                       className="w-full btn-brand py-2.5 rounded-lg text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                       {puede ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-                      {p.facturas === 0 ? "Facturas pendientes de carga" : "Firmar declaración"}
+                      {p.facturas === 0 ? "Facturas pendientes de carga" : !constanciaOk ? "Acepta la constancia (arriba)" : "Firmar declaración"}
                     </button>
                   )}
                 </div>
@@ -248,6 +261,7 @@ export default function SubsidioDU007() {
             );
           })}
         </div>
+        </>
       ))}
     </div>
   );

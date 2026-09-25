@@ -1849,12 +1849,36 @@ async def aceptar_declaracion(
     return {"ok": True, "declaracion": rec_out, "expediente_status": "submitted"}
 
 
+async def _firmas_pendientes_por_decreto(user: dict, uids: list) -> dict:
+    """Son DOS declaraciones juradas distintas: la del DU 004 (una sola) y la del DU 007 (una por
+    periodo). Pendiente = tiene facturas cargadas (no nulas, no rechazadas) y no firmó."""
+    q = _own_q(user, uids)
+    du004_fact = await db.consumos_subsidio.count_documents(
+        {**q, "programa": {"$ne": "du007"}, "status": {"$in": ["draft", "confirmed"]}, "invalida": {"$ne": True}})
+    du004_firmada = bool(await db.subsidio_declaraciones.find_one(q, {"_id": 1}))
+    rows = await db.consumos_subsidio.find(
+        {**q, "programa": "du007", "invalida": {"$ne": True}, "validacion_estado": {"$ne": "RECHAZADA"}},
+        {"_id": 0, "periodo_du007": 1}).to_list(5000)
+    con_fact = sorted({r.get("periodo_du007") for r in rows if r.get("periodo_du007") in (1, 2, 3)})
+    firmados = sorted({d.get("periodo") async for d in db.declaraciones_du007.find(q, {"_id": 0, "periodo": 1})})
+    return {
+        "du004": {"facturas": du004_fact, "firmada": du004_firmada, "pendiente": du004_fact > 0 and not du004_firmada},
+        "du007": {"periodos_con_facturas": con_fact, "periodos_firmados": firmados,
+                  "periodos_pendientes": [p for p in con_fact if p not in firmados]},
+    }
+
+
 @subsidio_router.get("/subsidio/firmas")
 async def get_firmas(user: dict = Depends(_require_subsidio)):
-    """¿Qué firmas tiene el cliente para poder 'Enviar reporte'? (constancia + declaración)."""
+    """Firmas del cliente: constancia + DJ DU 004 (candado de 'Enviar reporte') y, además, qué
+    tiene pendiente en cada decreto (la DJ del DU 007 es OTRA, por periodo)."""
     uids = await _get_company_uids(user)
     f = await _firmas_para_enviar(user, uids)
-    return {**f, "listo": f["constancia"] and f["declaracion"]}
+    por_decreto = await _firmas_pendientes_por_decreto(user, uids)
+    return {**f, "listo": f["constancia"] and f["declaracion"], **por_decreto,
+            "pendientes": (["constancia"] if not f["constancia"] else [])
+                          + (["du004"] if por_decreto["du004"]["pendiente"] else [])
+                          + [f"du007_p{p}" for p in por_decreto["du007"]["periodos_pendientes"]]}
 
 
 @subsidio_router.get("/subsidio/declaracion")
@@ -2976,6 +3000,12 @@ async def du007_declaracion(payload: dict, request: Request, user: dict = Depend
     if periodo not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="Periodo inválido (1, 2 o 3)")
     uids = await _get_company_uids(user)
+    if not user.get("_admin_id"):
+        _f = await _firmas_para_enviar(user, uids)
+        if not _f["constancia"]:
+            raise HTTPException(status_code=409, detail={
+                "codigo": "firmas_pendientes", "constancia": False, "declaracion": True,
+                "message": "Antes de firmar la declaración del DU 007 debes aceptar la Constancia de términos del servicio."})
     n = await db.consumos_subsidio.count_documents(
         {**_own_q(user, uids), "programa": "du007", "periodo_du007": periodo,
          "validacion_estado": {"$ne": "RECHAZADA"}})
