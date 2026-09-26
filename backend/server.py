@@ -4254,6 +4254,8 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
 
     for r in rows:
         r["atraso_dias"] = _calc_atraso(r)
+        if r.get("producto"):
+            r["producto"] = normalizar_producto(r["producto"]) or r["producto"]
 
     # Sort all invoices by f_emision descending (newest first to oldest last)
     def _sort_key(inv):
