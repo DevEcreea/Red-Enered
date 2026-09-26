@@ -2048,6 +2048,20 @@ async def list_consumptions(
             uid_filter["empresa"] = target_emp
 
         raw_sub = await db.consumos_subsidio.find(uid_filter, {"raw_ocr_response": 0, "factura_storage_key": 0}).sort("fecha", -1).to_list(limit)
+        # Mismas correcciones que el detalle admin: una factura con varias placas no repite el
+        # total en cada fila (galones × precio, o reparto por galones si no hay precio). Sin esto
+        # el precio derivado salía disparatado (S/ 9,795 en 60 gal → "163/gal").
+        try:
+            from subsidio import _repartir_importes_por_placa as _rep_pl, _importe_por_placa as _imp_pl
+            _rep = _rep_pl(raw_sub)
+            for r in raw_sub:
+                _imp = _imp_pl(r)
+                if _imp is not None:
+                    r["importe_total"] = _imp
+                elif r.get("id") in _rep:
+                    r.update(_rep[r["id"]])
+        except Exception as _e:
+            logger.warning(f"Reparto de importes por placa en /consumptions falló: {_e}")
         mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
         
         def keep(row):
@@ -5333,7 +5347,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.34-precio-derivado",
+        "version": "1.9.35-consumos-reparto-placa",
     }
 
 # ============================================================
