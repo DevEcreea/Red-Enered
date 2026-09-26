@@ -5528,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.43-citv-diagnostico",
+        "version": "1.9.44-citv-debug",
     }
 
 # ============================================================
@@ -6365,6 +6365,25 @@ async def vehiculo_verificacion_manual(payload: VerificacionManualIn, req: Reque
     await db.vehiculos.update_one({"_id": v["_id"]} if "_id" in v else {"id": v.get("id")},
                                   {"$set": cambios})
     return {"ok": True, "placa": placa, "guardado": {k: cambios[k] for k in (f"{pref}_vencimiento", f"{pref}_estado")}}
+
+
+@api.get("/vehiculos/citv-debug/{placa}")
+async def citv_debug(req: Request, placa: str):
+    """Admin: qué responde json.pe (crudo) para la revisión técnica de una placa, qué se
+    deriva de ello y qué hay guardado. Para diagnosticar sin entrar al servidor. 5 créditos."""
+    u = await require_auth(req)
+    if u["role"] != "admin_enered" and u.get("_admin_role") != "admin_enered":
+        raise HTTPException(403, "Solo administradores ENERED")
+    p = (placa or "").replace("-", "").replace(" ", "").upper()
+    crudo = await _jsonpe("revision-tecnica", {"placa": p})
+    derivado = await _placa_revtec(p)
+    guardado = await db.vehiculos.find_one({"placa": p}, {"_id": 0, "empresa": 1, "placa": 1, "revtec_vencimiento": 1,
+                                                          "revtec_certificado": 1, "revtec_desde": 1, "revtec_centro": 1,
+                                                          "revtec_estado": 1, "revtec_consultado_en": 1,
+                                                          "revtec_fuente_version": 1, "enriquecido_en": 1})
+    return {"placa": p, "hay_token": bool(os.getenv("JSONPE_TOKEN", "").strip()),
+            "jsonpe_crudo": crudo, "derivado": derivado, "guardado": guardado,
+            "ultimo_error_jsonpe": _JSONPE_ULTIMO_ERROR}
 
 
 @api.post("/vehiculos/vigencias/reset")
