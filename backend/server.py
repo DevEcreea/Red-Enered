@@ -1937,6 +1937,37 @@ def tenant_filter(user: dict) -> dict:
     return {"EMPRESA": user.get("empresa")}
 
 
+# ---------- Normalización del producto (cargas del subsidio) ----------
+# El OCR devuelve "DIESEL B5 S50 UV 21.61 25.", "Disel B5", "DB5", "SIESEL B5"... Para reportes,
+# dashboard y filtros se lleva a un catálogo corto: DIESEL B5 / GASOHOL 95 / GASOHOL REGULAR /
+# GASOHOL PREMIUM / GLP / GNV. Lo que no se reconoce se limpia de números y se deja tal cual.
+_PROD_DIESEL_RE = re.compile(r"D[IEO]?[IE]?S+[EI]?L|BIODI|\bDB5\b|\bD2\b|\bB5\b|\bB50\b", re.I)
+
+
+def normalizar_producto(value: Optional[str]) -> str:
+    s = re.sub(r"\s+", " ", str(value or "")).strip().upper()
+    if not s:
+        return ""
+    if "GNV" in s:
+        return "GNV"
+    if "GLP" in s:
+        return "GLP"
+    if _PROD_DIESEL_RE.search(s):
+        return "DIESEL B5"
+    if re.search(r"GASOHOL|GASOLINA|\bG-|^G ", s) or re.search(r"\b(84|90|95|97|98)\b", s):
+        m = re.search(r"\b(84|90|95|97|98)\b", s)
+        if m:
+            return f"GASOHOL {m.group(1)}"
+        if "PREM" in s:
+            return "GASOHOL PREMIUM"
+        if "REG" in s:
+            return "GASOHOL REGULAR"
+        return "GASOHOL"
+    # Desconocido: fuera tokens con dígitos/puntos (restos de precio o cantidad)
+    limpio = " ".join(t for t in re.split(r"[ _\-]+", s) if t and not re.search(r"\d", t)).strip(" .")
+    return limpio or s
+
+
 # ---------- Unificación de estación / ciudad (cargas del subsidio) ----------
 # El OCR escribe el mismo grifo de varias formas ("SERVICENTROS MARIELENA   S.A.C.",
 # "SERVICENTROS MARIELENA", "MARIELENA") y la ciudad a veces truncada o como región
@@ -2011,6 +2042,12 @@ def _unificar_estaciones(rows: list) -> list:
                     ruc = ruc_c
         else:
             r["ESTACION"] = "Sin estación"
+        # "Red"/proveedor (RAZON_SOCIAL_EMISOR): si la factura no traía razón social, el
+        # mapper cae al nombre crudo o al RUC; aquí se reemplaza por el nombre unificado.
+        if r["ESTACION"] != "Sin estación" and "RAZON_SOCIAL_EMISOR" in r:
+            rs = re.sub(r"\s+", " ", str(r.get("RAZON_SOCIAL_EMISOR") or "")).strip()
+            if not rs or rs == ruc or rs == nom or _clave_estacion(rs) == _clave_estacion(r["ESTACION"]):
+                r["RAZON_SOCIAL_EMISOR"] = r["ESTACION"]
         c = normalize_city(r.get("CIUDAD"))
         if ruc and ruc in ciudad_ruc:
             c = ciudad_ruc[ruc]
@@ -2049,7 +2086,7 @@ def _subsidio_row_to_consumption(r: dict) -> dict:
         "PLACA": r.get("placa") or "",
         "CIUDAD": normalize_city(r.get("ciudad")),
         "ESTACION": r.get("estacion") or "",
-        "PRODUCTO": r.get("producto") or "",
+        "PRODUCTO": normalizar_producto(r.get("producto")),
         "CANTIDAD_GL": gal,
         "PRECIO_UNITARIO": pre,
         "IMPORTE_TOTAL": imp,
@@ -2598,7 +2635,7 @@ async def dashboard_filter_options(user: dict = Depends(get_current_user), empre
         for r in raw:
             if r.get("placa"): placas.add(r["placa"])
             if r.get("estacion"): estaciones.add(r["estacion"])
-            if r.get("producto"): productos.add(r["producto"])
+            if r.get("producto"): productos.add(normalizar_producto(r["producto"]))
             f = (r.get("fecha") or "")[:10]
             try:
                 y, m, d = (int(x) for x in f.split("-"))
@@ -3125,16 +3162,18 @@ async def dashboard_kpis(
         sub_q.setdefault("fecha", {})["$lte"] = fecha_hasta
     if placa:
         sub_q["placa"] = placa.upper()
-    if estacion:
-        sub_q["estacion"] = estacion
-    if producto:
-        sub_q["producto"] = producto
+    # estación y producto se filtran DESPUÉS de unificar/normalizar (los filtros ofrecen los
+    # nombres canónicos, no las variantes crudas del OCR).
 
     sub_proj = {"_id": 0, "galones": 1, "importe_total": 1, "precio_unitario": 1, "precio_pizarra": 1, "fecha": 1, "hora": 1, "placa": 1, "ciudad": 1, "estacion": 1, "ruc_emisor": 1, "producto": 1, "kilometraje": 1, "semana": 1}
     sub_rows = await db.consumos_subsidio.find(sub_q, sub_proj).to_list(100000)
     mapped_sub = _unificar_estaciones([_subsidio_row_to_consumption(r) for r in sub_rows])
     if semana:
         mapped_sub = [r for r in mapped_sub if r.get("SEMANA") == semana]
+    if estacion:
+        mapped_sub = [r for r in mapped_sub if r.get("ESTACION") == estacion]
+    if producto:
+        mapped_sub = [r for r in mapped_sub if r.get("PRODUCTO") == producto]
     rows.extend(mapped_sub)
 
     def _f(x, default=0):
@@ -5447,7 +5486,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.37-estaciones-unificadas",
+        "version": "1.9.38-red-y-producto-unificados",
     }
 
 # ============================================================

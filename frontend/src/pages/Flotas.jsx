@@ -675,7 +675,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     <td style={{ ...tdSt, whiteSpace: "normal", maxWidth: 150, minWidth: 110, textOverflow: "clip" }}>
                       {(() => {
                         if (r._origen === "subsidio") {
-                          const supplierName = r.RAZON_SOCIAL_EMISOR || r.RUC_EMISOR || r.ESTACION || "Proveedor";
+                          const supplierName = r.RAZON_SOCIAL_EMISOR || r.ESTACION || r.RUC_EMISOR || "Proveedor";
                           return (
                             <span 
                               title={supplierName}
