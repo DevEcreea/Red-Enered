@@ -269,8 +269,9 @@ export default function Documentacion() {
     const ven = `${d}/${m}/${a}`;
     setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: true } }));
     try {
-      await api.post("/vehiculos/verificacion-manual", { placa, campo: "revtec", vencimiento: ven, estado: f.estado || "VIGENTE" });
-      setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: false, ok: true } }));
+      await api.post("/vehiculos/verificacion-manual", { placa, campo: "revtec", vencimiento: ven, estado: f.estado || "VIGENTE",
+        certificado: (f.certificado || "").trim() || null, centro: (f.centro || "").trim() || null });
+      setGuiadaForm(p => ({ ...p, [placa]: { ...f, guardando: false, ok: true, editar: false } }));
       setGuiadaVehs(p => p.map(v => v.placa === placa ? { ...v, revtec: ven } : v));
       load();
     } catch (err) {
@@ -2167,15 +2168,27 @@ export default function Documentacion() {
                 return (
                   <div key={v.placa} style={{ display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 0",borderBottom:"1px solid #F3F4F6" }}>
                     <span style={{ fontWeight:800,fontFamily:"ui-monospace,monospace",fontSize:13,minWidth:76 }}>{v.placa}</span>
-                    {v.revtec ? (
+                    {v.revtec && !f.editar ? (
                       <span style={{ display:"flex",alignItems:"center",gap:6,fontSize:12.5,color:"#0EA46B",fontWeight:700 }}>
                         <CheckCircle2 style={{ width:15,height:15 }}/> vence {v.revtec}{f.ok ? " · guardado ✓" : ""}
+                        {/* La API (json.pe) a veces trae un certificado viejo: se puede corregir con el dato del portal MTC */}
+                        <button type="button" onClick={()=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,editar:true,ok:false } }))}
+                          title="Reemplazar con el certificado que muestra el portal del MTC"
+                          style={{ marginLeft:8,height:26,padding:"0 10px",background:"#F3F4F6",color:"#374151",border:"1px solid #E5E7EB",borderRadius:6,fontSize:11.5,fontWeight:700,cursor:"pointer" }}>
+                          Corregir
+                        </button>
                       </span>
                     ) : (
                       <>
                         <input type="date" value={f.fecha||""}
                           onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,fecha:e.target.value } }))}
                           style={{ height:34,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}/>
+                        <input type="text" placeholder="N° certificado (opcional)" value={f.certificado||""}
+                          onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,certificado:e.target.value } }))}
+                          style={{ height:34,width:190,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}/>
+                        <input type="text" placeholder="Centro certificador (opcional)" value={f.centro||""}
+                          onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,centro:e.target.value } }))}
+                          style={{ height:34,width:210,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}/>
                         <select value={f.estado||"VIGENTE"}
                           onChange={e=>setGuiadaForm(p=>({ ...p,[v.placa]:{ ...f,estado:e.target.value } }))}
                           style={{ height:34,padding:"0 8px",border:"1px solid #E5E7EB",borderRadius:8,fontSize:12.5 }}>

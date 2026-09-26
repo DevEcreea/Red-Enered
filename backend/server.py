@@ -5528,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.44-citv-debug",
+        "version": "1.9.45-citv-corregir-manual",
     }
 
 # ============================================================
@@ -6333,6 +6333,9 @@ class VerificacionManualIn(BaseModel):
     campo: Literal["revtec", "soat"] = "revtec"
     vencimiento: str  # dd/mm/yyyy
     estado: Optional[str] = None
+    certificado: Optional[str] = None   # N° de certificado CITV / póliza (opcional)
+    centro: Optional[str] = None        # empresa certificadora / aseguradora (opcional)
+    desde: Optional[str] = None         # vigente desde dd/mm/yyyy (opcional)
 
 
 @api.post("/vehiculos/verificacion-manual")
@@ -6355,15 +6358,33 @@ async def vehiculo_verificacion_manual(payload: VerificacionManualIn, req: Reque
     if not v:
         raise HTTPException(404, "Vehículo no encontrado en la empresa activa")
     pref = "revtec" if payload.campo == "revtec" else "soat"
+    ahora = datetime.now(timezone.utc).isoformat()
     cambios = {
         f"{pref}_vencimiento": ven,
         f"{pref}_estado": (payload.estado or "VIGENTE").upper(),
         f"{pref}_fuente": "manual",
         f"{pref}_verificado_por": u.get("email") or u.get("name") or "",
-        f"{pref}_verificado_en": datetime.now(timezone.utc).isoformat(),
+        f"{pref}_verificado_en": ahora,
+        f"{pref}_consultado_en": ahora,
     }
-    await db.vehiculos.update_one({"_id": v["_id"]} if "_id" in v else {"id": v.get("id")},
-                                  {"$set": cambios})
+    # Datos del certificado/póliza: los nuevos si vienen; si no, se BORRAN los viejos para que
+    # la fila no mezcle la fecha nueva con el certificado anterior (C9E932: 2026 con cert. 2018).
+    if pref == "revtec":
+        cambios["revtec_fuente_version"] = 2
+        pares = {"revtec_certificado": (payload.certificado or "").strip(),
+                 "revtec_centro": (payload.centro or "").strip(),
+                 "revtec_desde": (payload.desde or "").strip()}
+        cambios["revtec_resultado"] = "APROBADO" if cambios["revtec_estado"] == "VIGENTE" else cambios["revtec_estado"]
+    else:
+        pares = {"soat_poliza": (payload.certificado or "").strip(),
+                 "soat_compania": (payload.centro or "").strip(),
+                 "soat_desde": (payload.desde or "").strip()}
+    quitar = {k: 1 for k, val in pares.items() if not val}
+    cambios.update({k: val for k, val in pares.items() if val})
+    op = {"$set": cambios}
+    if quitar:
+        op["$unset"] = quitar
+    await db.vehiculos.update_one({"_id": v["_id"]} if "_id" in v else {"id": v.get("id")}, op)
     return {"ok": True, "placa": placa, "guardado": {k: cambios[k] for k in (f"{pref}_vencimiento", f"{pref}_estado")}}
 
 
@@ -6557,9 +6578,18 @@ async def _enriquecer_flota(filt: dict) -> dict:
             nuevos["revtec_consultado_en"] = datetime.now(timezone.utc).isoformat()
             citv_consultadas += 1
             if rt:
-                nuevos.update(rt)
                 fallos_mtc = 0
                 citv_ok += 1
+                # json.pe a veces trae solo un certificado viejo (C9E932: 2018 cuando el MTC
+                # tiene uno de 2025). Nunca se reemplaza una vigencia por otra más antigua ni
+                # se pisa una verificación manual con un dato de API de menor fecha.
+                f_api = _fecha_tupla(rt.get("revtec_vencimiento"))
+                f_act = _fecha_tupla(v.get("revtec_vencimiento"))
+                if f_api and f_act and f_api < f_act:
+                    nuevos["revtec_fuente_version"] = 2
+                    detalle.append({"placa": placa, "revtec_ignorado": f"API trae {rt.get('revtec_vencimiento')} (más antiguo que {v.get('revtec_vencimiento')})"})
+                else:
+                    nuevos.update(rt)
             else:
                 citv_fallidas.append(placa)
                 # sin dato ni "sin registro" = el MTC rechazó (429). Tras 3 seguidos, se frena:
