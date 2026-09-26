@@ -145,7 +145,7 @@ export default function SubsidioDocumentos() {
         let firmaPend = false;
         try {
           const { data: f } = await api.get("/subsidio/firmas");
-          firmaPend = !!(f && (f.du004?.pendiente || !f.constancia));
+          firmaPend = !!(f && !f.constancia);
         } catch (_) { /* sin datos → flujo normal */ }
         const next = pedida || (firmaPend ? "declaracion" : pickNextEtapa(data));
         if (next) setActiveEtapa(next);
@@ -938,11 +938,8 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard, data, tota
                 <div className="text-[10px] uppercase tracking-widest font-bold text-brand">Antes de enviar tu reporte</div>
                 <h3 className="font-cabinet text-xl font-bold mt-1">Firma pendiente</h3>
                 <p className="text-sm text-neutral-600 mt-1">
-                  Para registrar tus facturas ante ENERED debes tener firmadas
-                  {!firmasModal.constancia && <> la <b>Constancia de términos del servicio</b></>}
-                  {!firmasModal.constancia && !firmasModal.declaracion && " y"}
-                  {!firmasModal.declaracion && <> la <b>Declaración jurada de veracidad</b></>}.
-                  Fírmalas aquí y el reporte se enviará solo.
+                  Para registrar tus facturas ante ENERED debes aceptar la <b>Constancia de términos del servicio</b> (obligatoria).
+                  La declaración jurada de veracidad es recomendada. Acepta la constancia aquí y el reporte se enviará solo.
                 </p>
               </div>
               <button onClick={() => setFirmasModal(null)} className="text-neutral-400 hover:text-neutral-700 text-xl leading-none" aria-label="Cerrar">×</button>
@@ -952,8 +949,8 @@ function CombustibleEtapa({ onAnyChange, confirmedCountFromDashboard, data, tota
                 <DeclaracionEtapa data={data} totals={totals} embebida
                   onAccepted={async () => { setFirmasModal(null); onAnyChange?.(); await enviarReporte(); }}
                   onConstancia={async (ok) => {
-                    // Si solo faltaba la constancia (la DJ ya estaba), al aceptarla se envía el reporte.
-                    if (ok && firmasModal?.declaracion) { setFirmasModal(null); await enviarReporte(); }
+                    // La constancia es lo único obligatorio: al aceptarla se envía el reporte.
+                    if (ok) { setFirmasModal(null); await enviarReporte(); }
                   }} />
               ) : (
                 <p className="text-sm text-neutral-600">Ve a la <b>Etapa 4 · Declaración jurada y términos del servicio</b>, fírmalas y vuelve a "Enviar reporte".</p>

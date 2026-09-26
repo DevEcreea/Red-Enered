@@ -1875,10 +1875,13 @@ async def get_firmas(user: dict = Depends(_require_subsidio)):
     uids = await _get_company_uids(user)
     f = await _firmas_para_enviar(user, uids)
     por_decreto = await _firmas_pendientes_por_decreto(user, uids)
-    return {**f, "listo": f["constancia"] and f["declaracion"], **por_decreto,
-            "pendientes": (["constancia"] if not f["constancia"] else [])
-                          + (["du004"] if por_decreto["du004"]["pendiente"] else [])
-                          + [f"du007_p{p}" for p in por_decreto["du007"]["periodos_pendientes"]]}
+    # `listo` y `pendientes` solo miran la constancia (obligatoria). Las DJ (du004/du007) se
+    # informan para mostrarlas como recomendadas, pero no bloquean nada.
+    tiene_facturas = por_decreto["du004"]["facturas"] > 0 or bool(por_decreto["du007"]["periodos_con_facturas"])
+    return {**f, "listo": f["constancia"], **por_decreto, "tiene_facturas": tiene_facturas,
+            "pendientes": (["constancia"] if not f["constancia"] else []),
+            "dj_pendientes": (["du004"] if por_decreto["du004"]["pendiente"] else [])
+                             + [f"du007_p{p}" for p in por_decreto["du007"]["periodos_pendientes"]]}
 
 
 @subsidio_router.get("/subsidio/declaracion")
@@ -2704,14 +2707,14 @@ async def invoices_confirm(user: dict = Depends(_require_subsidio)):
     sujeto (actúa a sabiendas)."""
     now = datetime.now(timezone.utc).isoformat()
     uids = await _get_company_uids(user)
+    # Giuliana (25/09/2026): lo que protege a ENERED es la CONSTANCIA de términos del servicio
+    # (ENERGIX); la declaración jurada de veracidad es opcional y no bloquea el envío.
     if not user.get("_admin_id"):
         firmas = await _firmas_para_enviar(user, uids)
-        if not (firmas["constancia"] and firmas["declaracion"]):
-            faltan = [n for n, ok in (("la Constancia de términos del servicio", firmas["constancia"]),
-                                      ("la Declaración jurada de veracidad", firmas["declaracion"])) if not ok]
+        if not firmas["constancia"]:
             raise HTTPException(status_code=409, detail={
                 "codigo": "firmas_pendientes", **firmas,
-                "message": "Antes de enviar tu reporte debes firmar " + " y ".join(faltan) + ".",
+                "message": "Antes de enviar tu reporte debes aceptar la Constancia de términos del servicio.",
             })
     drafts = await db.consumos_subsidio.find({**_own_q(user, uids), "status": "draft"}).to_list(1000)
 

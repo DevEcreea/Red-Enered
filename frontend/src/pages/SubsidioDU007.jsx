@@ -58,9 +58,11 @@ export default function SubsidioDU007() {
       // (salvo que la URL pida otra etapa). Periodo pendiente = con facturas válidas y sin firma.
       if (!new URLSearchParams(window.location.search).get("etapa") && !primeraCargaRef.current) {
         primeraCargaRef.current = true;
-        const firmados = new Set((est.data?.declaraciones || []).map((d) => d.periodo));
-        const pend = (est.data?.periodos || []).some((p) => p.facturas > 0 && !firmados.has(p.periodo));
-        if (pend) setEtapa("declaracion");
+        // Solo si falta la CONSTANCIA (obligatoria); la DJ del periodo es recomendada.
+        try {
+          const { data: f } = await api.get("/subsidio/firmas");
+          if (f && !f.constancia && (est.data?.periodos || []).some((p) => p.facturas > 0)) setEtapa("declaracion");
+        } catch (_) {}
       }
     } catch { /* silencioso: el diagnóstico funciona igual */ }
   };

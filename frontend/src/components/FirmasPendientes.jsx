@@ -6,13 +6,13 @@ import { api } from "../lib/api";
 /* Son DOS declaraciones juradas distintas: la del DU 004 (una sola) y la del DU 007 (una por
    periodo). Este aviso muestra lo que falta firmar en AMBOS decretos, esté donde esté el cliente,
    y lo lleva a la pantalla correcta. `actual` = decreto de la página donde se muestra. */
+/* Solo la CONSTANCIA de términos del servicio es obligatoria (Giuliana, 25/09/2026); las DJ de
+   veracidad se muestran como recomendadas. La constancia se acepta en la etapa de Declaración
+   del decreto donde el cliente tiene facturas (DU 007 si solo tiene ahí). */
 export function rutaFirmaPendiente(f) {
-  if (!f) return null;
-  // Primero la página de la DJ pendiente (la constancia se acepta en cualquiera de las dos).
-  if (f.du004?.pendiente) return "/subsidio/documentos?etapa=declaracion";
-  if ((f.du007?.periodos_pendientes || []).length > 0) return "/subsidio/du007?etapa=declaracion";
-  if (!f.constancia) return "/subsidio/documentos?etapa=declaracion";
-  return null;
+  if (!f || f.constancia) return null;
+  const soloDu007 = !(f.du004?.facturas > 0) && (f.du007?.periodos_con_facturas || []).length > 0;
+  return soloDu007 ? "/subsidio/du007?etapa=declaracion" : "/subsidio/documentos?etapa=declaracion";
 }
 
 export default function FirmasPendientes({ actual, onCargado }) {
@@ -31,21 +31,29 @@ export default function FirmasPendientes({ actual, onCargado }) {
   if (f.du004?.pendiente) items.push({ k: "du004", txt: `Declaración jurada DU 004 (${f.du004.facturas} factura${f.du004.facturas === 1 ? "" : "s"} cargada${f.du004.facturas === 1 ? "" : "s"})`, to: "/subsidio/documentos" });
   for (const p of (f.du007?.periodos_pendientes || [])) items.push({ k: `du007_p${p}`, txt: `Declaración jurada DU 007 · Periodo ${p}`, to: "/subsidio/du007" });
   if (items.length === 0) return null;
+  const obligatoria = !f.constancia;
+  const tono = obligatoria
+    ? { box: "bg-red-50 border-red-200", icon: "text-red-600", txt: "text-red-900", sub: "text-red-800", link: "text-red-700 hover:text-red-900" }
+    : { box: "bg-amber-50 border-amber-200", icon: "text-amber-600", txt: "text-amber-900", sub: "text-amber-800", link: "text-amber-700 hover:text-amber-900" };
   return (
-    <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3" data-testid="firmas-pendientes">
-      <ShieldAlert className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
-      <div className="text-sm text-red-900 flex-1">
-        <div className="font-bold">Tienes {items.length} firma{items.length === 1 ? "" : "s"} pendiente{items.length === 1 ? "" : "s"}</div>
-        <div className="text-red-800 mt-0.5">Sin la declaración jurada tus facturas no se presentan a la ATU. Fírmala para que tu consumo cuente.</div>
+    <div className={`${tono.box} border rounded-2xl p-4 flex items-start gap-3`} data-testid="firmas-pendientes">
+      <ShieldAlert className={`w-5 h-5 ${tono.icon} mt-0.5 flex-shrink-0`} />
+      <div className={`text-sm ${tono.txt} flex-1`}>
+        <div className="font-bold">{obligatoria ? "Firma obligatoria pendiente" : "Firmas recomendadas pendientes"}</div>
+        <div className={`${tono.sub} mt-0.5`}>
+          {obligatoria
+            ? "Para que ENERED gestione tu expediente debes aceptar la Constancia de términos del servicio (obligatoria). La declaración jurada de veracidad es recomendada."
+            : "La declaración jurada de veracidad es opcional, pero te recomendamos firmarla: respalda tu expediente ante la ATU."}
+        </div>
         <ul className="mt-2 space-y-1">
           {items.map((it) => {
             // La constancia se acepta en la etapa de Declaración de cualquiera de los dos decretos.
             const aqui = it.k === "constancia" || (actual === "du004" && it.to === "/subsidio/documentos") || (actual === "du007" && it.to === "/subsidio/du007");
             return (
               <li key={it.k} className="flex items-center gap-2 flex-wrap">
-                <span>• {it.txt}</span>
+                <span>• {it.txt}{it.k === "constancia" ? <b> (obligatoria)</b> : <span className="opacity-70"> (recomendada)</span>}</span>
                 <button onClick={() => navigate(`${it.to}?etapa=declaracion&t=${Date.now()}`)}
-                  className="text-xs font-bold underline text-red-700 hover:text-red-900">
+                  className={`text-xs font-bold underline ${tono.link}`}>
                   {aqui ? "Ir a la etapa de Declaración →" : "Ir a firmar →"}
                 </button>
               </li>
