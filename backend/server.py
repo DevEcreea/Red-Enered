@@ -5528,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.42-citv-mas-reciente",
+        "version": "1.9.43-citv-diagnostico",
     }
 
 # ============================================================
@@ -6415,6 +6415,7 @@ async def _enriquecer_flota(filt: dict) -> dict:
               "soat_vencimiento", "revtec_vencimiento", "valor_referencial"]
     vehiculos = await db.vehiculos.find(filt).to_list(2000)
     revisados, completados_total, detalle = 0, 0, []
+    citv_consultadas, citv_ok, citv_fallidas = 0, 0, []
     leyenda_caida = False
     fallos_mtc, mtc_bloqueado = 0, False  # freno automático ante 429 del MTC (vía json.pe)
     # sin token de json.pe no hay SOAT/CITV que consultar (y no debe contar como bloqueo del MTC)
@@ -6535,10 +6536,13 @@ async def _enriquecer_flota(filt: dict) -> dict:
         if "revtec_vencimiento" in vacios and hay_jsonpe and not mtc_bloqueado:
             rt = await _placa_revtec(placa)
             nuevos["revtec_consultado_en"] = datetime.now(timezone.utc).isoformat()
+            citv_consultadas += 1
             if rt:
                 nuevos.update(rt)
                 fallos_mtc = 0
+                citv_ok += 1
             else:
+                citv_fallidas.append(placa)
                 # sin dato ni "sin registro" = el MTC rechazó (429). Tras 3 seguidos, se frena:
                 # insistir solo quema créditos y alarga el bloqueo; el próximo ciclo reintenta.
                 fallos_mtc += 1
@@ -6616,8 +6620,17 @@ async def _enriquecer_flota(filt: dict) -> dict:
     elif mtc_bloqueado:
         aviso = ("El portal del MTC está limitando las consultas de revisión técnica en este momento; "
                  "se pausaron para no gastar créditos. Las pendientes se reintentan en el próximo ciclo.")
+    # Diagnóstico de CITV para que el aviso del botón diga qué pasó (sin entrar al servidor)
+    if citv_consultadas:
+        resumen = f"Revisión técnica: {citv_ok} de {citv_consultadas} placas respondieron"
+        if citv_fallidas:
+            err = _JSONPE_ULTIMO_ERROR or {}
+            msg_err = str(err.get("msg") or err.get("error") or err.get("dns_error") or "sin detalle")[:160]
+            resumen += f"; sin respuesta: {', '.join(citv_fallidas[:8])}. Último error json.pe: {msg_err}"
+        aviso = f"{aviso}\n{resumen}" if aviso else resumen
     return {"ok": True, "vehiculos_revisados": revisados, "campos_completados": completados_total,
-            "detalle": detalle, "mtc_bloqueado": mtc_bloqueado, "aviso": aviso}
+            "detalle": detalle, "mtc_bloqueado": mtc_bloqueado, "aviso": aviso,
+            "citv": {"consultadas": citv_consultadas, "ok": citv_ok, "fallidas": citv_fallidas}}
 
 
 @api.get("/vehiculos")
