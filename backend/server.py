@@ -5528,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.40-terceros-sin-deuda",
+        "version": "1.9.41-editar-vehiculo-subsidio",
     }
 
 # ============================================================
@@ -6758,34 +6758,65 @@ async def create_vehiculo(req: Request, body: VehiculoCreate):
     doc.pop("_id", None)
     return doc
 
+async def _buscar_vehiculo(vehiculo_id: str):
+    """El módulo Vehículos lista dos colecciones: `vehiculos` (generales) y `subsidio_vehicles`
+    (flota registrada en el subsidio). Editar/eliminar debe resolver en ambas; antes solo
+    miraba la primera y una placa del subsidio daba "Vehículo no encontrado" al guardar."""
+    v = await db.vehiculos.find_one({"id": vehiculo_id})
+    if v:
+        return db.vehiculos, v
+    v = await db.subsidio_vehicles.find_one({"id": vehiculo_id})
+    if v:
+        return db.subsidio_vehicles, v
+    try:
+        from bson import ObjectId
+        oid = ObjectId(vehiculo_id)
+        for col in (db.vehiculos, db.subsidio_vehicles):
+            v = await col.find_one({"_id": oid})
+            if v:
+                return col, v
+    except Exception:
+        pass
+    return None, None
+
+
 @api.put("/vehiculos/{vehiculo_id}")
 async def update_vehiculo(req: Request, vehiculo_id: str, body: VehiculoUpdate):
     u = await require_auth(req)
     
-    v = await db.vehiculos.find_one({"id": vehiculo_id})
+    col, v = await _buscar_vehiculo(vehiculo_id)
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
+    if u.get("role") != "admin_enered" and (v.get("empresa") or "") != (u.get("empresa") or ""):
+        raise HTTPException(403, "No puedes editar vehículos de otra empresa")
     
-    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    updates = {k: val for k, val in body.dict(exclude_unset=True).items() if val is not None}
+    if "placa" in updates:
+        updates["placa"] = (updates["placa"] or "").strip().upper()
+        if not updates["placa"]:
+            updates.pop("placa")
     if updates:
         updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-        await db.vehiculos.update_one({"id": vehiculo_id}, {"$set": updates})
+        await col.update_one({"_id": v["_id"]}, {"$set": updates})
     
-    updated = await db.vehiculos.find_one({"id": vehiculo_id})
-    updated.pop("_id")
+    updated = await col.find_one({"_id": v["_id"]})
+    updated["_id"] = str(updated["_id"])
+    if col is db.subsidio_vehicles:
+        updated["veh"] = updated.get("placa")
+        updated.setdefault("categoria", "N1")
     return updated
 
 @api.delete("/vehiculos/{vehiculo_id}")
 async def delete_vehiculo(req: Request, vehiculo_id: str):
     u = await require_auth(req)
     
-    v = await db.vehiculos.find_one({"id": vehiculo_id})
+    col, v = await _buscar_vehiculo(vehiculo_id)
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
     # Solo admin ENERED o alguien de la misma empresa puede borrar (antes bastaba con el id).
     if u.get("role") != "admin_enered" and (v.get("empresa") or "") != (u.get("empresa") or ""):
         raise HTTPException(403, "No puedes eliminar vehículos de otra empresa")
-    await db.vehiculos.delete_one({"id": vehiculo_id})
+    await col.delete_one({"_id": v["_id"]})
     # Los documentos subidos de esa placa (SOAT, CITV, tarjeta…) se archivan para no dejar huérfanos.
     placa = (v.get("placa") or "").upper().strip()
     if placa:
