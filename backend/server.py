@@ -1937,6 +1937,23 @@ def tenant_filter(user: dict) -> dict:
     return {"EMPRESA": user.get("empresa")}
 
 
+# ---------- Facturas de terceros vs. facturas ENERGIX ----------
+# Regla (Giuliana, 26/09/2026): solo lo que emite ENERGIX PERÚ es deuda del cliente y consume
+# línea de crédito. Todo lo demás (comprobantes que suben los clientes del subsidio, cargas
+# manuales con factura de un grifo) es de TERCEROS: se lista, se descarga, pero saldo 0.
+ENERGIX_RUC = "20609304082"
+_TERCERO_VIAS = {"subsidio_confirm", "subsidio_backfill", "subsidio_dynamic", "consumption_sync"}
+
+
+def _es_factura_tercero(inv: dict) -> bool:
+    if (inv.get("estado") or "").strip().lower() == "tercero":
+        return True
+    ruc = str(inv.get("ruc_emisor") or "").strip()
+    if ruc and ruc == ENERGIX_RUC:
+        return False
+    return (inv.get("created_via") or "") in _TERCERO_VIAS
+
+
 # ---------- Normalización del producto (cargas del subsidio) ----------
 # El OCR devuelve "DIESEL B5 S50 UV 21.61 25.", "Disel B5", "DB5", "SIESEL B5"... Para reportes,
 # dashboard y filtros se lleva a un catálogo corto: DIESEL B5 / GASOHOL 95 / GASOHOL REGULAR /
@@ -2303,7 +2320,11 @@ async def create_consumption(
                 "uploaded_at": datetime.now(timezone.utc).isoformat(),
                 "uploaded_by": user["email"],
                 "created_via": "consumption_sync",
+                "ruc_emisor": (RUC_EMISOR or "").strip(),
             }
+            if _es_factura_tercero(inv_doc):  # factura de un grifo, no de ENERGIX
+                inv_doc["estado"] = "TERCERO"
+                inv_doc["saldo"] = 0.0
             await db.invoices.insert_one(inv_doc)
 
     if user.get("role") == "cliente_subsidio":
@@ -4256,6 +4277,10 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
         r["atraso_dias"] = _calc_atraso(r)
         if r.get("producto"):
             r["producto"] = normalizar_producto(r["producto"]) or r["producto"]
+        if _es_factura_tercero(r):
+            r["estado"] = "TERCERO"
+            r["saldo"] = 0.0
+            r["atraso_dias"] = 0
 
     # Sort all invoices by f_emision descending (newest first to oldest last)
     def _sort_key(inv):
@@ -5241,8 +5266,7 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
 
     # Facturas de TERCERO (las que cargó el cliente, no emitidas por ENERED) NO son deuda
     # con ENERED → se excluyen de todos los cálculos del estado de cuenta.
-    def _es_tercero(i):
-        return (i.get("estado") or "").lower() == "tercero" or i.get("created_via") == "subsidio_confirm"
+    _es_tercero = _es_factura_tercero
     invs_reales = [i for i in invs if not _es_tercero(i)]
 
     total_facturado = sum(_f(i.get("monto_total")) for i in invs_reales)
@@ -5504,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.39-cuenta-facturas-subsidio",
+        "version": "1.9.40-terceros-sin-deuda",
     }
 
 # ============================================================
@@ -9870,6 +9894,19 @@ async def startup():
         print(f"DELETED MANUAL RECORDS! {res1.deleted_count} + {res2.deleted_count}")
     except Exception as e:
         print("DELETE ERR", e)
+
+    # Facturas de terceros guardadas como deuda (backfill/sync antiguos) → TERCERO, saldo 0.
+    try:
+        _mig = await db.invoices.update_many(
+            {"created_via": {"$in": list(_TERCERO_VIAS)},
+             "estado": {"$not": {"$regex": "^tercero$", "$options": "i"}},
+             "$or": [{"ruc_emisor": {"$exists": False}}, {"ruc_emisor": {"$in": [None, ""]}},
+                     {"ruc_emisor": {"$ne": ENERGIX_RUC}}]},
+            {"$set": {"estado": "TERCERO", "saldo": 0.0, "atraso_dias": 0}})
+        if _mig.modified_count:
+            logger.info(f"[invoices] {_mig.modified_count} facturas de terceros pasadas a TERCERO/saldo 0")
+    except Exception as e:
+        logger.warning(f"[invoices] migración terceros falló: {e}")
 
     # Guardián de sesión ATU (auto-renueva la cuenta maestra cada ~13 min)
     try:
