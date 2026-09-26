@@ -5528,7 +5528,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.41-editar-vehiculo-subsidio",
+        "version": "1.9.42-citv-mas-reciente",
     }
 
 # ============================================================
@@ -5941,6 +5941,18 @@ async def _placa_soat(placa: str) -> dict:
     return out
 
 
+def _fecha_tupla(v) -> Optional[tuple]:
+    """'dd/mm/yyyy' o 'yyyy-mm-dd' (con o sin hora) → (yyyy, mm, dd) comparable; None si no parsea."""
+    s = str(v or "").strip()
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})", s)
+    if m:
+        return (int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})", s)
+    if m:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
+
+
 async def _placa_revtec(placa: str) -> dict:
     """Revisión técnica (CITV) por placa vía json.pe (consulta al MTC). Devuelve {}
     si no hay datos o el MTC limita las consultas (reintentar luego)."""
@@ -5956,11 +5968,28 @@ async def _placa_revtec(placa: str) -> dict:
     items = [i for i in items if isinstance(i, dict)]
     if not items:
         return {}
-    ult = next((i for i in items if str(i.get("orden", "")).upper() == "ULTIMO"), items[0])
-    con_vig = next((i for i in items if i.get("vigente_hasta")), None)
-    src = ult if ult.get("vigente_hasta") else (con_vig or ult)
+    # El orden de la lista NO es confiable (C9E932 recibió como "último" un certificado de
+    # 2018 teniendo uno vigente de 2025): manda la FECHA. Certificado vigente = el de mayor
+    # "vigente_hasta"; última inspección (aunque desaprobada) = la de mayor fecha de inicio.
+    def _fk(*vals):
+        for x in vals:
+            f = _fecha_tupla(x)
+            if f:
+                return f
+        return None
+    def _k_hasta(i):
+        return _fk(i.get("vigente_hasta"), i.get("fecha_vencimiento"), i.get("fecha_fin"))
+    def _k_desde(i):
+        return _fk(i.get("vigente_desde"), i.get("fecha_inspeccion"), i.get("fecha"), i.get("vigente_hasta"))
+    con_hasta = [i for i in items if _k_hasta(i)]
+    con_desde = [i for i in items if _k_desde(i)]
+    if con_desde:
+        ult = max(con_desde, key=_k_desde)
+    else:
+        ult = next((i for i in items if str(i.get("orden", "")).upper() == "ULTIMO"), items[0])
+    src = max(con_hasta, key=_k_hasta) if con_hasta else ult
     venc = (src.get("vigente_hasta") or src.get("fecha_vencimiento") or src.get("fecha_fin") or "")
-    out = {}
+    out = {"revtec_fuente_version": 2}
     if venc:
         out["revtec_vencimiento"] = str(venc)[:10]
     for k_dst, keys in (("revtec_estado", ("estado", "vigencia")),
@@ -6435,6 +6464,12 @@ async def _enriquecer_flota(filt: dict) -> dict:
     def _necesita_vigencia(v, pref):
         venc = v.get(f"{pref}_vencimiento")
         ultima = _hace_dias(v.get(f"{pref}_consultado_en") or "")
+        # CITV guardada con la selección antigua (podía quedarse con un certificado viejo
+        # aunque hubiera uno vigente): se re-consulta una sola vez si figura vencida.
+        if pref == "revtec" and venc and v.get("revtec_fuente_version") != 2:
+            d0 = _dias_para(venc)
+            if d0 is not None and d0 < 0:
+                return True
         if not venc:
             if v.get(f"{pref}_estado") == "SIN REGISTRO":
                 return ultima > 30
