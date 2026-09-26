@@ -1937,6 +1937,12 @@ def tenant_filter(user: dict) -> dict:
     return {"EMPRESA": user.get("empresa")}
 
 
+# Rango plausible de precio por galón en Perú (diésel/gasohol ~S/ 12-25; GLP ~S/ 6-10).
+# Fuera de esto, el importe o los galones están mal cargados.
+PRECIO_GAL_MIN = 1.0
+PRECIO_GAL_MAX = 60.0
+
+
 def _subsidio_row_to_consumption(r: dict) -> dict:
     """Map consumos_subsidio doc → schema esperado por el frontend (UPPERCASE keys)."""
     gal = float(r.get("galones") or 0)
@@ -2079,14 +2085,21 @@ async def list_consumptions(
 
     # Precio unitario: si la fila no lo trae pero sí galones e importe, se deriva (importe ÷ galones).
     # Muchas cargas (OCR, Excel, QR) traen total y galones sin precio y la columna salía "—".
+    # Además se marca PRECIO_INCOHERENTE cuando el precio por galón sale fuera de todo rango
+    # razonable (p. ej. S/ 449/gal en CASALI): casi siempre es un importe mal leído por el OCR
+    # o una factura de varias placas cuyo total se pegó a una sola fila. La fila se muestra
+    # igual, con aviso, para que el cliente/admin la corrija en vez de inflar los reportes.
     for r in rows:
         try:
+            gal = float(r.get("CANTIDAD_GL") or 0)
+            imp = float(r.get("IMPORTE_TOTAL") or 0)
             if not float(r.get("PRECIO_UNITARIO") or 0):
-                gal = float(r.get("CANTIDAD_GL") or 0)
-                imp = float(r.get("IMPORTE_TOTAL") or 0)
                 if gal > 0 and imp > 0:
                     r["PRECIO_UNITARIO"] = round(imp / gal, 2)
                     r["PRECIO_DERIVADO"] = True
+            pre = float(r.get("PRECIO_UNITARIO") or 0)
+            if gal > 0 and pre > 0 and not (PRECIO_GAL_MIN <= pre <= PRECIO_GAL_MAX):
+                r["PRECIO_INCOHERENTE"] = True
         except (TypeError, ValueError):
             pass
 
@@ -5347,7 +5360,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.35-consumos-reparto-placa",
+        "version": "1.9.36-importe-incoherente",
     }
 
 # ============================================================

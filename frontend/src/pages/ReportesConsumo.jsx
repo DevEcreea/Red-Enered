@@ -213,7 +213,9 @@ export default function ReportesConsumo() {
                       <td className="px-3 py-2 truncate max-w-[160px]">{r.ESTACION || "—"}</td>
                       <td className="px-3 py-2 text-[12px]">{r.PRODUCTO || "—"}</td>
                       <td className="px-3 py-2 text-right font-bold">{formatNumber(parseFloat(r.CANTIDAD_GL || 0), 2)}</td>
-                      <td className="px-3 py-2 text-right text-neutral-700">S/ {formatNumber(parseFloat(r.PRECIO_UNITARIO || 0), 2)}</td>
+                      <td className={`px-3 py-2 text-right ${r.PRECIO_INCOHERENTE ? "text-amber-700 font-bold" : "text-neutral-700"}`} title={r.PRECIO_INCOHERENTE ? "Importe incoherente: el precio por galón sale fuera de rango. Revisa importe o galones de esta carga." : undefined}>
+                        {r.PRECIO_INCOHERENTE && <span aria-label="Importe incoherente" className="mr-1">⚠</span>}S/ {formatNumber(parseFloat(r.PRECIO_UNITARIO || 0), 2)}
+                      </td>
                       <td className="px-3 py-2 text-right font-bold text-neutral-900">{formatSoles(parseFloat(r.IMPORTE_TOTAL || 0))}</td>
                       {!isSubsidio && <td className="px-3 py-2 text-right font-bold text-green-600">{formatSoles(parseFloat(r.AHORRO || 0))}</td>}
                     </tr>

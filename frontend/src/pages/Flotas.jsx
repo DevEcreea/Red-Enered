@@ -724,7 +724,7 @@ function TabResumen({ rows, totals, services, isAdmin, onOpenNuevaCarga, onEdit,
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{r.KILOMETRAJE?`${r.KILOMETRAJE} km`:"—"}</td>
                     <td style={tdSt}>{r.COMBUSTIBLE || r.PRODUCTO || "—"}</td>
                     <td style={tdSt}>{galones? galones.toFixed(2):"—"}</td>
-                    <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{precio? `S/ ${precio.toFixed(2)}`:"—"}</td>
+                    <td style={{ ...tdSt,whiteSpace:"nowrap", ...(r.PRECIO_INCOHERENTE ? { color:"#B45309", fontWeight:700 } : {}) }} title={r.PRECIO_INCOHERENTE ? "Importe incoherente: el precio por galón sale fuera de rango. Revisa importe o galones de esta carga." : undefined}>{r.PRECIO_INCOHERENTE ? "⚠ " : ""}{precio? `S/ ${precio.toFixed(2)}`:"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap" }}>{importe? `S/ ${importe.toFixed(2)}`:"—"}</td>
                     <td style={{ ...tdSt,whiteSpace:"nowrap",color:"#059669",fontWeight:600 }}>S/ {ahorro? ahorro.toFixed(2):"0.00"}</td>
 

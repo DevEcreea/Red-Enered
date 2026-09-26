@@ -149,7 +149,9 @@ export default function Reportes() {
                     <td>{r.ESTACION || "—"}</td>
                     <td>{r.PRODUCTO || "—"}</td>
                     <td className="text-right font-semibold">{formatNumber(r.CANTIDAD_GL, 2)}</td>
-                    <td className="text-right">{formatNumber(r.PRECIO_UNITARIO, 2)}</td>
+                    <td className={`text-right ${r.PRECIO_INCOHERENTE ? "text-amber-700 font-bold" : ""}`} title={r.PRECIO_INCOHERENTE ? "Importe incoherente: el precio por galón sale fuera de rango. Revisa importe o galones de esta carga." : undefined}>
+                      {r.PRECIO_INCOHERENTE && <span className="mr-1">⚠</span>}{formatNumber(r.PRECIO_UNITARIO, 2)}
+                    </td>
                     <td className="text-right font-bold">{formatSoles(r.IMPORTE_TOTAL)}</td>
                     <td className="text-right text-green-600 font-semibold">{formatSoles(r.AHORRO)}</td>
                     <td>{r.KILOMETRAJE || "—"}</td>
