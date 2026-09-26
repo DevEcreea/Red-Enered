@@ -4148,19 +4148,32 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
 
     # Dynamically pull confirmed subsidio invoices (uploaded by client/subsidio) and merge them as TERCERO
     sub_q = {"status": "confirmed", "origin": {"$ne": "admin_ocr"}}
+    # Empresa con tolerancia (espacios/puntos como comodín, sin distinguir mayúsculas), igual
+    # que /account-state: "TRANSPORTE RAPESA S.A.C" y "TRANSPORTES RAPESA S.A.C." son la misma.
+    # Para el usuario no admin también valen las cargas hechas con su propio user_id.
+    def _emp_rx(v: str) -> dict:
+        esc = re.escape(v.strip()).replace("\\ ", ".*").replace("\\.", ".*")
+        return {"$regex": f"^{esc}$", "$options": "i"}
     if q.get("empresa"):
-        sub_q["empresa"] = q["empresa"]
+        sub_q["empresa"] = _emp_rx(q["empresa"])
     elif user["role"] != "admin_enered":
-        sub_q["empresa"] = user.get("empresa")
+        ors = [{"user_id": user["id"]}]
+        if user.get("empresa"):
+            ors.append({"empresa": _emp_rx(user["empresa"])})
+        sub_q["$or"] = ors
     
-    sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0}).to_list(1000)
+    sub_raw = await db.consumos_subsidio.find(sub_q, {"_id": 0, "raw_ocr_response": 0}).to_list(5000)
     
-    # Group subsidio invoices by numero_documento to avoid duplicates
+    # Group subsidio invoices by numero_documento to avoid duplicates. Las que el OCR dejó sin
+    # número igual se listan (una fila por carga, "S/N-xxxxxxxx") para que el cliente vea todo
+    # lo que subió y pueda descargar el comprobante.
     grouped_sub = {}
     for d in sub_raw:
         n_doc = (d.get("numero_documento") or d.get("n_doc") or "").upper().strip()
         if not n_doc:
-            continue
+            n_doc = "S/N-" + str(d.get("id") or "")[:8].upper()
+            if n_doc == "S/N-":
+                continue
         if n_doc not in grouped_sub:
             fecha_str = d.get("fecha") or datetime.now(timezone.utc).date().isoformat()
             if len(fecha_str) > 10:
@@ -4182,7 +4195,7 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
                 "empresa": d.get("empresa") or "",
                 "n_doc": n_doc,
                 "tipo_doc": "factura",
-                "producto": d.get("producto") or "DIESEL B5 S-50",
+                "producto": normalizar_producto(d.get("producto")) or "DIESEL B5",
                 "f_emision": fecha_str,
                 "f_vencimiento": f_venc,
                 "moneda": "PEN",
@@ -4201,10 +4214,13 @@ async def list_invoices(user: dict = Depends(get_current_user), empresa: Optiona
             }
         grouped_sub[n_doc]["monto_total"] += float(d.get("importe_total") or 0.0)
 
-    existing_ndocs = {r.get("n_doc") for r in rows if r.get("n_doc")}
+    existing_ndocs = {str(r.get("n_doc") or "").upper().strip() for r in rows if r.get("n_doc")}
+    existing_ids = {r.get("id") for r in rows if r.get("id")}
     for n_doc, sub_inv in grouped_sub.items():
-        if n_doc not in existing_ndocs:
+        if n_doc not in existing_ndocs and sub_inv.get("id") not in existing_ids:
             sub_inv["saldo"] = 0.0  # Tercero: no hay deuda con Red-Enered
+            sub_inv["monto_total"] = round(sub_inv["monto_total"], 2)
+            rows.append(sub_inv)  # (antes se armaba y nunca se agregaba: la lista salía vacía)
     # Calcular atraso_dias estrictamente por regla: pagada/pendiente/tercero -> 0; vencida -> días desde f_vencimiento hasta hoy
     from datetime import date as _date, datetime as _dt
     today = _date.today()
@@ -5176,7 +5192,7 @@ async def account_state(user: dict = Depends(get_current_user), empresa: Optiona
                 "empresa": d.get("empresa") or "",
                 "n_doc": n_doc,
                 "tipo_doc": "factura",
-                "producto": d.get("producto") or "DIESEL B5 S-50",
+                "producto": normalizar_producto(d.get("producto")) or "DIESEL B5",
                 "f_emision": fecha_str,
                 "f_vencimiento": f_venc,
                 "moneda": "PEN",
@@ -5486,7 +5502,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.38-red-y-producto-unificados",
+        "version": "1.9.39-cuenta-facturas-subsidio",
     }
 
 # ============================================================
@@ -9786,7 +9802,7 @@ async def temp_backfill_invoices(_: dict = Depends(require_roles("admin_enered")
             "empresa": empresa,
             "n_doc": n_doc,
             "tipo_doc": "factura",
-            "producto": d.get("producto") or "DIESEL B5 S-50",
+            "producto": normalizar_producto(d.get("producto")) or "DIESEL B5",
             "f_emision": fecha_str,
             "f_vencimiento": f_venc,
             "moneda": "PEN",

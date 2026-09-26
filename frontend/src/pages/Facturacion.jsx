@@ -124,7 +124,7 @@ export default function Facturacion() {
       }
       return s.slice(0, 10);
     };
-    const isTercero = (inv) => inv.created_via === "subsidio_confirm";
+    const isTercero = (inv) => inv.created_via === "subsidio_confirm" || inv.created_via === "subsidio_dynamic" || String(inv.estado || "").toUpperCase() === "TERCERO";
     return [...invoices].sort((a, b) => {
       const ta = isTercero(a) ? 1 : 0;
       const tb = isTercero(b) ? 1 : 0;
@@ -183,7 +183,7 @@ export default function Facturacion() {
       body: invoices.map((i) => [
         i.n_doc, i.tipo_doc || "—", i.f_emision || "—", i.f_vencimiento || "—",
         `${i.atraso_dias || 0} d`, formatSoles(i.monto_total), formatSoles(i.saldo),
-        i.created_via === "subsidio_confirm" ? "TERCERO" : (i.estado || "").toUpperCase(),
+        (i.created_via === "subsidio_confirm" || i.created_via === "subsidio_dynamic") ? "TERCERO" : (i.estado || "").toUpperCase(),
       ]),
       headStyles: { fillColor: [30, 27, 75] },
       styles: { fontSize: 8 },
@@ -511,7 +511,7 @@ export default function Facturacion() {
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.monto_total)}</td>
                       <td className="px-3 py-2.5 text-right font-bold">{formatSoles(inv.saldo)}</td>
                       <td className="px-3 py-2.5 text-center">
-                        {inv.created_via === "subsidio_confirm" ? (
+                        {(inv.created_via === "subsidio_confirm" || inv.created_via === "subsidio_dynamic" || String(inv.estado || "").toUpperCase() === "TERCERO") ? (
                           // Factura cargada por el cliente (comprobante de tercero, ej. grifo).
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${ESTADO_BADGE.TERCERO}`} title="Factura cargada por el cliente (tercero)">
                             {ESTADO_LABEL.TERCERO}
