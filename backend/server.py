@@ -1937,6 +1937,89 @@ def tenant_filter(user: dict) -> dict:
     return {"EMPRESA": user.get("empresa")}
 
 
+# ---------- Unificación de estación / ciudad (cargas del subsidio) ----------
+# El OCR escribe el mismo grifo de varias formas ("SERVICENTROS MARIELENA   S.A.C.",
+# "SERVICENTROS MARIELENA", "MARIELENA") y la ciudad a veces truncada o como región
+# ("Trujil", "La Libertad"). Para el dashboard y los filtros, un mismo RUC emisor es UNA
+# estación con UNA ciudad; las filas sin RUC se pegan al nombre canónico si coinciden.
+_EST_SUFIJOS_RE = re.compile(r"\b(S\.?\s?A\.?\s?C\.?|S\.?\s?A\.?|E\.?\s?I\.?\s?R\.?\s?L\.?|S\.?\s?R\.?\s?L\.?|SAC|EIRL|SRL|SA)\b\.?", re.I)
+
+
+def _clave_estacion(nombre: Optional[str]) -> str:
+    s = re.sub(r"\s+", " ", str(nombre or "")).strip().upper()
+    if not s:
+        return ""
+    s = _EST_SUFIJOS_RE.sub(" ", s)
+    s = re.sub(r"[^A-Z0-9ÁÉÍÓÚÑ ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _unificar_estaciones(rows: list) -> list:
+    """Muta ESTACION y CIUDAD de las filas (formato UPPERCASE de /consumptions)."""
+    from collections import Counter, defaultdict
+    if not rows:
+        return rows
+    por_ruc_nom, por_ruc_ciu = defaultdict(Counter), defaultdict(Counter)
+    for r in rows:
+        ruc = str(r.get("RUC_EMISOR") or "").strip()
+        nom = re.sub(r"\s+", " ", str(r.get("ESTACION") or "")).strip()
+        if ruc and nom:
+            por_ruc_nom[ruc][nom] += 1
+        if ruc:
+            c = normalize_city(r.get("CIUDAD"))
+            if c:
+                por_ruc_ciu[ruc][c] += 1
+    # Nombre canónico por RUC: el más frecuente; empate → el más completo (más largo).
+    canon_ruc = {ruc: max(cnt.items(), key=lambda kv: (kv[1], len(kv[0])))[0] for ruc, cnt in por_ruc_nom.items()}
+    ciudad_ruc = {ruc: cnt.most_common(1)[0][0] for ruc, cnt in por_ruc_ciu.items()}
+    clave_a_canon = {}
+    for ruc, nom in canon_ruc.items():
+        clave_a_canon.setdefault(_clave_estacion(nom), (nom, ruc))
+    # Filas sin RUC: misma clave → mismo nombre; si la clave está contenida en una canónica
+    # (o al revés) y hay una sola candidata, se pega a esa.
+    sin_ruc = Counter(re.sub(r"\s+", " ", str(r.get("ESTACION") or "")).strip()
+                      for r in rows if not str(r.get("RUC_EMISOR") or "").strip() and r.get("ESTACION"))
+    canon_libre = {}
+    for nom, _ in sin_ruc.most_common():
+        k = _clave_estacion(nom)
+        if not k or k in canon_libre:
+            continue
+        if k in clave_a_canon:
+            canon_libre[k] = clave_a_canon[k]
+            continue
+        cand = [v for ck, v in clave_a_canon.items() if len(k) >= 5 and (k in ck or ck in k)]
+        canon_libre[k] = cand[0] if len(cand) == 1 else (nom, "")
+    # Ciudades: una truncada ("Trujil") se pega a la ciudad conocida que la contiene.
+    ciudades = Counter(normalize_city(r.get("CIUDAD")) for r in rows if normalize_city(r.get("CIUDAD")))
+    ciudad_fix = {}
+    for c in ciudades:
+        if len(c) < 4:
+            continue
+        largas = [o for o in ciudades if o != c and len(o) > len(c) and o.lower().startswith(c.lower())]
+        if len(largas) == 1:
+            ciudad_fix[c] = largas[0]
+    for r in rows:
+        ruc = str(r.get("RUC_EMISOR") or "").strip()
+        nom = re.sub(r"\s+", " ", str(r.get("ESTACION") or "")).strip()
+        if ruc and ruc in canon_ruc:
+            r["ESTACION"] = canon_ruc[ruc]
+        elif nom:
+            k = _clave_estacion(nom)
+            if k in canon_libre:
+                r["ESTACION"], ruc_c = canon_libre[k]
+                if ruc_c and not ruc:
+                    ruc = ruc_c
+        else:
+            r["ESTACION"] = "Sin estación"
+        c = normalize_city(r.get("CIUDAD"))
+        if ruc and ruc in ciudad_ruc:
+            c = ciudad_ruc[ruc]
+        elif c in ciudad_fix:
+            c = ciudad_fix[c]
+        r["CIUDAD"] = c
+    return rows
+
+
 # Rango plausible de precio por galón en Perú (diésel/gasohol ~S/ 12-25; GLP ~S/ 6-10).
 # Fuera de esto, el importe o los galones están mal cargados.
 PRECIO_GAL_MIN = 1.0
@@ -2068,7 +2151,7 @@ async def list_consumptions(
                     r.update(_rep[r["id"]])
         except Exception as _e:
             logger.warning(f"Reparto de importes por placa en /consumptions falló: {_e}")
-        mapped = [_subsidio_row_to_consumption(r) for r in raw_sub]
+        mapped = _unificar_estaciones([_subsidio_row_to_consumption(r) for r in raw_sub])
         
         def keep(row):
             if fecha_desde and (row.get("FECHA") or "") < fecha_desde: return False
@@ -2504,9 +2587,13 @@ async def dashboard_filter_options(user: dict = Depends(get_current_user), empre
             fo_filter["empresa"] = user.get("empresa")
         raw = await db.consumos_subsidio.find(
             fo_filter,
-            {"_id": 0, "placa": 1, "estacion": 1, "producto": 1, "fecha": 1},
+            {"_id": 0, "placa": 1, "estacion": 1, "ruc_emisor": 1, "producto": 1, "fecha": 1},
         ).to_list(100000)
         from datetime import date as _date
+        # Nombres de estación unificados (mismo criterio que /consumptions y el dashboard)
+        _uni = _unificar_estaciones([{"ESTACION": r.get("estacion"), "RUC_EMISOR": r.get("ruc_emisor"), "CIUDAD": ""} for r in raw])
+        for r, u in zip(raw, _uni):
+            r["estacion"] = u["ESTACION"] if u["ESTACION"] != "Sin estación" else ""
         placas, estaciones, productos, semanas = set(), set(), set(), set()
         for r in raw:
             if r.get("placa"): placas.add(r["placa"])
@@ -3043,9 +3130,9 @@ async def dashboard_kpis(
     if producto:
         sub_q["producto"] = producto
 
-    sub_proj = {"_id": 0, "galones": 1, "importe_total": 1, "precio_unitario": 1, "precio_pizarra": 1, "fecha": 1, "hora": 1, "placa": 1, "ciudad": 1, "estacion": 1, "producto": 1, "kilometraje": 1, "semana": 1}
+    sub_proj = {"_id": 0, "galones": 1, "importe_total": 1, "precio_unitario": 1, "precio_pizarra": 1, "fecha": 1, "hora": 1, "placa": 1, "ciudad": 1, "estacion": 1, "ruc_emisor": 1, "producto": 1, "kilometraje": 1, "semana": 1}
     sub_rows = await db.consumos_subsidio.find(sub_q, sub_proj).to_list(100000)
-    mapped_sub = [_subsidio_row_to_consumption(r) for r in sub_rows]
+    mapped_sub = _unificar_estaciones([_subsidio_row_to_consumption(r) for r in sub_rows])
     if semana:
         mapped_sub = [r for r in mapped_sub if r.get("SEMANA") == semana]
     rows.extend(mapped_sub)
@@ -5360,7 +5447,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.36-importe-incoherente",
+        "version": "1.9.37-estaciones-unificadas",
     }
 
 # ============================================================
