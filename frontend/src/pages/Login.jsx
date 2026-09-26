@@ -1,4 +1,5 @@
 import { api } from "../lib/api";
+import { rutaFirmaPendiente } from "../components/FirmasPendientes";
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -28,7 +29,8 @@ export default function Login() {
         let destino = "/subsidio/documentos";
         try {
           const { data: f } = await api.get("/subsidio/firmas");
-          if (f?.constancia && !f?.du004?.pendiente && (f?.du007?.periodos_pendientes || []).length > 0) destino = "/subsidio/du007";
+          // Con firmas pendientes se aterriza DIRECTO en la etapa de Declaración del decreto que falta.
+          destino = rutaFirmaPendiente(f) || destino;
         } catch (_) { /* sin datos → DU 004 */ }
         navigate(destino);
       } else {

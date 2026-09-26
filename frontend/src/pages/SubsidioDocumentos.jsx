@@ -140,7 +140,14 @@ export default function SubsidioDocumentos() {
       // Auto-jump to first incomplete stage on first load (salvo entrada solo-RUC → queda en Etapa 0)
       if (loading && user?.acceso_etapa0 !== true) {
         const pedida = new URLSearchParams(window.location.search).get("etapa");
-        const next = pedida || pickNextEtapa(data);
+        // Con la DJ (o la constancia) pendiente, lo PRIMERO que ve el cliente es la Etapa 4 —
+        // así se ubica de inmediato y firma. Si no, la primera etapa incompleta, como siempre.
+        let firmaPend = false;
+        try {
+          const { data: f } = await api.get("/subsidio/firmas");
+          firmaPend = !!(f && (f.du004?.pendiente || !f.constancia));
+        } catch (_) { /* sin datos → flujo normal */ }
+        const next = pedida || (firmaPend ? "declaracion" : pickNextEtapa(data));
         if (next) setActiveEtapa(next);
       }
     } catch (err) {

@@ -54,8 +54,17 @@ export default function SubsidioDU007() {
       setItems(prev.data.items || []);
       setVehicles(prev.data.vehicles || []);
       setEstado(est.data);
+      // Lo PRIMERO que ve el cliente con una DJ de periodo pendiente es la Etapa 2 · Declaración
+      // (salvo que la URL pida otra etapa). Periodo pendiente = con facturas válidas y sin firma.
+      if (!new URLSearchParams(window.location.search).get("etapa") && !primeraCargaRef.current) {
+        primeraCargaRef.current = true;
+        const firmados = new Set((est.data?.declaraciones || []).map((d) => d.periodo));
+        const pend = (est.data?.periodos || []).some((p) => p.facturas > 0 && !firmados.has(p.periodo));
+        if (pend) setEtapa("declaracion");
+      }
     } catch { /* silencioso: el diagnóstico funciona igual */ }
   };
+  const primeraCargaRef = useRef(false);
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   const subir = async (fileList) => {
