@@ -2515,6 +2515,7 @@ async def invoices_upload(
               "programa": programa,   # du004 | du007 — cada subsidio lleva su propio bucket
               "items_ocr": extracted.get("items") or [],
           }
+          _completar_precio(doc)
 
           # ── Validación automática contra las reglas del decreto correspondiente
           try:
@@ -2570,6 +2571,8 @@ async def invoices_preview(programa: str = "du004", user: dict = Depends(_requir
     vehicles = await db.subsidio_vehicles.find(
         _own_q(user, uids), {"_id": 0, "placa": 1, "categoria": 1}
     ).to_list(200)
+    for _r in rows:
+        _completar_precio(_r)
     return {"items": rows, "vehicles": vehicles}
 
 
@@ -3056,6 +3059,9 @@ async def invoices_confirmed(programa: str = "du004", user: dict = Depends(_requ
         rows.extend(mapped)
 
     rows.sort(key=lambda x: x.get("fecha") or "", reverse=True)
+    for _r in rows:
+        if isinstance(_r, dict):
+            _completar_precio(_r)
     return rows
 
 
@@ -4166,6 +4172,7 @@ async def admin_get_expediente(user_id: str, empresa: Optional[str] = None, prog
         elif i.get("id") in _reparto:
             i.update(_reparto[i["id"]])
             i["importe_corregido"] = True
+        _completar_precio(i)
 
     # Etiquetas legibles
     for d in docs:
@@ -4318,6 +4325,11 @@ async def _revalidar_expediente(u: dict, uids: list, filas: list, promover: bool
         if _imp is not None:
             patch["importe_total"] = _imp
             f = {**f, "importe_total": _imp}
+        _pd = _precio_derivado(f)
+        if _pd is not None:
+            patch["precio_unitario"] = _pd
+            patch["precio_derivado"] = True
+            f = {**f, "precio_unitario": _pd}
         patch.update({"validacion": val, "validacion_estado": val["estado"],
                       "requiere_revision": val["requiere_revision"],
                       "periodo_du007": val.get("periodo_du007") if prog == "du007" else None})
@@ -5256,6 +5268,30 @@ async def _razones_sociales_por_ruc(filas: list, max_rucs: int = 40) -> dict:
     return out
 
 
+def _precio_derivado(doc: dict) -> Optional[float]:
+    """Precio unitario = importe ÷ galones cuando la fila no lo trae (OCR/QR/Excel suelen dar
+    total y galones sin precio). Devuelve None si ya tiene precio o faltan datos."""
+    try:
+        if float(doc.get("precio_unitario") or 0) > 0:
+            return None
+        g = float(doc.get("galones") or 0)
+        imp = float(doc.get("importe_total") or 0)
+    except (TypeError, ValueError):
+        return None
+    if g <= 0 or imp <= 0:
+        return None
+    return round(imp / g, 4)
+
+
+def _completar_precio(doc: dict) -> dict:
+    """Aplica _precio_derivado sobre el dict (marca precio_derivado=True). Devuelve el mismo dict."""
+    p = _precio_derivado(doc)
+    if p is not None:
+        doc["precio_unitario"] = p
+        doc["precio_derivado"] = True
+    return doc
+
+
 def _repartir_importes_por_placa(filas: list) -> dict:
     """Facturas con VARIAS placas cargadas como varias filas (misma serie) donde cada fila trae el
     TOTAL de la factura repetido y sin precio unitario (CASALI: S/ 20,661 en 14 filas → S/ 289 mil
@@ -5415,6 +5451,7 @@ async def admin_add_invoice(
     _imp = _importe_por_placa(doc)
     if _imp is not None:
         doc["importe_total"] = _imp
+    _completar_precio(doc)
     # Validar al crear (estado + periodo DU 007), igual que cuando sube/edita el cliente.
     try:
         uids_v = await _get_company_uids(u)

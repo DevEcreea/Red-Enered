@@ -2063,6 +2063,19 @@ async def list_consumptions(
         rows.extend([r for r in mapped if keep(r)])
         rows.sort(key=lambda x: x.get("FECHA") or "", reverse=True)
 
+    # Precio unitario: si la fila no lo trae pero sí galones e importe, se deriva (importe ÷ galones).
+    # Muchas cargas (OCR, Excel, QR) traen total y galones sin precio y la columna salía "—".
+    for r in rows:
+        try:
+            if not float(r.get("PRECIO_UNITARIO") or 0):
+                gal = float(r.get("CANTIDAD_GL") or 0)
+                imp = float(r.get("IMPORTE_TOTAL") or 0)
+                if gal > 0 and imp > 0:
+                    r["PRECIO_UNITARIO"] = round(imp / gal, 2)
+                    r["PRECIO_DERIVADO"] = True
+        except (TypeError, ValueError):
+            pass
+
     return rows
 
 
@@ -5320,7 +5333,7 @@ async def health():
         "mongo": "ok" if mongo_ok else "fail",
         "storage_backend": storage.current_backend(),
         # Subir en cada cambio relevante: permite confirmar qué versión corre en producción.
-        "version": "1.9.33-constancia-obligatoria",
+        "version": "1.9.34-precio-derivado",
     }
 
 # ============================================================
